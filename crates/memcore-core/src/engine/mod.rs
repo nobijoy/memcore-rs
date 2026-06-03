@@ -7,7 +7,8 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use uuid::Uuid;
 
 use crate::{
-    CandidateFact, Fact, MemorySearchResult, MemorySource, TenantContext,
+    assemble_context, BuildContextInput, BuildContextOutput, CandidateFact, Fact,
+    MemorySearchResult, MemorySource, TenantContext,
 };
 use crate::ports::{
     EmbeddingProvider, FactExtractionInput, FactStore, LlmProvider, VectorRecord, VectorSearchQuery,
@@ -165,6 +166,32 @@ impl MemoryEngine {
 
         Ok(SearchMemoryOutput { results })
     }
+
+    pub async fn build_context(
+        &self,
+        input: BuildContextInput,
+    ) -> MemcoreResult<BuildContextOutput> {
+        validate_tenant(&input.tenant)?;
+        validate_query(&input.query)?;
+        let max_memories = normalize_context_max_memories(input.max_memories)?;
+
+        let search_output = self
+            .search_memory(SearchMemoryInput {
+                tenant: input.tenant,
+                query: input.query,
+                limit: max_memories,
+                memory_types: input.memory_types,
+                metadata_filter: None,
+            })
+            .await?;
+
+        let context = assemble_context(&search_output.results, input.include_metadata);
+
+        Ok(BuildContextOutput {
+            context,
+            memories: search_output.results,
+        })
+    }
 }
 
 fn validate_tenant(tenant: &TenantContext) -> MemcoreResult<()> {
@@ -188,6 +215,23 @@ fn validate_query(query: &str) -> MemcoreResult<()> {
         ));
     }
     Ok(())
+}
+
+fn normalize_context_max_memories(max_memories: usize) -> MemcoreResult<usize> {
+    if max_memories == 0 {
+        return Err(MemcoreError::ValidationError(
+            "max_memories must be greater than 0".to_string(),
+        ));
+    }
+
+    if max_memories > crate::MAX_CONTEXT_MAX_MEMORIES {
+        return Err(MemcoreError::ValidationError(format!(
+            "max_memories cannot exceed {}",
+            crate::MAX_CONTEXT_MAX_MEMORIES
+        )));
+    }
+
+    Ok(max_memories)
 }
 
 fn normalize_search_limit(limit: usize) -> MemcoreResult<usize> {

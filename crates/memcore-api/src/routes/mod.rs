@@ -1,4 +1,5 @@
 pub mod common;
+pub mod context;
 pub mod health;
 pub mod memories;
 
@@ -13,4 +14,5 @@ pub fn router() -> Router<AppState> {
         .route("/ready", get(health::ready))
         .route("/api/v1/memories", post(memories::add_memory))
         .route("/api/v1/memories/search", post(memories::search_memory))
+        .route("/api/v1/context", post(context::build_context))
 }

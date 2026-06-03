@@ -1,7 +1,12 @@
+pub mod context;
 pub mod engine;
 pub mod models;
 pub mod ports;
 
+pub use context::{
+    assemble_context, BuildContextInput, BuildContextOutput, DEFAULT_CONTEXT_MAX_MEMORIES,
+    EMPTY_CONTEXT_MESSAGE, MAX_CONTEXT_MAX_MEMORIES,
+};
 pub use engine::{
     AddMemoryInput, AddMemoryOutput, MemoryEngine, MemoryOperationSummary, SearchMemoryInput,
     SearchMemoryOutput, DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
