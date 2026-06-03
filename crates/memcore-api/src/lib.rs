@@ -1,5 +1,6 @@
 pub mod app;
 pub mod dto;
+pub mod middleware;
 pub mod response;
 pub mod routes;
 pub mod state;

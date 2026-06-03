@@ -19,7 +19,7 @@ pub fn init_tracing() {
 }
 
 pub fn create_app(state: AppState) -> Router {
-    routes::router()
+    routes::router(&state)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

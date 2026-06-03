@@ -1,9 +1,13 @@
+mod common;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use memcore_api::{AppState, create_app};
 use memcore_config::Settings;
 use tower::ServiceExt;
+
+use common::authorization_header;
 
 const ORG_ID: &str = "org_123";
 const USER_ID: &str = "user_123";
@@ -22,6 +26,9 @@ fn post_request(uri: &str, body: &str, org_id: Option<&str>) -> Request<Body> {
     if let Some(org_id) = org_id {
         builder = builder.header("X-Organization-ID", org_id);
     }
+
+    let (name, value) = authorization_header();
+    builder = builder.header(name, value);
 
     builder
         .body(Body::from(body.to_string()))

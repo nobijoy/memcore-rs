@@ -19,6 +19,8 @@ const MEMCORE_EMBEDDING_PROVIDER: &str = "MEMCORE_EMBEDDING_PROVIDER";
 const MEMCORE_EMBEDDING_MODEL: &str = "MEMCORE_EMBEDDING_MODEL";
 const MEMCORE_ENABLE_PII_REDACTION: &str = "MEMCORE_ENABLE_PII_REDACTION";
 const MEMCORE_MIN_IMPORTANCE: &str = "MEMCORE_MIN_IMPORTANCE";
+const MEMCORE_AUTH_ENABLED: &str = "MEMCORE_AUTH_ENABLED";
+const MEMCORE_DEV_API_KEY: &str = "MEMCORE_DEV_API_KEY";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Environment {
@@ -77,6 +79,10 @@ pub struct Settings {
     pub embedding_model: String,
     pub enable_pii_redaction: bool,
     pub min_importance: f32,
+    /// Temporary development auth toggle. Production will use hashed keys from storage.
+    pub auth_enabled: bool,
+    /// Temporary plaintext dev API key. Do not log this value.
+    pub dev_api_key: String,
 }
 
 impl Default for Settings {
@@ -98,6 +104,8 @@ impl Default for Settings {
             embedding_model: "mock-embedding".to_string(),
             enable_pii_redaction: true,
             min_importance: 0.55,
+            auth_enabled: true,
+            dev_api_key: "memcore_dev_key".to_string(),
         }
     }
 }
@@ -129,6 +137,8 @@ impl Settings {
         let enable_pii_redaction =
             parse_bool(MEMCORE_ENABLE_PII_REDACTION, defaults.enable_pii_redaction)?;
         let min_importance = parse_f32(MEMCORE_MIN_IMPORTANCE, defaults.min_importance)?;
+        let auth_enabled = parse_bool(MEMCORE_AUTH_ENABLED, defaults.auth_enabled)?;
+        let dev_api_key = read_env_or(MEMCORE_DEV_API_KEY, &defaults.dev_api_key);
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -153,6 +163,8 @@ impl Settings {
             embedding_model,
             enable_pii_redaction,
             min_importance,
+            auth_enabled,
+            dev_api_key,
         };
 
         settings.validate()?;
@@ -181,6 +193,12 @@ impl Settings {
         if self.lancedb_path.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_LANCEDB_PATH cannot be empty".to_string(),
+            ));
+        }
+
+        if self.auth_enabled && self.dev_api_key.trim().is_empty() {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_DEV_API_KEY cannot be empty when MEMCORE_AUTH_ENABLED=true".to_string(),
             ));
         }
 
@@ -349,7 +367,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 16] = [
+    const ENV_KEYS: [&str; 18] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -366,6 +384,8 @@ mod tests {
         "MEMCORE_EMBEDDING_MODEL",
         "MEMCORE_ENABLE_PII_REDACTION",
         "MEMCORE_MIN_IMPORTANCE",
+        "MEMCORE_AUTH_ENABLED",
+        "MEMCORE_DEV_API_KEY",
     ];
 
     fn env_test_lock() -> &'static Mutex<()> {
@@ -423,6 +443,27 @@ mod tests {
         assert_eq!(settings.vector_backend, VectorBackend::LanceDb);
         assert_eq!(settings.min_importance, 0.55);
         assert!(settings.enable_pii_redaction);
+        assert!(settings.auth_enabled);
+        assert_eq!(settings.dev_api_key, "memcore_dev_key");
+    }
+
+    #[test]
+    fn loads_auth_settings_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_AUTH_ENABLED", "false");
+            std::env::set_var("MEMCORE_DEV_API_KEY", "custom_dev_key");
+        }
+
+        let settings = Settings::from_env().expect("auth settings should load");
+        assert!(!settings.auth_enabled);
+        assert_eq!(settings.dev_api_key, "custom_dev_key");
     }
 
     #[test]
