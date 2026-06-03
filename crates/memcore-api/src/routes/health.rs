@@ -64,6 +64,7 @@ fn vector_backend_label(vector_backend: &VectorBackend) -> &'static str {
 
 fn fact_backend_label(fact_backend: &FactBackend) -> &'static str {
     match fact_backend {
+        FactBackend::Mock => "mock",
         FactBackend::Sqlite => "sqlite",
         FactBackend::Postgres => "postgres",
     }

@@ -45,7 +45,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "starting memcore-api"
     );
 
-    let state = AppState::new(settings.clone());
+    let state = AppState::initialize(settings.clone()).await?;
     let app = create_app(state);
     let addr: SocketAddr = format!("{}:{}", settings.host, settings.port).parse()?;
 

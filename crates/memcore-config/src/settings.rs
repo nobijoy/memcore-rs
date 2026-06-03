@@ -42,6 +42,7 @@ pub enum VectorBackend {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FactBackend {
+    Mock,
     Sqlite,
     Postgres,
 }
@@ -93,7 +94,7 @@ impl Default for Settings {
             port: 8080,
             storage_mode: StorageMode::Embedded,
             vector_backend: VectorBackend::LanceDb,
-            fact_backend: FactBackend::Sqlite,
+            fact_backend: FactBackend::Mock,
             database_url: "sqlite://./data/memcore.db".to_string(),
             postgres_url: None,
             qdrant_url: "http://localhost:6333".to_string(),
@@ -169,6 +170,15 @@ impl Settings {
 
         settings.validate()?;
         Ok(settings)
+    }
+
+    /// In-memory SQLite settings for integration tests.
+    pub fn sqlite_memory() -> Self {
+        Self {
+            fact_backend: FactBackend::Sqlite,
+            database_url: "sqlite::memory:?cache=shared".to_string(),
+            ..Self::default()
+        }
     }
 
     fn validate(&self) -> MemcoreResult<()> {
@@ -320,6 +330,7 @@ impl FromStr for FactBackend {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
+            "mock" => Ok(Self::Mock),
             "sqlite" => Ok(Self::Sqlite),
             "postgres" => Ok(Self::Postgres),
             _ => Err(MemcoreError::ValidationError(format!(
@@ -445,6 +456,20 @@ mod tests {
         assert!(settings.enable_pii_redaction);
         assert!(settings.auth_enabled);
         assert_eq!(settings.dev_api_key, "memcore_dev_key");
+        assert_eq!(settings.fact_backend, super::FactBackend::Sqlite);
+    }
+
+    #[test]
+    fn default_struct_uses_mock_fact_backend() {
+        let settings = Settings::default();
+        assert_eq!(settings.fact_backend, super::FactBackend::Mock);
+    }
+
+    #[test]
+    fn sqlite_memory_settings_use_in_memory_database() {
+        let settings = Settings::sqlite_memory();
+        assert_eq!(settings.fact_backend, super::FactBackend::Sqlite);
+        assert!(settings.database_url.contains(":memory:"));
     }
 
     #[test]
