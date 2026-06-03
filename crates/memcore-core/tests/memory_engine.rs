@@ -3,7 +3,7 @@ use std::sync::Arc;
 use memcore_common::MemcoreError;
 use memcore_core::{
     AddMemoryInput, CandidateFact, FactStore, MemoryEngine, MemoryMessage, MemoryType, MessageRole,
-    TenantContext, VectorSearchQuery, VectorStore,
+    SearchMemoryInput, TenantContext, VectorSearchQuery, VectorStore,
 };
 use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -333,4 +333,43 @@ async fn configurable_llm_extraction_is_used_without_external_calls() {
 
     assert_eq!(output.memories[0].content, "Configured extraction");
     assert_eq!(output.memories[0].metadata["source"], "test");
+}
+
+#[tokio::test]
+async fn search_memory_returns_vector_matches_after_add() {
+    let content = "I am learning Rust.";
+    let engine = engine_with_mocks(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: content.to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    let output = engine
+        .search_memory(SearchMemoryInput {
+            tenant,
+            query: content.to_string(),
+            limit: 10,
+            memory_types: None,
+            metadata_filter: None,
+        })
+        .await
+        .expect("search memory should succeed");
+
+    assert_eq!(output.results.len(), 1);
+    assert_eq!(output.results[0].content, content);
+    assert!(output.results[0].score > 0.99);
 }

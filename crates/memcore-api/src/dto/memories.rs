@@ -1,7 +1,12 @@
-use memcore_core::{AddMemoryOutput, Fact, MemoryType};
+use memcore_common::MemcoreError;
+use memcore_core::{AddMemoryOutput, Fact, MemorySearchResult, MemoryType, SearchMemoryOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+pub fn default_search_limit() -> usize {
+    memcore_core::DEFAULT_SEARCH_LIMIT
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AddMemoryRequest {
@@ -94,5 +99,95 @@ impl From<AddMemoryOutput> for AddMemoryResponse {
             },
             memories: output.memories.iter().map(MemoryItemResponse::from).collect(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SearchMemoryFiltersRequest {
+    #[serde(default)]
+    pub memory_type: Option<Vec<String>>,
+}
+
+impl SearchMemoryFiltersRequest {
+    pub fn parse_memory_types(&self) -> Result<Option<Vec<MemoryType>>, MemcoreError> {
+        let Some(types) = &self.memory_type else {
+            return Ok(None);
+        };
+
+        if types.is_empty() {
+            return Ok(None);
+        }
+
+        let parsed = types
+            .iter()
+            .map(|value| parse_memory_type_label(value))
+            .collect::<Result<Vec<MemoryType>, _>>()?;
+        Ok(Some(parsed))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchMemoryRequest {
+    pub user_id: String,
+    pub query: String,
+    #[serde(default = "default_search_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub filters: SearchMemoryFiltersRequest,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchMemoryResponse {
+    pub status: &'static str,
+    pub results: Vec<SearchMemoryResultResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchMemoryResultResponse {
+    pub fact_id: Uuid,
+    pub content: String,
+    pub memory_type: MemoryTypeResponse,
+    pub score: f32,
+    pub metadata: Value,
+}
+
+impl From<SearchMemoryOutput> for SearchMemoryResponse {
+    fn from(output: SearchMemoryOutput) -> Self {
+        Self {
+            status: "success",
+            results: output
+                .results
+                .iter()
+                .map(SearchMemoryResultResponse::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<&MemorySearchResult> for SearchMemoryResultResponse {
+    fn from(result: &MemorySearchResult) -> Self {
+        Self {
+            fact_id: result.fact_id,
+            content: result.content.clone(),
+            memory_type: result.memory_type.into(),
+            score: result.score,
+            metadata: result.metadata.clone(),
+        }
+    }
+}
+
+pub fn parse_memory_type_label(label: &str) -> Result<MemoryType, MemcoreError> {
+    match label.trim() {
+        "Profile" => Ok(MemoryType::Profile),
+        "Preference" => Ok(MemoryType::Preference),
+        "Project" => Ok(MemoryType::Project),
+        "Conversation" => Ok(MemoryType::Conversation),
+        "Task" => Ok(MemoryType::Task),
+        "Entity" => Ok(MemoryType::Entity),
+        "Skill" => Ok(MemoryType::Skill),
+        "System" => Ok(MemoryType::System),
+        other => Err(MemcoreError::ValidationError(format!(
+            "invalid memory type: {other}"
+        ))),
     }
 }

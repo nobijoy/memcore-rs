@@ -1,15 +1,15 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::response::{IntoResponse, Response};
 use memcore_common::MemcoreError;
-use memcore_core::{AddMemoryInput, MemoryMessage, MessageRole, TenantContext};
+use memcore_core::{AddMemoryInput, MemoryMessage, MessageRole, SearchMemoryInput, TenantContext};
 
-use crate::dto::{AddMemoryRequest, AddMemoryResponse, MemoryMessageRequest};
-use crate::response::ErrorBody;
+use crate::dto::{
+    AddMemoryRequest, AddMemoryResponse, MemoryMessageRequest, SearchMemoryRequest,
+    SearchMemoryResponse,
+};
+use crate::routes::common::{ApiError, org_id_from_headers};
 use crate::state::AppState;
-
-const ORG_HEADER: &str = "X-Organization-ID";
 
 pub async fn add_memory(
     State(state): State<AppState>,
@@ -34,25 +34,29 @@ pub async fn add_memory(
     Ok(Json(AddMemoryResponse::from(output)))
 }
 
-fn org_id_from_headers(headers: &HeaderMap) -> Result<String, MemcoreError> {
-    let value = headers
-        .get(ORG_HEADER)
-        .ok_or_else(|| {
-            MemcoreError::ValidationError(format!("{ORG_HEADER} header is required"))
-        })?
-        .to_str()
-        .map_err(|_| {
-            MemcoreError::ValidationError(format!("{ORG_HEADER} header must be valid UTF-8"))
-        })?;
+pub async fn search_memory(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SearchMemoryRequest>,
+) -> Result<Json<SearchMemoryResponse>, ApiError> {
+    let org_id = org_id_from_headers(&headers)?;
+    validate_search_memory_request(&request)?;
 
-    let org_id = value.trim();
-    if org_id.is_empty() {
-        return Err(MemcoreError::ValidationError(format!(
-            "{ORG_HEADER} header is required"
-        )));
-    }
+    let tenant = TenantContext::new(org_id, request.user_id)?;
+    let memory_types = request.filters.parse_memory_types()?;
 
-    Ok(org_id.to_string())
+    let output = state
+        .memory_engine
+        .search_memory(SearchMemoryInput {
+            tenant,
+            query: request.query,
+            limit: request.limit,
+            memory_types,
+            metadata_filter: None,
+        })
+        .await?;
+
+    Ok(Json(SearchMemoryResponse::from(output)))
 }
 
 fn validate_add_memory_request(request: &AddMemoryRequest) -> Result<(), MemcoreError> {
@@ -79,6 +83,35 @@ fn validate_add_memory_request(request: &AddMemoryRequest) -> Result<(), Memcore
     Ok(())
 }
 
+fn validate_search_memory_request(request: &SearchMemoryRequest) -> Result<(), MemcoreError> {
+    if request.user_id.trim().is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "user_id cannot be empty".to_string(),
+        ));
+    }
+
+    if request.query.trim().is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "query cannot be empty".to_string(),
+        ));
+    }
+
+    if request.limit == 0 {
+        return Err(MemcoreError::ValidationError(
+            "limit must be greater than 0".to_string(),
+        ));
+    }
+
+    if request.limit > memcore_core::MAX_SEARCH_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {}",
+            memcore_core::MAX_SEARCH_LIMIT
+        )));
+    }
+
+    Ok(())
+}
+
 fn map_messages(messages: &[MemoryMessageRequest]) -> Result<Vec<MemoryMessage>, MemcoreError> {
     messages.iter().map(map_message).collect()
 }
@@ -99,21 +132,4 @@ fn map_message(message: &MemoryMessageRequest) -> Result<MemoryMessage, MemcoreE
         role,
         content: message.content.clone(),
     })
-}
-
-#[derive(Debug)]
-pub struct ApiError((axum::http::StatusCode, Json<ErrorBody>));
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let (status, body) = self.0;
-        (status, body).into_response()
-    }
-}
-
-impl From<MemcoreError> for ApiError {
-    fn from(error: MemcoreError) -> Self {
-        let (status, body) = ErrorBody::from_memcore_error(error);
-        Self((status, Json(body)))
-    }
 }

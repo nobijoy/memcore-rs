@@ -7,14 +7,16 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use uuid::Uuid;
 
 use crate::{
-    CandidateFact, Fact, MemorySource, TenantContext,
+    CandidateFact, Fact, MemorySearchResult, MemorySource, TenantContext,
 };
 use crate::ports::{
-    EmbeddingProvider, FactExtractionInput, FactStore, LlmProvider, VectorRecord, VectorStore,
+    EmbeddingProvider, FactExtractionInput, FactStore, LlmProvider, VectorRecord, VectorSearchQuery,
+    VectorStore,
 };
 
 pub use types::{
-    AddMemoryInput, AddMemoryOutput, MemoryOperationSummary, DEFAULT_MIN_IMPORTANCE,
+    AddMemoryInput, AddMemoryOutput, MemoryOperationSummary, SearchMemoryInput, SearchMemoryOutput,
+    DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
 };
 
 pub struct MemoryEngine {
@@ -113,6 +115,56 @@ impl MemoryEngine {
             memories,
         })
     }
+
+    pub async fn search_memory(
+        &self,
+        input: SearchMemoryInput,
+    ) -> MemcoreResult<SearchMemoryOutput> {
+        validate_tenant(&input.tenant)?;
+        validate_query(&input.query)?;
+        let limit = normalize_search_limit(input.limit)?;
+
+        let embedding = self.embedding_provider.embed_text(&input.query).await?;
+
+        let vector_results = self
+            .vector_store
+            .search_vectors(VectorSearchQuery {
+                tenant: input.tenant.clone(),
+                embedding,
+                limit,
+                memory_types: input.memory_types,
+                metadata_filter: input.metadata_filter,
+            })
+            .await?;
+
+        let mut results = Vec::with_capacity(vector_results.len());
+        for vector_result in vector_results {
+            let mut search_result = MemorySearchResult {
+                fact_id: vector_result.fact_id,
+                content: vector_result.content,
+                memory_type: vector_result.memory_type,
+                score: vector_result.score,
+                confidence: 0.0,
+                importance: 0.0,
+                valid_at: None,
+                metadata: vector_result.metadata,
+            };
+
+            if let Some(fact) = self
+                .fact_store
+                .get_fact(&input.tenant, search_result.fact_id)
+                .await?
+            {
+                search_result.confidence = fact.confidence;
+                search_result.importance = fact.importance;
+                search_result.valid_at = fact.valid_at;
+            }
+
+            results.push(search_result);
+        }
+
+        Ok(SearchMemoryOutput { results })
+    }
 }
 
 fn validate_tenant(tenant: &TenantContext) -> MemcoreResult<()> {
@@ -127,6 +179,32 @@ fn validate_tenant(tenant: &TenantContext) -> MemcoreResult<()> {
         ));
     }
     Ok(())
+}
+
+fn validate_query(query: &str) -> MemcoreResult<()> {
+    if query.trim().is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "query cannot be empty".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_search_limit(limit: usize) -> MemcoreResult<usize> {
+    if limit == 0 {
+        return Err(MemcoreError::ValidationError(
+            "limit must be greater than 0".to_string(),
+        ));
+    }
+
+    if limit > types::MAX_SEARCH_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {}",
+            types::MAX_SEARCH_LIMIT
+        )));
+    }
+
+    Ok(limit)
 }
 
 fn validate_messages(messages: &[crate::ports::MemoryMessage]) -> MemcoreResult<()> {

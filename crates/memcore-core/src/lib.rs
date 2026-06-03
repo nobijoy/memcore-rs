@@ -3,7 +3,8 @@ pub mod models;
 pub mod ports;
 
 pub use engine::{
-    AddMemoryInput, AddMemoryOutput, MemoryEngine, MemoryOperationSummary, DEFAULT_MIN_IMPORTANCE,
+    AddMemoryInput, AddMemoryOutput, MemoryEngine, MemoryOperationSummary, SearchMemoryInput,
+    SearchMemoryOutput, DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
 };
 pub use models::{
     CandidateFact, Fact, FactOperation, FactOperationDecision, MemorySearchResult, MemorySource,
