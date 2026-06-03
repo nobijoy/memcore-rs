@@ -1,11 +1,13 @@
 use axum::Json;
-use axum::extract::{Extension, State};
+use axum::extract::{Extension, Path, Query, State};
 use memcore_common::MemcoreError;
-use memcore_core::{AddMemoryInput, MemoryMessage, MessageRole, SearchMemoryInput};
+use memcore_core::{
+    AddMemoryInput, ListMemoriesInput, MemoryMessage, MessageRole, SearchMemoryInput, TenantContext,
+};
 
 use crate::dto::{
-    AddMemoryRequest, AddMemoryResponse, MemoryMessageRequest, SearchMemoryRequest,
-    SearchMemoryResponse,
+    parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, ListMemoriesQuery,
+    ListMemoriesResponse, MemoryMessageRequest, SearchMemoryRequest, SearchMemoryResponse,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::ApiError;
@@ -55,6 +57,60 @@ pub async fn search_memory(
         .await?;
 
     Ok(Json(SearchMemoryResponse::from(output)))
+}
+
+pub async fn list_user_memories(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    Path(user_id): Path<String>,
+    Query(query): Query<ListMemoriesQuery>,
+) -> Result<Json<ListMemoriesResponse>, ApiError> {
+    validate_path_user_id(&user_id)?;
+
+    let memory_type = query
+        .memory_type
+        .as_deref()
+        .map(parse_memory_type_label)
+        .transpose()?;
+
+    if query.limit == 0 {
+        return Err(MemcoreError::ValidationError(
+            "limit must be greater than 0".to_string(),
+        )
+        .into());
+    }
+
+    if query.limit > memcore_core::MAX_LIST_MEMORIES_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {}",
+            memcore_core::MAX_LIST_MEMORIES_LIMIT
+        ))
+        .into());
+    }
+
+    let tenant = TenantContext::new(organization.org_id, user_id)?;
+
+    let output = state
+        .memory_engine
+        .list_memories(ListMemoriesInput {
+            tenant,
+            memory_type,
+            limit: query.limit,
+            cursor: query.cursor,
+            include_deleted: query.include_deleted,
+        })
+        .await?;
+
+    Ok(Json(ListMemoriesResponse::from(output)))
+}
+
+fn validate_path_user_id(user_id: &str) -> Result<(), MemcoreError> {
+    if user_id.trim().is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "user_id cannot be empty".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_add_memory_request(request: &AddMemoryRequest) -> Result<(), MemcoreError> {

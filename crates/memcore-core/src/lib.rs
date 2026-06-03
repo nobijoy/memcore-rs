@@ -9,8 +9,9 @@ pub use context::{
     EMPTY_CONTEXT_MESSAGE, MAX_CONTEXT_MAX_MEMORIES,
 };
 pub use engine::{
-    AddMemoryInput, AddMemoryOutput, MemoryEngine, MemoryOperationSummary, SearchMemoryInput,
-    SearchMemoryOutput, DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
+    AddMemoryInput, AddMemoryOutput, ListMemoriesInput, ListMemoriesOutput, MemoryEngine,
+    MemoryOperationSummary, SearchMemoryInput, SearchMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT,
+    DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
 };
 pub use models::{
     CandidateFact, Fact, FactOperation, FactOperationDecision, MemorySearchResult, MemorySource,

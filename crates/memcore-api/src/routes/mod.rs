@@ -16,6 +16,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/api/v1/memories", post(memories::add_memory))
         .route("/api/v1/memories/search", post(memories::search_memory))
         .route("/api/v1/context", post(context::build_context))
+        .route(
+            "/api/v1/users/{user_id}/memories",
+            get(memories::list_user_memories),
+        )
         .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 

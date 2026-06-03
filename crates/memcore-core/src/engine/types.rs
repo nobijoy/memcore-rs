@@ -13,6 +13,12 @@ pub const DEFAULT_SEARCH_LIMIT: usize = 10;
 /// Maximum allowed result limit for memory search.
 pub const MAX_SEARCH_LIMIT: usize = 50;
 
+/// Default limit for listing memories when callers omit an explicit limit.
+pub const DEFAULT_LIST_MEMORIES_LIMIT: usize = 20;
+
+/// Maximum allowed limit for listing memories.
+pub const MAX_LIST_MEMORIES_LIMIT: usize = 100;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddMemoryInput {
     pub tenant: TenantContext,
@@ -61,4 +67,19 @@ pub struct SearchMemoryInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchMemoryOutput {
     pub results: Vec<MemorySearchResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListMemoriesInput {
+    pub tenant: TenantContext,
+    pub memory_type: Option<crate::MemoryType>,
+    pub limit: usize,
+    pub cursor: Option<String>,
+    pub include_deleted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListMemoriesOutput {
+    pub memories: Vec<Fact>,
+    pub next_cursor: Option<String>,
 }

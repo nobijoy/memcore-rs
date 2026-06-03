@@ -13,13 +13,14 @@ use crate::{
 use crate::privacy::redact_messages_for_extraction;
 use crate::ports::MemoryMessage;
 use crate::ports::{
-    EmbeddingProvider, FactExtractionInput, FactStore, LlmProvider, VectorRecord, VectorSearchQuery,
-    VectorStore,
+    EmbeddingProvider, FactExtractionInput, FactSearchQuery, FactStore, LlmProvider, VectorRecord,
+    VectorSearchQuery, VectorStore,
 };
 
 pub use types::{
-    AddMemoryInput, AddMemoryOutput, MemoryOperationSummary, SearchMemoryInput, SearchMemoryOutput,
-    DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
+    AddMemoryInput, AddMemoryOutput, ListMemoriesInput, ListMemoriesOutput, MemoryOperationSummary,
+    SearchMemoryInput, SearchMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_MIN_IMPORTANCE,
+    DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
 };
 
 pub struct MemoryEngine {
@@ -208,6 +209,35 @@ impl MemoryEngine {
             memories: search_output.results,
         })
     }
+
+    pub async fn list_memories(
+        &self,
+        input: ListMemoriesInput,
+    ) -> MemcoreResult<ListMemoriesOutput> {
+        validate_tenant(&input.tenant)?;
+        let limit = normalize_list_limit(input.limit)?;
+
+        let memory_types = input
+            .memory_type
+            .map(|memory_type| vec![memory_type]);
+
+        let memories = self
+            .fact_store
+            .search_facts(FactSearchQuery {
+                tenant: input.tenant,
+                memory_types,
+                query_text: None,
+                limit,
+                cursor: input.cursor,
+                include_deleted: input.include_deleted,
+            })
+            .await?;
+
+        Ok(ListMemoriesOutput {
+            memories,
+            next_cursor: None,
+        })
+    }
 }
 
 fn messages_for_llm_extraction(
@@ -259,6 +289,23 @@ fn normalize_context_max_memories(max_memories: usize) -> MemcoreResult<usize> {
     }
 
     Ok(max_memories)
+}
+
+fn normalize_list_limit(limit: usize) -> MemcoreResult<usize> {
+    if limit == 0 {
+        return Err(MemcoreError::ValidationError(
+            "limit must be greater than 0".to_string(),
+        ));
+    }
+
+    if limit > types::MAX_LIST_MEMORIES_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {}",
+            types::MAX_LIST_MEMORIES_LIMIT
+        )));
+    }
+
+    Ok(limit)
 }
 
 fn normalize_search_limit(limit: usize) -> MemcoreResult<usize> {

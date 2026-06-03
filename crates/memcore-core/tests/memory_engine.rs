@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, BuildContextInput, CandidateFact, FactStore, MemoryEngine, MemoryMessage,
-    MemoryType, MessageRole, SearchMemoryInput, TenantContext, VectorSearchQuery, VectorStore,
-    EMPTY_CONTEXT_MESSAGE,
+    AddMemoryInput, BuildContextInput, CandidateFact, FactStore, ListMemoriesInput, MemoryEngine,
+    MemoryMessage, MemoryType, MessageRole, SearchMemoryInput, TenantContext, VectorSearchQuery,
+    VectorStore, EMPTY_CONTEXT_MESSAGE,
 };
 use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -531,4 +531,58 @@ async fn provider_receives_redacted_content_when_redaction_enabled() {
     assert_eq!(received.len(), 1);
     assert!(received[0].content.contains("[REDACTED_EMAIL]"));
     assert!(!received[0].content.contains("secret@example.com"));
+}
+
+#[tokio::test]
+async fn list_memories_returns_tenant_scoped_facts() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant_a = tenant("org_a", "user_a");
+    let tenant_b = tenant("org_a", "user_b");
+
+    engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant_a.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "only for user_a".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    let listed_a = engine
+        .list_memories(ListMemoriesInput {
+            tenant: tenant_a,
+            memory_type: None,
+            limit: 20,
+            cursor: None,
+            include_deleted: false,
+        })
+        .await
+        .expect("list should succeed");
+
+    assert_eq!(listed_a.memories.len(), 1);
+    assert_eq!(listed_a.memories[0].content, "only for user_a");
+    assert!(listed_a.next_cursor.is_none());
+
+    let listed_b = engine
+        .list_memories(ListMemoriesInput {
+            tenant: tenant_b,
+            memory_type: None,
+            limit: 20,
+            cursor: None,
+            include_deleted: false,
+        })
+        .await
+        .expect("list should succeed");
+
+    assert!(listed_b.memories.is_empty());
 }
