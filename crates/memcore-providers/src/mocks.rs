@@ -8,10 +8,10 @@ use memcore_core::{
     CandidateFact, FactOperation, FactOperationDecision, MemoryType,
 };
 
-use crate::inputs::{
-    FactClassificationInput, FactExtractionInput, MemoryMessage, MessageRole, SummarizationInput,
+use memcore_core::ports::{
+    EmbeddingProvider, FactClassificationInput, FactExtractionInput, LlmProvider, MemoryMessage,
+    MessageRole, SummarizationInput,
 };
-use crate::traits::{EmbeddingProvider, LlmProvider};
 
 fn check_fail(error: &Option<MemcoreError>) -> MemcoreResult<()> {
     if let Some(err) = error {

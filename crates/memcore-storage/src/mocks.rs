@@ -7,9 +7,9 @@ use memcore_core::{Fact, TenantContext};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::queries::FactSearchQuery;
-use crate::traits::{FactStore, VectorStore};
-use crate::vector::{VectorRecord, VectorSearchQuery, VectorSearchResult};
+use memcore_core::ports::{
+    FactSearchQuery, FactStore, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
+};
 
 fn tenant_key(tenant: &TenantContext) -> (String, String) {
     (tenant.org_id.clone(), tenant.user_id.clone())
