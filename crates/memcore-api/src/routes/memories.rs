@@ -2,12 +2,15 @@ use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, ListMemoriesInput, MemoryMessage, MessageRole, SearchMemoryInput, TenantContext,
+    AddMemoryInput, DeleteMemoryInput, ListMemoriesInput, MemoryMessage, MessageRole,
+    SearchMemoryInput, TenantContext,
 };
+use uuid::Uuid;
 
 use crate::dto::{
-    parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, ListMemoriesQuery,
-    ListMemoriesResponse, MemoryMessageRequest, SearchMemoryRequest, SearchMemoryResponse,
+    parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse,
+    ListMemoriesQuery, ListMemoriesResponse, MemoryMessageRequest, SearchMemoryRequest,
+    SearchMemoryResponse,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::ApiError;
@@ -102,6 +105,27 @@ pub async fn list_user_memories(
         .await?;
 
     Ok(Json(ListMemoriesResponse::from(output)))
+}
+
+pub async fn delete_user_memory(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    Path((user_id, memory_id)): Path<(String, String)>,
+) -> Result<Json<DeleteMemoryResponse>, ApiError> {
+    validate_path_user_id(&user_id)?;
+
+    let memory_id = Uuid::parse_str(memory_id.trim()).map_err(|_| {
+        MemcoreError::ValidationError("invalid memory_id".to_string())
+    })?;
+
+    let tenant = TenantContext::new(organization.org_id, user_id)?;
+
+    let output = state
+        .memory_engine
+        .delete_memory(DeleteMemoryInput { tenant, memory_id })
+        .await?;
+
+    Ok(Json(DeleteMemoryResponse::from(output)))
 }
 
 fn validate_path_user_id(user_id: &str) -> Result<(), MemcoreError> {

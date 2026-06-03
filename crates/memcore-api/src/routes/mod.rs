@@ -5,7 +5,7 @@ pub mod memories;
 
 use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 
 use crate::middleware::{require_api_key, require_organization};
 use crate::state::AppState;
@@ -19,6 +19,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route(
             "/api/v1/users/{user_id}/memories",
             get(memories::list_user_memories),
+        )
+        .route(
+            "/api/v1/users/{user_id}/memories/{memory_id}",
+            delete(memories::delete_user_memory),
         )
         .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));

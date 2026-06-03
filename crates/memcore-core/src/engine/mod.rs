@@ -18,9 +18,10 @@ use crate::ports::{
 };
 
 pub use types::{
-    AddMemoryInput, AddMemoryOutput, ListMemoriesInput, ListMemoriesOutput, MemoryOperationSummary,
-    SearchMemoryInput, SearchMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_MIN_IMPORTANCE,
-    DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
+    AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ListMemoriesInput,
+    ListMemoriesOutput, MemoryOperationSummary, SearchMemoryInput, SearchMemoryOutput,
+    DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT,
+    MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
 };
 
 pub struct MemoryEngine {
@@ -237,6 +238,32 @@ impl MemoryEngine {
             memories,
             next_cursor: None,
         })
+    }
+
+    pub async fn delete_memory(
+        &self,
+        input: DeleteMemoryInput,
+    ) -> MemcoreResult<DeleteMemoryOutput> {
+        validate_tenant(&input.tenant)?;
+
+        let exists = self
+            .fact_store
+            .get_fact(&input.tenant, input.memory_id)
+            .await?;
+
+        if exists.is_none() {
+            return Err(MemcoreError::NotFound("memory not found".to_string()));
+        }
+
+        self.fact_store
+            .soft_delete_fact(&input.tenant, input.memory_id)
+            .await?;
+
+        self.vector_store
+            .delete_by_fact_id(&input.tenant, input.memory_id)
+            .await?;
+
+        Ok(DeleteMemoryOutput { deleted: true })
     }
 }
 

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::{Fact, MemorySearchResult, TenantContext};
 use crate::ports::MemoryMessage;
@@ -82,4 +83,15 @@ pub struct ListMemoriesInput {
 pub struct ListMemoriesOutput {
     pub memories: Vec<Fact>,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeleteMemoryInput {
+    pub tenant: TenantContext,
+    pub memory_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeleteMemoryOutput {
+    pub deleted: bool,
 }

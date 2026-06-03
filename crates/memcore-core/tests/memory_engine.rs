@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, BuildContextInput, CandidateFact, FactStore, ListMemoriesInput, MemoryEngine,
-    MemoryMessage, MemoryType, MessageRole, SearchMemoryInput, TenantContext, VectorSearchQuery,
-    VectorStore, EMPTY_CONTEXT_MESSAGE,
+    AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, FactStore,
+    ListMemoriesInput, MemoryEngine, MemoryMessage, MemoryType, MessageRole, SearchMemoryInput,
+    TenantContext, VectorSearchQuery, VectorStore, EMPTY_CONTEXT_MESSAGE,
 };
 use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -585,4 +585,102 @@ async fn list_memories_returns_tenant_scoped_facts() {
         .expect("list should succeed");
 
     assert!(listed_b.memories.is_empty());
+}
+
+#[tokio::test]
+async fn delete_memory_soft_deletes_fact_and_removes_vector() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let vector_store = Arc::new(MockVectorStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        vector_store.clone(),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let output = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "delete me".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    let memory_id = output.memories[0].id;
+
+    let delete_output = engine
+        .delete_memory(DeleteMemoryInput {
+            tenant: tenant.clone(),
+            memory_id,
+        })
+        .await
+        .expect("delete should succeed");
+
+    assert!(delete_output.deleted);
+
+    let fact = fact_store
+        .get_fact(&tenant, memory_id)
+        .await
+        .expect("get should succeed");
+    assert!(fact.is_none());
+
+    let listed = engine
+        .list_memories(ListMemoriesInput {
+            tenant: tenant.clone(),
+            memory_type: None,
+            limit: 20,
+            cursor: None,
+            include_deleted: false,
+        })
+        .await
+        .expect("list should succeed");
+    assert!(listed.memories.is_empty());
+
+    let search = engine
+        .search_memory(SearchMemoryInput {
+            tenant: tenant.clone(),
+            query: "delete me".to_string(),
+            limit: 10,
+            memory_types: None,
+            metadata_filter: None,
+        })
+        .await
+        .expect("search should succeed");
+    assert!(search.results.is_empty());
+
+    let vectors = vector_store
+        .search_vectors(VectorSearchQuery {
+            tenant: tenant.clone(),
+            embedding: deterministic_embedding("delete me", 4).expect("embedding should succeed"),
+            limit: 10,
+            memory_types: None,
+            metadata_filter: None,
+        })
+        .await
+        .expect("vector search should succeed");
+    assert!(vectors.is_empty());
+}
+
+#[tokio::test]
+async fn delete_memory_returns_not_found_for_missing_id() {
+    let engine = default_engine();
+    let tenant = tenant("org_a", "user_a");
+
+    let error = engine
+        .delete_memory(DeleteMemoryInput {
+            tenant,
+            memory_id: uuid::Uuid::new_v4(),
+        })
+        .await
+        .expect_err("delete should fail");
+
+    assert_eq!(
+        error,
+        MemcoreError::NotFound("memory not found".to_string())
+    );
 }
