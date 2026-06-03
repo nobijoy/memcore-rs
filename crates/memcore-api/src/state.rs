@@ -15,10 +15,11 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(settings: Settings) -> Self {
+        let memory_engine = Arc::new(create_mock_memory_engine(&settings));
         Self {
             settings,
             started_at: Utc::now(),
-            memory_engine: Arc::new(create_mock_memory_engine()),
+            memory_engine,
         }
     }
 
@@ -32,11 +33,12 @@ impl AppState {
 }
 
 /// Development wiring: in-memory mock storage and providers until real backends are configured.
-pub fn create_mock_memory_engine() -> MemoryEngine {
+pub fn create_mock_memory_engine(settings: &Settings) -> MemoryEngine {
     MemoryEngine::new(
         Arc::new(MockFactStore::new()),
         Arc::new(MockVectorStore::new()),
         Arc::new(MockLlmProvider::new()),
         Arc::new(MockEmbeddingProvider::new(4)),
     )
+    .with_pii_redaction(settings.enable_pii_redaction)
 }

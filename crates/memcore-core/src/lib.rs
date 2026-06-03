@@ -2,6 +2,7 @@ pub mod context;
 pub mod engine;
 pub mod models;
 pub mod ports;
+pub mod privacy;
 
 pub use context::{
     assemble_context, BuildContextInput, BuildContextOutput, DEFAULT_CONTEXT_MAX_MEMORIES,
@@ -15,6 +16,7 @@ pub use models::{
     CandidateFact, Fact, FactOperation, FactOperationDecision, MemorySearchResult, MemorySource,
     MemoryType, TenantContext,
 };
+pub use privacy::PiiRedactor;
 pub use ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryMessage, MessageRole, SummarizationInput, VectorRecord, VectorSearchQuery,

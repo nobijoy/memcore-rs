@@ -8,6 +8,7 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 memcore-common = { path = "../memcore-common" }
 serde = { version = "1", features = ["derive"] }
+regex = "1"
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 

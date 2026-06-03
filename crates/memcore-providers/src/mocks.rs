@@ -55,6 +55,7 @@ pub struct MockLlmProvider {
     classification_decision: RwLock<Option<FactOperationDecision>>,
     summary_prefix: RwLock<String>,
     fail_with: RwLock<Option<MemcoreError>>,
+    last_extraction_messages: RwLock<Vec<MemoryMessage>>,
 }
 
 impl MockLlmProvider {
@@ -89,6 +90,14 @@ impl MockLlmProvider {
     pub fn with_fail_error(self, error: MemcoreError) -> Self {
         *self.fail_with.write().expect("fail lock poisoned") = Some(error);
         self
+    }
+
+    /// Messages most recently passed to [`LlmProvider::extract_facts`] (for tests).
+    pub fn last_extraction_messages(&self) -> Vec<MemoryMessage> {
+        self.last_extraction_messages
+            .read()
+            .expect("extraction messages lock poisoned")
+            .clone()
     }
 
     fn default_candidates(messages: &[MemoryMessage]) -> MemcoreResult<Vec<CandidateFact>> {
@@ -134,6 +143,11 @@ impl LlmProvider for MockLlmProvider {
         input: FactExtractionInput,
     ) -> MemcoreResult<Vec<CandidateFact>> {
         check_fail(&self.fail_with.read().expect("fail lock poisoned"))?;
+
+        *self
+            .last_extraction_messages
+            .write()
+            .expect("extraction messages lock poisoned") = input.messages.clone();
 
         if let Some(candidates) = self
             .extraction_candidates

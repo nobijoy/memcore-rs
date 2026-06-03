@@ -10,6 +10,8 @@ use crate::{
     assemble_context, BuildContextInput, BuildContextOutput, CandidateFact, Fact,
     MemorySearchResult, MemorySource, TenantContext,
 };
+use crate::privacy::redact_messages_for_extraction;
+use crate::ports::MemoryMessage;
 use crate::ports::{
     EmbeddingProvider, FactExtractionInput, FactStore, LlmProvider, VectorRecord, VectorSearchQuery,
     VectorStore,
@@ -26,6 +28,7 @@ pub struct MemoryEngine {
     llm_provider: Arc<dyn LlmProvider>,
     embedding_provider: Arc<dyn EmbeddingProvider>,
     min_importance: f32,
+    enable_pii_redaction: bool,
 }
 
 impl MemoryEngine {
@@ -41,6 +44,7 @@ impl MemoryEngine {
             llm_provider,
             embedding_provider,
             min_importance: types::DEFAULT_MIN_IMPORTANCE,
+            enable_pii_redaction: false,
         }
     }
 
@@ -49,15 +53,27 @@ impl MemoryEngine {
         self
     }
 
+    pub fn with_pii_redaction(mut self, enabled: bool) -> Self {
+        self.enable_pii_redaction = enabled;
+        self
+    }
+
+    pub fn pii_redaction_enabled(&self) -> bool {
+        self.enable_pii_redaction
+    }
+
     pub async fn add_memory(&self, input: AddMemoryInput) -> MemcoreResult<AddMemoryOutput> {
         validate_tenant(&input.tenant)?;
         validate_messages(&input.messages)?;
+
+        let messages_for_extraction =
+            messages_for_llm_extraction(&input.messages, self.enable_pii_redaction);
 
         let candidates = self
             .llm_provider
             .extract_facts(FactExtractionInput {
                 tenant: input.tenant.clone(),
-                messages: input.messages,
+                messages: messages_for_extraction,
                 metadata: input.metadata.clone(),
             })
             .await?;
@@ -191,6 +207,17 @@ impl MemoryEngine {
             context,
             memories: search_output.results,
         })
+    }
+}
+
+fn messages_for_llm_extraction(
+    messages: &[MemoryMessage],
+    enable_pii_redaction: bool,
+) -> Vec<MemoryMessage> {
+    if enable_pii_redaction {
+        redact_messages_for_extraction(messages)
+    } else {
+        messages.to_vec()
     }
 }
 

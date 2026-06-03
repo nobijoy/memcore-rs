@@ -20,7 +20,18 @@ fn engine_with_mocks(
     llm: MockLlmProvider,
     embedding: MockEmbeddingProvider,
 ) -> MemoryEngine {
+    engine_with_mocks_and_pii(fact_store, vector_store, llm, embedding, false)
+}
+
+fn engine_with_mocks_and_pii(
+    fact_store: Arc<dyn FactStore>,
+    vector_store: Arc<dyn VectorStore>,
+    llm: MockLlmProvider,
+    embedding: MockEmbeddingProvider,
+    enable_pii_redaction: bool,
+) -> MemoryEngine {
     MemoryEngine::new(fact_store, vector_store, Arc::new(llm), Arc::new(embedding))
+        .with_pii_redaction(enable_pii_redaction)
 }
 
 fn default_engine() -> MemoryEngine {
@@ -432,4 +443,92 @@ async fn build_context_returns_empty_message_when_no_matches() {
 
     assert_eq!(output.context, EMPTY_CONTEXT_MESSAGE);
     assert!(output.memories.is_empty());
+}
+
+#[tokio::test]
+async fn add_memory_stores_redacted_facts_when_redaction_enabled() {
+    let engine = engine_with_mocks_and_pii(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+        true,
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let output = engine
+        .add_memory(AddMemoryInput {
+            tenant,
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "Email me at secret@example.com".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    assert!(output.memories[0].content.contains("[REDACTED_EMAIL]"));
+    assert!(!output.memories[0].content.contains("secret@example.com"));
+}
+
+#[tokio::test]
+async fn provider_receives_original_content_when_redaction_disabled() {
+    let llm = MockLlmProvider::new();
+    let llm_arc = Arc::new(llm);
+    let engine = MemoryEngine::new(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        llm_arc.clone(),
+        Arc::new(MockEmbeddingProvider::new(4)),
+    )
+    .with_pii_redaction(false);
+
+    let tenant = tenant("org_a", "user_a");
+    engine
+        .add_memory(AddMemoryInput {
+            tenant,
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "Email me at secret@example.com".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    let received = llm_arc.last_extraction_messages();
+    assert_eq!(received.len(), 1);
+    assert!(received[0].content.contains("secret@example.com"));
+}
+
+#[tokio::test]
+async fn provider_receives_redacted_content_when_redaction_enabled() {
+    let llm = MockLlmProvider::new();
+    let llm_arc = Arc::new(llm);
+    let engine = MemoryEngine::new(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        llm_arc.clone(),
+        Arc::new(MockEmbeddingProvider::new(4)),
+    )
+    .with_pii_redaction(true);
+
+    let tenant = tenant("org_a", "user_a");
+    engine
+        .add_memory(AddMemoryInput {
+            tenant,
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "Email me at secret@example.com".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    let received = llm_arc.last_extraction_messages();
+    assert_eq!(received.len(), 1);
+    assert!(received[0].content.contains("[REDACTED_EMAIL]"));
+    assert!(!received[0].content.contains("secret@example.com"));
 }
