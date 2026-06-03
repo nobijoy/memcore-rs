@@ -95,3 +95,13 @@ pub struct DeleteMemoryInput {
 pub struct DeleteMemoryOutput {
     pub deleted: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForgetUserInput {
+    pub tenant: TenantContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForgetUserOutput {
+    pub deleted: bool,
+}

@@ -1,7 +1,7 @@
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryOutput, DeleteMemoryOutput, Fact, ListMemoriesOutput, MemorySearchResult, MemoryType,
-    SearchMemoryOutput,
+    AddMemoryOutput, DeleteMemoryOutput, Fact, ForgetUserOutput, ListMemoriesOutput,
+    MemorySearchResult, MemoryType, SearchMemoryOutput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -241,6 +241,21 @@ pub struct DeleteMemoryResponse {
 
 impl From<DeleteMemoryOutput> for DeleteMemoryResponse {
     fn from(output: DeleteMemoryOutput) -> Self {
+        Self {
+            status: "success",
+            deleted: output.deleted,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ForgetUserResponse {
+    pub status: &'static str,
+    pub deleted: bool,
+}
+
+impl From<ForgetUserOutput> for ForgetUserResponse {
+    fn from(output: ForgetUserOutput) -> Self {
         Self {
             status: "success",
             deleted: output.deleted,

@@ -2,6 +2,7 @@ pub mod common;
 pub mod context;
 pub mod health;
 pub mod memories;
+pub mod users;
 
 use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
@@ -24,6 +25,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/v1/users/{user_id}/memories/{memory_id}",
             delete(memories::delete_user_memory),
         )
+        .route("/api/v1/users/{user_id}", delete(users::forget_user))
         .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 

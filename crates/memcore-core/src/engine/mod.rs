@@ -18,10 +18,10 @@ use crate::ports::{
 };
 
 pub use types::{
-    AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ListMemoriesInput,
-    ListMemoriesOutput, MemoryOperationSummary, SearchMemoryInput, SearchMemoryOutput,
-    DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT,
-    MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
+    AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ForgetUserInput,
+    ForgetUserOutput, ListMemoriesInput, ListMemoriesOutput, MemoryOperationSummary,
+    SearchMemoryInput, SearchMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_MIN_IMPORTANCE,
+    DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
 };
 
 pub struct MemoryEngine {
@@ -264,6 +264,20 @@ impl MemoryEngine {
             .await?;
 
         Ok(DeleteMemoryOutput { deleted: true })
+    }
+
+    pub async fn forget_user(&self, input: ForgetUserInput) -> MemcoreResult<ForgetUserOutput> {
+        validate_tenant(&input.tenant)?;
+
+        self.fact_store
+            .delete_user_data(&input.tenant)
+            .await?;
+
+        self.vector_store
+            .delete_by_user(&input.tenant)
+            .await?;
+
+        Ok(ForgetUserOutput { deleted: true })
     }
 }
 

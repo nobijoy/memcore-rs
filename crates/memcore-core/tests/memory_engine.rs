@@ -3,8 +3,8 @@ use std::sync::Arc;
 use memcore_common::MemcoreError;
 use memcore_core::{
     AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, FactStore,
-    ListMemoriesInput, MemoryEngine, MemoryMessage, MemoryType, MessageRole, SearchMemoryInput,
-    TenantContext, VectorSearchQuery, VectorStore, EMPTY_CONTEXT_MESSAGE,
+    ForgetUserInput, ListMemoriesInput, MemoryEngine, MemoryMessage, MemoryType, MessageRole,
+    SearchMemoryInput, TenantContext, VectorSearchQuery, VectorStore, EMPTY_CONTEXT_MESSAGE,
 };
 use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -683,4 +683,76 @@ async fn delete_memory_returns_not_found_for_missing_id() {
         error,
         MemcoreError::NotFound("memory not found".to_string())
     );
+}
+
+#[tokio::test]
+async fn forget_user_removes_facts_and_vectors_for_tenant_only() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let vector_store = Arc::new(MockVectorStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        vector_store.clone(),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant_a = tenant("org_a", "user_a");
+    let tenant_b = tenant("org_a", "user_b");
+
+    engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant_a.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "user a memory".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant_b.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "user b memory".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    let output = engine
+        .forget_user(ForgetUserInput {
+            tenant: tenant_a.clone(),
+        })
+        .await
+        .expect("forget should succeed");
+
+    assert!(output.deleted);
+
+    let listed_a = engine
+        .list_memories(ListMemoriesInput {
+            tenant: tenant_a,
+            memory_type: None,
+            limit: 20,
+            cursor: None,
+            include_deleted: false,
+        })
+        .await
+        .expect("list should succeed");
+    assert!(listed_a.memories.is_empty());
+
+    let listed_b = engine
+        .list_memories(ListMemoriesInput {
+            tenant: tenant_b,
+            memory_type: None,
+            limit: 20,
+            cursor: None,
+            include_deleted: false,
+        })
+        .await
+        .expect("list should succeed");
+    assert_eq!(listed_b.memories.len(), 1);
 }

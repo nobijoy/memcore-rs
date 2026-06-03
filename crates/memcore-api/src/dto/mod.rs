@@ -7,7 +7,8 @@ pub use context::{
 };
 pub use memories::{
     parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse,
-    ListMemoriesQuery, ListMemoriesResponse, ListMemoryItemResponse, MemoryItemResponse,
-    MemoryOperationSummaryResponse, MemoryMessageRequest, SearchMemoryFiltersRequest,
-    SearchMemoryRequest, SearchMemoryResponse, SearchMemoryResultResponse,
+    ForgetUserResponse, ListMemoriesQuery, ListMemoriesResponse, ListMemoryItemResponse,
+    MemoryItemResponse, MemoryOperationSummaryResponse, MemoryMessageRequest,
+    SearchMemoryFiltersRequest, SearchMemoryRequest, SearchMemoryResponse,
+    SearchMemoryResultResponse,
 };
