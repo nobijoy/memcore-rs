@@ -142,7 +142,7 @@ async fn missing_organization_header_returns_error() {
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
     assert_eq!(
         json["error"]["message"],
-        "X-Organization-ID header is required"
+        "missing X-Organization-ID header"
     );
 }
 

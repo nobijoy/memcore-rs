@@ -4,17 +4,19 @@ pub mod health;
 pub mod memories;
 
 use axum::Router;
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{get, post};
 
-use crate::middleware::require_api_key;
+use crate::middleware::{require_api_key, require_organization};
 use crate::state::AppState;
 
+/// Protected routes: outer `require_api_key` runs first, then `require_organization`, then handler.
 pub fn router(state: &AppState) -> Router<AppState> {
     let protected = Router::new()
         .route("/api/v1/memories", post(memories::add_memory))
         .route("/api/v1/memories/search", post(memories::search_memory))
         .route("/api/v1/context", post(context::build_context))
+        .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 
     Router::new()

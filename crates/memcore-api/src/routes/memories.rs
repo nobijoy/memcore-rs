@@ -1,25 +1,24 @@
 use axum::Json;
-use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::extract::{Extension, State};
 use memcore_common::MemcoreError;
-use memcore_core::{AddMemoryInput, MemoryMessage, MessageRole, SearchMemoryInput, TenantContext};
+use memcore_core::{AddMemoryInput, MemoryMessage, MessageRole, SearchMemoryInput};
 
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, MemoryMessageRequest, SearchMemoryRequest,
     SearchMemoryResponse,
 };
-use crate::routes::common::{ApiError, org_id_from_headers};
+use crate::middleware::OrganizationContext;
+use crate::routes::common::ApiError;
 use crate::state::AppState;
 
 pub async fn add_memory(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(organization): Extension<OrganizationContext>,
     Json(request): Json<AddMemoryRequest>,
 ) -> Result<Json<AddMemoryResponse>, ApiError> {
-    let org_id = org_id_from_headers(&headers)?;
     validate_add_memory_request(&request)?;
 
-    let tenant = TenantContext::new(org_id, request.user_id)?;
+    let tenant = organization.tenant_with_user_id(request.user_id)?;
     let messages = map_messages(&request.messages)?;
 
     let output = state
@@ -36,13 +35,12 @@ pub async fn add_memory(
 
 pub async fn search_memory(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(organization): Extension<OrganizationContext>,
     Json(request): Json<SearchMemoryRequest>,
 ) -> Result<Json<SearchMemoryResponse>, ApiError> {
-    let org_id = org_id_from_headers(&headers)?;
     validate_search_memory_request(&request)?;
 
-    let tenant = TenantContext::new(org_id, request.user_id)?;
+    let tenant = organization.tenant_with_user_id(request.user_id)?;
     let memory_types = request.filters.parse_memory_types()?;
 
     let output = state
