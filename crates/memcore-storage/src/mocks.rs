@@ -1,0 +1,684 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::RwLock;
+
+use async_trait::async_trait;
+use memcore_common::{MemcoreError, MemcoreResult};
+use memcore_core::{Fact, TenantContext};
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::queries::FactSearchQuery;
+use crate::traits::{FactStore, VectorStore};
+use crate::vector::{VectorRecord, VectorSearchQuery, VectorSearchResult};
+
+fn tenant_key(tenant: &TenantContext) -> (String, String) {
+    (tenant.org_id.clone(), tenant.user_id.clone())
+}
+
+fn fact_matches_tenant(fact: &Fact, tenant: &TenantContext) -> bool {
+    fact.org_id == tenant.org_id && fact.user_id == tenant.user_id
+}
+
+fn record_matches_tenant(record: &VectorRecord, tenant: &TenantContext) -> bool {
+    record.org_id == tenant.org_id && record.user_id == tenant.user_id
+}
+
+fn ensure_fact_tenant(fact: &Fact, tenant: &TenantContext) -> MemcoreResult<()> {
+    if fact_matches_tenant(fact, tenant) {
+        Ok(())
+    } else {
+        Err(MemcoreError::Forbidden)
+    }
+}
+
+fn ensure_record_tenant(record: &VectorRecord, tenant: &TenantContext) -> MemcoreResult<()> {
+    if record_matches_tenant(record, tenant) {
+        Ok(())
+    } else {
+        Err(MemcoreError::Forbidden)
+    }
+}
+
+fn metadata_matches(record_metadata: &Value, filter: &Value) -> bool {
+    let Some(filter_obj) = filter.as_object() else {
+        return false;
+    };
+
+    let Some(record_obj) = record_metadata.as_object() else {
+        return false;
+    };
+
+    filter_obj
+        .iter()
+        .all(|(key, value)| record_obj.get(key) == Some(value))
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.is_empty() || b.is_empty() || a.len() != b.len() {
+        return 0.0;
+    }
+
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot / (norm_a * norm_b)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MockFactStore {
+    facts: RwLock<HashMap<Uuid, Fact>>,
+    deleted: RwLock<HashSet<Uuid>>,
+}
+
+impl MockFactStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn is_deleted(&self, fact_id: &Uuid) -> bool {
+        self.deleted
+            .read()
+            .expect("deleted lock poisoned")
+            .contains(fact_id)
+    }
+}
+
+#[async_trait]
+impl FactStore for MockFactStore {
+    async fn insert_fact(&self, tenant: &TenantContext, fact: Fact) -> MemcoreResult<Fact> {
+        ensure_fact_tenant(&fact, tenant)?;
+
+        let mut facts = self.facts.write().expect("facts lock poisoned");
+        if facts.contains_key(&fact.id) {
+            return Err(MemcoreError::Conflict(format!(
+                "fact already exists: {}",
+                fact.id
+            )));
+        }
+
+        facts.insert(fact.id, fact.clone());
+        Ok(fact)
+    }
+
+    async fn update_fact(&self, tenant: &TenantContext, fact: Fact) -> MemcoreResult<Fact> {
+        ensure_fact_tenant(&fact, tenant)?;
+
+        let mut facts = self.facts.write().expect("facts lock poisoned");
+        let existing = facts
+            .get(&fact.id)
+            .ok_or_else(|| MemcoreError::NotFound(format!("fact not found: {}", fact.id)))?;
+
+        if !fact_matches_tenant(existing, tenant) {
+            return Err(MemcoreError::Forbidden);
+        }
+
+        facts.insert(fact.id, fact.clone());
+        Ok(fact)
+    }
+
+    async fn get_fact(
+        &self,
+        tenant: &TenantContext,
+        fact_id: Uuid,
+    ) -> MemcoreResult<Option<Fact>> {
+        let facts = self.facts.read().expect("facts lock poisoned");
+        let Some(fact) = facts.get(&fact_id) else {
+            return Ok(None);
+        };
+
+        if !fact_matches_tenant(fact, tenant) {
+            return Ok(None);
+        }
+
+        if self.is_deleted(&fact_id) {
+            return Ok(None);
+        }
+
+        Ok(Some(fact.clone()))
+    }
+
+    async fn search_facts(&self, query: FactSearchQuery) -> MemcoreResult<Vec<Fact>> {
+        let facts = self.facts.read().expect("facts lock poisoned");
+        let deleted = self.deleted.read().expect("deleted lock poisoned");
+
+        let mut results: Vec<Fact> = facts
+            .values()
+            .filter(|fact| fact_matches_tenant(fact, &query.tenant))
+            .filter(|fact| {
+                if query.include_deleted {
+                    true
+                } else {
+                    !deleted.contains(&fact.id)
+                }
+            })
+            .filter(|fact| {
+                query
+                    .memory_types
+                    .as_ref()
+                    .is_none_or(|types| types.contains(&fact.memory_type))
+            })
+            .filter(|fact| {
+                query.query_text.as_ref().is_none_or(|text| {
+                    let needle = text.to_ascii_lowercase();
+                    fact.content.to_ascii_lowercase().contains(&needle)
+                })
+            })
+            .cloned()
+            .collect();
+
+        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        results.truncate(query.limit);
+        Ok(results)
+    }
+
+    async fn soft_delete_fact(
+        &self,
+        tenant: &TenantContext,
+        fact_id: Uuid,
+    ) -> MemcoreResult<()> {
+        let facts = self.facts.read().expect("facts lock poisoned");
+        let Some(fact) = facts.get(&fact_id) else {
+            return Err(MemcoreError::NotFound(format!("fact not found: {fact_id}")));
+        };
+
+        if !fact_matches_tenant(fact, tenant) {
+            return Err(MemcoreError::Forbidden);
+        }
+
+        self.deleted
+            .write()
+            .expect("deleted lock poisoned")
+            .insert(fact_id);
+        Ok(())
+    }
+
+    async fn delete_user_data(&self, tenant: &TenantContext) -> MemcoreResult<()> {
+        let key = tenant_key(tenant);
+        let mut facts = self.facts.write().expect("facts lock poisoned");
+        facts.retain(|_, fact| (fact.org_id.as_str(), fact.user_id.as_str()) != (&key.0, &key.1));
+
+        let mut deleted = self.deleted.write().expect("deleted lock poisoned");
+        let remaining_ids: HashSet<Uuid> = facts.keys().copied().collect();
+        deleted.retain(|id| remaining_ids.contains(id));
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MockVectorStore {
+    records: RwLock<HashMap<Uuid, VectorRecord>>,
+}
+
+impl MockVectorStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl VectorStore for MockVectorStore {
+    async fn upsert_vector(
+        &self,
+        tenant: &TenantContext,
+        record: VectorRecord,
+    ) -> MemcoreResult<()> {
+        ensure_record_tenant(&record, tenant)?;
+        self.records
+            .write()
+            .expect("records lock poisoned")
+            .insert(record.id, record);
+        Ok(())
+    }
+
+    async fn search_vectors(
+        &self,
+        query: VectorSearchQuery,
+    ) -> MemcoreResult<Vec<VectorSearchResult>> {
+        let records = self.records.read().expect("records lock poisoned");
+
+        let mut scored: Vec<VectorSearchResult> = records
+            .values()
+            .filter(|record| record_matches_tenant(record, &query.tenant))
+            .filter(|record| {
+                query
+                    .memory_types
+                    .as_ref()
+                    .is_none_or(|types| types.contains(&record.memory_type))
+            })
+            .filter(|record| {
+                query
+                    .metadata_filter
+                    .as_ref()
+                    .is_none_or(|filter| metadata_matches(&record.metadata, filter))
+            })
+            .map(|record| VectorSearchResult {
+                fact_id: record.fact_id,
+                content: record.content.clone(),
+                score: cosine_similarity(&query.embedding, &record.embedding),
+                memory_type: record.memory_type,
+                metadata: record.metadata.clone(),
+            })
+            .collect();
+
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        scored.truncate(query.limit);
+        Ok(scored)
+    }
+
+    async fn delete_by_fact_id(
+        &self,
+        tenant: &TenantContext,
+        fact_id: Uuid,
+    ) -> MemcoreResult<()> {
+        let mut records = self.records.write().expect("records lock poisoned");
+        let before = records.len();
+        records.retain(|_, record| {
+            !(record_matches_tenant(record, tenant) && record.fact_id == fact_id)
+        });
+
+        if records.len() == before {
+            return Err(MemcoreError::NotFound(format!(
+                "vector record not found for fact: {fact_id}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn delete_by_user(&self, tenant: &TenantContext) -> MemcoreResult<()> {
+        let key = tenant_key(tenant);
+        self.records
+            .write()
+            .expect("records lock poisoned")
+            .retain(|_, record| (record.org_id.as_str(), record.user_id.as_str()) != (&key.0, &key.1));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use memcore_core::{MemorySource, MemoryType};
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::{MockFactStore, MockVectorStore};
+    use crate::queries::FactSearchQuery;
+    use crate::traits::{FactStore, VectorStore};
+    use crate::vector::{VectorRecord, VectorSearchQuery};
+
+    fn tenant(org_id: &str, user_id: &str) -> memcore_core::TenantContext {
+        memcore_core::TenantContext::new(org_id, user_id).expect("tenant should be valid")
+    }
+
+    fn sample_fact(
+        org_id: &str,
+        user_id: &str,
+        content: &str,
+        memory_type: MemoryType,
+    ) -> memcore_core::Fact {
+        let now = Utc::now();
+        memcore_core::Fact::new(
+            Uuid::new_v4(),
+            org_id,
+            user_id,
+            memory_type,
+            content,
+            None,
+            MemorySource::UserMessage,
+            0.9,
+            0.8,
+            None,
+            None,
+            now,
+            now,
+            json!({}),
+        )
+        .expect("fact should be valid")
+    }
+
+    fn sample_vector(
+        org_id: &str,
+        user_id: &str,
+        fact_id: Uuid,
+        embedding: Vec<f32>,
+        content: &str,
+        memory_type: MemoryType,
+    ) -> VectorRecord {
+        VectorRecord {
+            id: Uuid::new_v4(),
+            fact_id,
+            org_id: org_id.to_string(),
+            user_id: user_id.to_string(),
+            embedding,
+            content: content.to_string(),
+            memory_type,
+            metadata: json!({ "topic": "rust" }),
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_and_get_fact() {
+        let store = MockFactStore::new();
+        let tenant = tenant("org_a", "user_a");
+        let fact = sample_fact("org_a", "user_a", "learning rust", MemoryType::Skill);
+
+        let inserted = store
+            .insert_fact(&tenant, fact.clone())
+            .await
+            .expect("insert should succeed");
+        assert_eq!(inserted.id, fact.id);
+
+        let fetched = store
+            .get_fact(&tenant, fact.id)
+            .await
+            .expect("get should succeed")
+            .expect("fact should exist");
+        assert_eq!(fetched.content, "learning rust");
+    }
+
+    #[tokio::test]
+    async fn tenant_isolation_for_facts() {
+        let store = MockFactStore::new();
+        let tenant_a = tenant("org_a", "user_a");
+        let tenant_b = tenant("org_a", "user_b");
+        let fact = sample_fact("org_a", "user_a", "private memory", MemoryType::Profile);
+
+        store
+            .insert_fact(&tenant_a, fact.clone())
+            .await
+            .expect("insert should succeed");
+
+        let cross_tenant = store
+            .get_fact(&tenant_b, fact.id)
+            .await
+            .expect("get should succeed");
+        assert!(cross_tenant.is_none());
+    }
+
+    #[tokio::test]
+    async fn search_facts_by_tenant() {
+        let store = MockFactStore::new();
+        let tenant_a = tenant("org_a", "user_a");
+        let tenant_b = tenant("org_b", "user_b");
+
+        store
+            .insert_fact(
+                &tenant_a,
+                sample_fact("org_a", "user_a", "rust backend", MemoryType::Skill),
+            )
+            .await
+            .expect("insert should succeed");
+        store
+            .insert_fact(
+                &tenant_b,
+                sample_fact("org_b", "user_b", "rust backend", MemoryType::Skill),
+            )
+            .await
+            .expect("insert should succeed");
+
+        let query = FactSearchQuery {
+            tenant: tenant_a,
+            memory_types: None,
+            query_text: Some("rust".to_string()),
+            limit: 10,
+            cursor: None,
+            include_deleted: false,
+        };
+
+        let results = store
+            .search_facts(query)
+            .await
+            .expect("search should succeed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].org_id, "org_a");
+    }
+
+    #[tokio::test]
+    async fn soft_delete_fact_hides_from_get() {
+        let store = MockFactStore::new();
+        let tenant = tenant("org_a", "user_a");
+        let fact = sample_fact("org_a", "user_a", "to delete", MemoryType::Task);
+
+        store
+            .insert_fact(&tenant, fact.clone())
+            .await
+            .expect("insert should succeed");
+        store
+            .soft_delete_fact(&tenant, fact.id)
+            .await
+            .expect("soft delete should succeed");
+
+        let fetched = store
+            .get_fact(&tenant, fact.id)
+            .await
+            .expect("get should succeed");
+        assert!(fetched.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_user_data_removes_tenant_facts() {
+        let store = MockFactStore::new();
+        let tenant_a = tenant("org_a", "user_a");
+        let tenant_b = tenant("org_a", "user_b");
+
+        store
+            .insert_fact(
+                &tenant_a,
+                sample_fact("org_a", "user_a", "user a memory", MemoryType::Profile),
+            )
+            .await
+            .expect("insert should succeed");
+        store
+            .insert_fact(
+                &tenant_b,
+                sample_fact("org_a", "user_b", "user b memory", MemoryType::Profile),
+            )
+            .await
+            .expect("insert should succeed");
+
+        store
+            .delete_user_data(&tenant_a)
+            .await
+            .expect("delete user data should succeed");
+
+        let query_a = FactSearchQuery::new(tenant_a, 10);
+        let query_b = FactSearchQuery::new(tenant_b, 10);
+
+        assert!(store.search_facts(query_a).await.expect("search").is_empty());
+        assert_eq!(
+            store.search_facts(query_b).await.expect("search").len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_and_search_vector() {
+        let store = MockVectorStore::new();
+        let tenant = tenant("org_a", "user_a");
+        let fact_id = Uuid::new_v4();
+        let record = sample_vector(
+            "org_a",
+            "user_a",
+            fact_id,
+            vec![1.0, 0.0, 0.0],
+            "rust vector",
+            MemoryType::Skill,
+        );
+
+        store
+            .upsert_vector(&tenant, record)
+            .await
+            .expect("upsert should succeed");
+
+        let query = VectorSearchQuery {
+            tenant,
+            embedding: vec![1.0, 0.0, 0.0],
+            limit: 5,
+            memory_types: None,
+            metadata_filter: None,
+        };
+
+        let results = store
+            .search_vectors(query)
+            .await
+            .expect("search should succeed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].fact_id, fact_id);
+        assert!(results[0].score > 0.99);
+    }
+
+    #[tokio::test]
+    async fn tenant_isolation_for_vectors() {
+        let store = MockVectorStore::new();
+        let tenant_a = tenant("org_a", "user_a");
+        let tenant_b = tenant("org_a", "user_b");
+        let fact_id = Uuid::new_v4();
+
+        store
+            .upsert_vector(
+                &tenant_a,
+                sample_vector(
+                    "org_a",
+                    "user_a",
+                    fact_id,
+                    vec![0.0, 1.0, 0.0],
+                    "private vector",
+                    MemoryType::Preference,
+                ),
+            )
+            .await
+            .expect("upsert should succeed");
+
+        let query = VectorSearchQuery {
+            tenant: tenant_b,
+            embedding: vec![0.0, 1.0, 0.0],
+            limit: 5,
+            memory_types: None,
+            metadata_filter: None,
+        };
+
+        let results = store
+            .search_vectors(query)
+            .await
+            .expect("search should succeed");
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_vector_by_fact_id() {
+        let store = MockVectorStore::new();
+        let tenant = tenant("org_a", "user_a");
+        let fact_id = Uuid::new_v4();
+        let record = sample_vector(
+            "org_a",
+            "user_a",
+            fact_id,
+            vec![1.0, 1.0, 0.0],
+            "delete me",
+            MemoryType::Entity,
+        );
+
+        store
+            .upsert_vector(&tenant, record)
+            .await
+            .expect("upsert should succeed");
+        store
+            .delete_by_fact_id(&tenant, fact_id)
+            .await
+            .expect("delete by fact id should succeed");
+
+        let query = VectorSearchQuery {
+            tenant,
+            embedding: vec![1.0, 1.0, 0.0],
+            limit: 5,
+            memory_types: None,
+            metadata_filter: None,
+        };
+
+        assert!(store
+            .search_vectors(query)
+            .await
+            .expect("search should succeed")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_vectors_by_user() {
+        let store = MockVectorStore::new();
+        let tenant_a = tenant("org_a", "user_a");
+        let tenant_b = tenant("org_a", "user_b");
+
+        store
+            .upsert_vector(
+                &tenant_a,
+                sample_vector(
+                    "org_a",
+                    "user_a",
+                    Uuid::new_v4(),
+                    vec![1.0, 0.0],
+                    "a",
+                    MemoryType::System,
+                ),
+            )
+            .await
+            .expect("upsert should succeed");
+        store
+            .upsert_vector(
+                &tenant_b,
+                sample_vector(
+                    "org_a",
+                    "user_b",
+                    Uuid::new_v4(),
+                    vec![0.0, 1.0],
+                    "b",
+                    MemoryType::System,
+                ),
+            )
+            .await
+            .expect("upsert should succeed");
+
+        store
+            .delete_by_user(&tenant_a)
+            .await
+            .expect("delete by user should succeed");
+
+        let query_a = VectorSearchQuery {
+            tenant: tenant_a,
+            embedding: vec![1.0, 0.0],
+            limit: 5,
+            memory_types: None,
+            metadata_filter: None,
+        };
+        let query_b = VectorSearchQuery {
+            tenant: tenant_b,
+            embedding: vec![0.0, 1.0],
+            limit: 5,
+            memory_types: None,
+            metadata_filter: None,
+        };
+
+        assert!(store
+            .search_vectors(query_a)
+            .await
+            .expect("search")
+            .is_empty());
+        assert_eq!(
+            store
+                .search_vectors(query_b)
+                .await
+                .expect("search")
+                .len(),
+            1
+        );
+    }
+}
