@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/memcore-api",
+    "crates/memcore-core",
+    "crates/memcore-storage",
+    "crates/memcore-providers",
+    "crates/memcore-config",
+    "crates/memcore-common",
+]
+resolver = "3"

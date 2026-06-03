@@ -1,0 +1,16 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+**/*.tmp
+**/*.log
+
+# Ignore project docs and planning files
+/docs/
+project_plan.md
+
+# Visual Studio Code
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
