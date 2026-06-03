@@ -50,6 +50,21 @@ impl ErrorBody {
             MemcoreError::Internal(_) => "INTERNAL_ERROR",
         };
 
-        (status, Self::new(code, error.message()))
+        (status, Self::new(code, api_error_message(&error)))
+    }
+}
+
+fn api_error_message(error: &MemcoreError) -> String {
+    match error {
+        MemcoreError::ValidationError(message)
+        | MemcoreError::BadRequest(message)
+        | MemcoreError::NotFound(message)
+        | MemcoreError::Conflict(message)
+        | MemcoreError::ProviderError(message)
+        | MemcoreError::StorageError(message)
+        | MemcoreError::Internal(message) => message.clone(),
+        MemcoreError::Unauthorized => "unauthorized".to_string(),
+        MemcoreError::Forbidden => "forbidden".to_string(),
+        MemcoreError::RateLimited => "rate limited".to_string(),
     }
 }

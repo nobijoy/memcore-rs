@@ -897,6 +897,9 @@ dependencies = [
  "http-body-util",
  "memcore-common",
  "memcore-config",
+ "memcore-core",
+ "memcore-providers",
+ "memcore-storage",
  "serde",
  "serde_json",
  "tokio",
@@ -904,6 +907,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
