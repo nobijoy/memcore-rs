@@ -22,6 +22,10 @@ const MEMCORE_ENABLE_PII_REDACTION: &str = "MEMCORE_ENABLE_PII_REDACTION";
 const MEMCORE_MIN_IMPORTANCE: &str = "MEMCORE_MIN_IMPORTANCE";
 const MEMCORE_AUTH_ENABLED: &str = "MEMCORE_AUTH_ENABLED";
 const MEMCORE_DEV_API_KEY: &str = "MEMCORE_DEV_API_KEY";
+const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
+const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
+
+pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Environment {
@@ -87,6 +91,10 @@ pub struct Settings {
     pub auth_enabled: bool,
     /// Temporary plaintext dev API key. Do not log this value.
     pub dev_api_key: String,
+    /// OpenAI API key. Required only when LLM or embedding provider is OpenAI.
+    pub openai_api_key: Option<String>,
+    /// OpenAI API base URL (supports OpenAI-compatible gateways).
+    pub openai_base_url: String,
 }
 
 impl Default for Settings {
@@ -111,6 +119,8 @@ impl Default for Settings {
             min_importance: 0.55,
             auth_enabled: true,
             dev_api_key: "memcore_dev_key".to_string(),
+            openai_api_key: None,
+            openai_base_url: DEFAULT_OPENAI_BASE_URL.to_string(),
         }
     }
 }
@@ -145,6 +155,8 @@ impl Settings {
         let min_importance = parse_f32(MEMCORE_MIN_IMPORTANCE, defaults.min_importance)?;
         let auth_enabled = parse_bool(MEMCORE_AUTH_ENABLED, defaults.auth_enabled)?;
         let dev_api_key = read_env_or(MEMCORE_DEV_API_KEY, &defaults.dev_api_key);
+        let openai_api_key = read_env_optional(OPENAI_API_KEY);
+        let openai_base_url = read_env_or(OPENAI_BASE_URL, &defaults.openai_base_url);
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -172,6 +184,8 @@ impl Settings {
             min_importance,
             auth_enabled,
             dev_api_key,
+            openai_api_key,
+            openai_base_url,
         };
 
         settings.validate()?;
@@ -230,6 +244,27 @@ impl Settings {
         if self.auth_enabled && self.dev_api_key.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_DEV_API_KEY cannot be empty when MEMCORE_AUTH_ENABLED=true".to_string(),
+            ));
+        }
+
+        if self.openai_base_url.trim().is_empty() {
+            return Err(MemcoreError::ValidationError(
+                "OPENAI_BASE_URL cannot be empty".to_string(),
+            ));
+        }
+
+        let needs_openai_key = self.llm_provider == LlmProviderKind::OpenAi
+            || self.embedding_provider == EmbeddingProviderKind::OpenAi;
+        if needs_openai_key
+            && self
+                .openai_api_key
+                .as_ref()
+                .map(|k| k.trim().is_empty())
+                .unwrap_or(true)
+        {
+            return Err(MemcoreError::ValidationError(
+                "OPENAI_API_KEY is required when MEMCORE_LLM_PROVIDER or MEMCORE_EMBEDDING_PROVIDER is openai"
+                    .to_string(),
             ));
         }
 
@@ -400,7 +435,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 19] = [
+    const ENV_KEYS: [&str; 21] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -420,6 +455,8 @@ mod tests {
         "MEMCORE_MIN_IMPORTANCE",
         "MEMCORE_AUTH_ENABLED",
         "MEMCORE_DEV_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
     ];
 
     fn env_test_lock() -> &'static Mutex<()> {
@@ -582,6 +619,37 @@ mod tests {
                 .to_string()
                 .contains("MEMCORE_MIN_IMPORTANCE must be between 0.0 and 1.0")
         );
+    }
+
+    #[test]
+    fn openai_provider_requires_api_key() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_LLM_PROVIDER", "openai");
+        }
+
+        let error = Settings::from_env().expect_err("openai without key should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(error.to_string().contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn openai_api_key_not_required_for_mock_providers() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        let settings = Settings::from_env().expect("mock providers should load without openai key");
+        assert_eq!(settings.llm_provider, super::LlmProviderKind::Mock);
+        assert!(settings.openai_api_key.is_none());
     }
 
     #[test]
