@@ -78,6 +78,6 @@ async fn ready_response_contains_config_derived_values() {
     assert_eq!(json["status"], "ready");
     assert_eq!(json["environment"], "development");
     assert_eq!(json["storage_mode"], "embedded");
-    assert_eq!(json["vector_backend"], "lancedb");
+    assert_eq!(json["vector_backend"], "mock");
     assert_eq!(json["fact_backend"], "mock");
 }

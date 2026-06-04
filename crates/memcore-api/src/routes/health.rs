@@ -57,6 +57,7 @@ fn storage_mode_label(storage_mode: &StorageMode) -> &'static str {
 
 fn vector_backend_label(vector_backend: &VectorBackend) -> &'static str {
     match vector_backend {
+        VectorBackend::Mock => "mock",
         VectorBackend::LanceDb => "lancedb",
         VectorBackend::Qdrant => "qdrant",
     }

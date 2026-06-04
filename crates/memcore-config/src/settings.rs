@@ -13,6 +13,7 @@ const MEMCORE_DATABASE_URL: &str = "MEMCORE_DATABASE_URL";
 const MEMCORE_POSTGRES_URL: &str = "MEMCORE_POSTGRES_URL";
 const MEMCORE_QDRANT_URL: &str = "MEMCORE_QDRANT_URL";
 const MEMCORE_LANCEDB_PATH: &str = "MEMCORE_LANCEDB_PATH";
+const MEMCORE_LANCEDB_TABLE: &str = "MEMCORE_LANCEDB_TABLE";
 const MEMCORE_LLM_PROVIDER: &str = "MEMCORE_LLM_PROVIDER";
 const MEMCORE_LLM_MODEL: &str = "MEMCORE_LLM_MODEL";
 const MEMCORE_EMBEDDING_PROVIDER: &str = "MEMCORE_EMBEDDING_PROVIDER";
@@ -36,6 +37,7 @@ pub enum StorageMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VectorBackend {
+    Mock,
     LanceDb,
     Qdrant,
 }
@@ -74,6 +76,7 @@ pub struct Settings {
     pub postgres_url: Option<String>,
     pub qdrant_url: String,
     pub lancedb_path: String,
+    pub lancedb_table: String,
     pub llm_provider: LlmProviderKind,
     pub llm_model: String,
     pub embedding_provider: EmbeddingProviderKind,
@@ -93,12 +96,13 @@ impl Default for Settings {
             host: "0.0.0.0".to_string(),
             port: 8080,
             storage_mode: StorageMode::Embedded,
-            vector_backend: VectorBackend::LanceDb,
+            vector_backend: VectorBackend::Mock,
             fact_backend: FactBackend::Mock,
             database_url: "sqlite://./data/memcore.db".to_string(),
             postgres_url: None,
             qdrant_url: "http://localhost:6333".to_string(),
             lancedb_path: "./data/lancedb".to_string(),
+            lancedb_table: "memcore_vectors".to_string(),
             llm_provider: LlmProviderKind::Mock,
             llm_model: "mock-llm".to_string(),
             embedding_provider: EmbeddingProviderKind::Mock,
@@ -127,6 +131,7 @@ impl Settings {
         let postgres_url = read_env_optional(MEMCORE_POSTGRES_URL);
         let qdrant_url = read_env_or(MEMCORE_QDRANT_URL, &defaults.qdrant_url);
         let lancedb_path = read_env_or(MEMCORE_LANCEDB_PATH, &defaults.lancedb_path);
+        let lancedb_table = read_env_or(MEMCORE_LANCEDB_TABLE, &defaults.lancedb_table);
         let llm_provider =
             LlmProviderKind::from_str(&read_env_or(MEMCORE_LLM_PROVIDER, "mock"))?;
         let llm_model = read_env_or(MEMCORE_LLM_MODEL, &defaults.llm_model);
@@ -158,6 +163,7 @@ impl Settings {
             postgres_url,
             qdrant_url,
             lancedb_path,
+            lancedb_table,
             llm_provider,
             llm_model,
             embedding_provider,
@@ -177,6 +183,15 @@ impl Settings {
         Self {
             fact_backend: FactBackend::Sqlite,
             database_url: "sqlite::memory:?cache=shared".to_string(),
+            ..Self::default()
+        }
+    }
+
+    /// LanceDB vector store with mock facts (API integration tests).
+    pub fn lancedb_with_path(lancedb_path: impl Into<String>) -> Self {
+        Self {
+            vector_backend: VectorBackend::LanceDb,
+            lancedb_path: lancedb_path.into(),
             ..Self::default()
         }
     }
@@ -203,6 +218,12 @@ impl Settings {
         if self.lancedb_path.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_LANCEDB_PATH cannot be empty".to_string(),
+            ));
+        }
+
+        if self.lancedb_table.trim().is_empty() {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_LANCEDB_TABLE cannot be empty".to_string(),
             ));
         }
 
@@ -316,6 +337,7 @@ impl FromStr for VectorBackend {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
+            "mock" => Ok(Self::Mock),
             "lancedb" => Ok(Self::LanceDb),
             "qdrant" => Ok(Self::Qdrant),
             _ => Err(MemcoreError::ValidationError(format!(
@@ -378,7 +400,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 18] = [
+    const ENV_KEYS: [&str; 19] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -389,6 +411,7 @@ mod tests {
         "MEMCORE_POSTGRES_URL",
         "MEMCORE_QDRANT_URL",
         "MEMCORE_LANCEDB_PATH",
+        "MEMCORE_LANCEDB_TABLE",
         "MEMCORE_LLM_PROVIDER",
         "MEMCORE_LLM_MODEL",
         "MEMCORE_EMBEDDING_PROVIDER",
@@ -460,9 +483,10 @@ mod tests {
     }
 
     #[test]
-    fn default_struct_uses_mock_fact_backend() {
+    fn default_struct_uses_mock_backends() {
         let settings = Settings::default();
         assert_eq!(settings.fact_backend, super::FactBackend::Mock);
+        assert_eq!(settings.vector_backend, super::VectorBackend::Mock);
     }
 
     #[test]
