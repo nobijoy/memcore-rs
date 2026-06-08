@@ -4,7 +4,7 @@ mod llm;
 mod types;
 
 pub use client::OpenAiClient;
-pub use embeddings::OpenAiEmbeddingProvider;
+pub use embeddings::{OpenAiEmbeddingProvider, default_embedding_dimensions_for_model};
 pub use llm::OpenAiLlmProvider;
 
 #[cfg(test)]

@@ -13,6 +13,15 @@ pub struct OpenAiEmbeddingProvider {
     dimensions: usize,
 }
 
+/// Default output dimensions for common OpenAI embedding models (used at API bootstrap).
+pub fn default_embedding_dimensions_for_model(model: &str) -> usize {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "text-embedding-3-large" => 3072,
+        "text-embedding-3-small" | "text-embedding-ada-002" => 1536,
+        _ => 1536,
+    }
+}
+
 impl OpenAiEmbeddingProvider {
     pub fn new(client: OpenAiClient, model: impl Into<String>, dimensions: usize) -> MemcoreResult<Self> {
         if dimensions == 0 {
@@ -109,6 +118,19 @@ impl EmbeddingProvider for OpenAiEmbeddingProvider {
 mod tests {
     use super::*;
     use crate::traits::EmbeddingProvider;
+
+    #[test]
+    fn default_dimensions_for_known_models() {
+        assert_eq!(
+            default_embedding_dimensions_for_model("text-embedding-3-small"),
+            1536
+        );
+        assert_eq!(
+            default_embedding_dimensions_for_model("text-embedding-3-large"),
+            3072
+        );
+        assert_eq!(default_embedding_dimensions_for_model("unknown-model"), 1536);
+    }
 
     #[test]
     fn zero_dimensions_rejected_at_construction() {

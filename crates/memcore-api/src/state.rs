@@ -2,15 +2,20 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
-use memcore_config::{FactBackend, Settings, VectorBackend};
+use memcore_config::{
+    EmbeddingProviderKind, FactBackend, LlmProviderKind, Settings, VectorBackend,
+};
 use memcore_core::{EmbeddingProvider, FactStore, LlmProvider, MemoryEngine, VectorStore};
-use memcore_providers::{MockEmbeddingProvider, MockLlmProvider};
+use memcore_providers::{
+    MockEmbeddingProvider, MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider,
+    OpenAiLlmProvider, default_embedding_dimensions_for_model,
+};
 use memcore_storage::{MockFactStore, MockVectorStore, SqliteFactStore};
 #[cfg(feature = "lancedb")]
 use memcore_storage::LanceDbVectorStore;
 
-/// Default embedding dimensions for the mock embedding provider until config exposes this.
-const DEFAULT_EMBEDDING_DIMENSIONS: usize = 4;
+/// Default embedding dimensions for the mock embedding provider.
+const MOCK_EMBEDDING_DIMENSIONS: usize = 4;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -20,7 +25,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Builds application state using configured storage and mock providers.
+    /// Builds application state using configured storage and providers.
     pub async fn initialize(settings: Settings) -> MemcoreResult<Self> {
         let memory_engine = Arc::new(create_memory_engine(&settings).await?);
         Ok(Self {
@@ -60,12 +65,11 @@ impl AppState {
     }
 }
 
-/// Wires `MemoryEngine` from settings: configurable fact/vector stores, mock LLM/embedding.
+/// Wires `MemoryEngine` from settings: configurable fact/vector stores and LLM/embedding providers.
 pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEngine> {
     let fact_store = create_fact_store(settings).await?;
-    let llm_provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::new());
-    let embedding_provider: Arc<dyn EmbeddingProvider> =
-        Arc::new(MockEmbeddingProvider::new(DEFAULT_EMBEDDING_DIMENSIONS));
+    let llm_provider = create_llm_provider(settings)?;
+    let embedding_provider = create_embedding_provider(settings)?;
     let vector_store =
         create_vector_store(settings, embedding_provider.dimensions()).await?;
 
@@ -76,6 +80,70 @@ pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEn
         embedding_provider,
     )
     .with_pii_redaction(settings.enable_pii_redaction))
+}
+
+fn create_llm_provider(settings: &Settings) -> MemcoreResult<Arc<dyn LlmProvider>> {
+    match settings.llm_provider {
+        LlmProviderKind::Mock => Ok(Arc::new(MockLlmProvider::new())),
+        LlmProviderKind::OpenAi => {
+            let api_key = require_openai_api_key(
+                settings,
+                "OPENAI_API_KEY is required when MEMCORE_LLM_PROVIDER=openai",
+            )?;
+            let client = OpenAiClient::new(&api_key, &settings.openai_base_url).map_err(|err| {
+                provider_init_error("OpenAI LLM", err)
+            })?;
+            Ok(Arc::new(OpenAiLlmProvider::new(client, settings.llm_model.clone())))
+        }
+        LlmProviderKind::OpenRouter => Err(MemcoreError::ValidationError(
+            "openrouter LLM provider is not wired into the API yet".to_string(),
+        )),
+        LlmProviderKind::Anthropic => Err(MemcoreError::ValidationError(
+            "anthropic LLM provider is not wired into the API yet".to_string(),
+        )),
+        LlmProviderKind::Groq => Err(MemcoreError::ValidationError(
+            "groq LLM provider is not wired into the API yet".to_string(),
+        )),
+    }
+}
+
+fn create_embedding_provider(settings: &Settings) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
+    match settings.embedding_provider {
+        EmbeddingProviderKind::Mock => {
+            Ok(Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS)))
+        }
+        EmbeddingProviderKind::OpenAi => {
+            let api_key = require_openai_api_key(
+                settings,
+                "OPENAI_API_KEY is required when MEMCORE_EMBEDDING_PROVIDER=openai",
+            )?;
+            let client = OpenAiClient::new(&api_key, &settings.openai_base_url).map_err(|err| {
+                provider_init_error("OpenAI embedding", err)
+            })?;
+            let dimensions =
+                default_embedding_dimensions_for_model(&settings.embedding_model);
+            let provider = OpenAiEmbeddingProvider::new(
+                client,
+                settings.embedding_model.clone(),
+                dimensions,
+            )
+            .map_err(|err| provider_init_error("OpenAI embedding", err))?;
+            Ok(Arc::new(provider))
+        }
+    }
+}
+
+fn require_openai_api_key(settings: &Settings, message: &str) -> MemcoreResult<String> {
+    settings
+        .openai_api_key
+        .as_ref()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| MemcoreError::ValidationError(message.to_string()))
+}
+
+fn provider_init_error(provider: &str, err: MemcoreError) -> MemcoreError {
+    MemcoreError::ValidationError(format!("failed to initialize {provider} provider: {err}"))
 }
 
 async fn create_fact_store(settings: &Settings) -> MemcoreResult<Arc<dyn FactStore>> {
@@ -128,7 +196,7 @@ pub fn create_mock_memory_engine(settings: &Settings) -> MemoryEngine {
         Arc::new(MockFactStore::new()),
         Arc::new(MockVectorStore::new()),
         Arc::new(MockLlmProvider::new()),
-        Arc::new(MockEmbeddingProvider::new(DEFAULT_EMBEDDING_DIMENSIONS)),
+        Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS)),
     )
     .with_pii_redaction(settings.enable_pii_redaction)
 }

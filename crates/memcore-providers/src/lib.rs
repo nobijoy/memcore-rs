@@ -7,5 +7,7 @@ pub use inputs::{
     FactClassificationInput, FactExtractionInput, MemoryMessage, MessageRole, SummarizationInput,
 };
 pub use mocks::{MockEmbeddingProvider, MockLlmProvider, deterministic_embedding};
-pub use openai::{OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider};
+pub use openai::{
+    OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider, default_embedding_dimensions_for_model,
+};
 pub use traits::{EmbeddingProvider, LlmProvider};
