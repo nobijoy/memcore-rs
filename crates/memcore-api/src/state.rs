@@ -112,8 +112,7 @@ async fn create_vector_store(
             {
                 let _ = dimensions;
                 Err(MemcoreError::ValidationError(
-                    "lancedb vector backend requires the memcore-api 'lancedb' feature"
-                        .to_string(),
+                    "LanceDB vector backend requires the `lancedb` cargo feature".to_string(),
                 ))
             }
         }

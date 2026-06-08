@@ -8,6 +8,7 @@ name = "memcore_api"
 path = "src/lib.rs"
 
 [features]
+default = []
 lancedb = ["memcore-storage/lancedb"]
 
 [[bin]]
