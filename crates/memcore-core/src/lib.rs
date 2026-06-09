@@ -1,5 +1,6 @@
 pub mod context;
 pub mod engine;
+pub mod lifecycle;
 pub mod models;
 pub mod ports;
 pub mod privacy;

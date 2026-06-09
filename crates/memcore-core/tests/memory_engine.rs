@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, FactStore,
-    ForgetUserInput, ListMemoriesInput, MemoryEngine, MemoryMessage, MemoryType, MessageRole,
-    SearchMemoryInput, TenantContext, VectorSearchQuery, VectorStore, EMPTY_CONTEXT_MESSAGE,
+    AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, FactOperation,
+    FactOperationDecision, FactStore, ForgetUserInput, ListMemoriesInput, MemoryEngine,
+    MemoryMessage, MemoryType, MessageRole, SearchMemoryInput, TenantContext, VectorSearchQuery,
+    VectorStore, EMPTY_CONTEXT_MESSAGE,
 };
 use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -755,4 +756,636 @@ async fn forget_user_removes_facts_and_vectors_for_tenant_only() {
         .await
         .expect("list should succeed");
     assert_eq!(listed_b.memories.len(), 1);
+}
+
+fn high_importance_candidate(content: &str) -> CandidateFact {
+    CandidateFact::new(content, MemoryType::Preference, 0.9, 0.8, None, json!({}))
+        .expect("candidate should be valid")
+}
+
+#[tokio::test]
+async fn noop_operation_does_not_insert_fact() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("skip me")])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::NoOp,
+                target_fact_id: None,
+                reason: Some("duplicate".to_string()),
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let output = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "skip me".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory should succeed");
+
+    assert_eq!(output.added, 0);
+    assert_eq!(output.noop, 1);
+    assert!(output.memories.is_empty());
+
+    let listed = engine
+        .list_memories(ListMemoriesInput {
+            tenant,
+            memory_type: None,
+            limit: 20,
+            cursor: None,
+            include_deleted: false,
+        })
+        .await
+        .expect("list should succeed");
+    assert!(listed.memories.is_empty());
+}
+
+#[tokio::test]
+async fn update_operation_updates_existing_fact() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let initial = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "User prefers Python.".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("initial add should succeed");
+
+    let target_id = initial.memories[0].id;
+    let updated_candidate = high_importance_candidate("User prefers Rust.");
+
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![updated_candidate])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Update,
+                target_fact_id: Some(target_id),
+                reason: Some("preference changed".to_string()),
+                confidence: 0.95,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let output = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "User prefers Rust.".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("update should succeed");
+
+    assert_eq!(output.added, 0);
+    assert_eq!(output.updated, 1);
+    assert_eq!(output.memories.len(), 1);
+    assert_eq!(output.memories[0].content, "User prefers Rust.");
+
+    let stored = fact_store
+        .get_fact(&tenant, target_id)
+        .await
+        .expect("get should succeed")
+        .expect("fact should exist");
+    assert_eq!(stored.content, "User prefers Rust.");
+}
+
+#[tokio::test]
+async fn update_operation_updates_vector_embedding() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let vector_store = Arc::new(MockVectorStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        vector_store.clone(),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let initial = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "old content".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("initial add should succeed");
+
+    let target_id = initial.memories[0].id;
+    let new_content = "new content";
+    let engine = engine_with_mocks(
+        fact_store,
+        vector_store.clone(),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate(new_content)])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Update,
+                target_fact_id: Some(target_id),
+                reason: None,
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: new_content.to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("update should succeed");
+
+    let expected =
+        deterministic_embedding(new_content, 4).expect("deterministic embedding should succeed");
+    let results = vector_store
+        .search_vectors(VectorSearchQuery {
+            tenant,
+            embedding: expected,
+            limit: 5,
+            memory_types: None,
+            metadata_filter: None,
+        })
+        .await
+        .expect("vector search should succeed");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].fact_id, target_id);
+    assert_eq!(results[0].content, new_content);
+    assert!(results[0].score > 0.99);
+}
+
+#[tokio::test]
+async fn delete_operation_soft_deletes_fact_via_lifecycle() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let vector_store = Arc::new(MockVectorStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        vector_store.clone(),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let initial = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "remove this".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("initial add should succeed");
+
+    let target_id = initial.memories[0].id;
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        vector_store.clone(),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("remove this")])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Delete,
+                target_fact_id: Some(target_id),
+                reason: Some("obsolete".to_string()),
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let output = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "remove this".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("delete lifecycle should succeed");
+
+    assert_eq!(output.deleted, 1);
+    assert_eq!(output.added, 0);
+    assert!(output.memories.is_empty());
+
+    let fact = fact_store
+        .get_fact(&tenant, target_id)
+        .await
+        .expect("get should succeed");
+    assert!(fact.is_none());
+}
+
+#[tokio::test]
+async fn delete_operation_removes_vector_via_lifecycle() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let vector_store = Arc::new(MockVectorStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        vector_store.clone(),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let content = "vector delete target";
+    let initial = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: content.to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("initial add should succeed");
+
+    let target_id = initial.memories[0].id;
+    let engine = engine_with_mocks(
+        fact_store,
+        vector_store.clone(),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate(content)])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Delete,
+                target_fact_id: Some(target_id),
+                reason: None,
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: content.to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("delete lifecycle should succeed");
+
+    let embedding =
+        deterministic_embedding(content, 4).expect("deterministic embedding should succeed");
+    let results = vector_store
+        .search_vectors(VectorSearchQuery {
+            tenant,
+            embedding,
+            limit: 5,
+            memory_types: None,
+            metadata_filter: None,
+        })
+        .await
+        .expect("vector search should succeed");
+    assert!(results.is_empty());
+}
+
+#[tokio::test]
+async fn update_without_target_fact_id_returns_validation_error() {
+    let engine = engine_with_mocks(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("updated")])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Update,
+                target_fact_id: None,
+                reason: None,
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let error = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant("org_a", "user_a"),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "updated".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect_err("update without target should fail");
+
+    assert_eq!(error.code(), "validation_error");
+    assert!(error.to_string().contains("target_fact_id is required"));
+}
+
+#[tokio::test]
+async fn delete_without_target_fact_id_returns_validation_error() {
+    let engine = engine_with_mocks(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("deleted")])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Delete,
+                target_fact_id: None,
+                reason: None,
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let error = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant("org_a", "user_a"),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "deleted".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect_err("delete without target should fail");
+
+    assert_eq!(error.code(), "validation_error");
+    assert!(error.to_string().contains("target_fact_id is required"));
+}
+
+#[tokio::test]
+async fn update_target_from_another_tenant_returns_not_found() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant_a = tenant("org_a", "user_a");
+    let tenant_b = tenant("org_a", "user_b");
+    let initial = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant_a.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "user a fact".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("initial add should succeed");
+
+    let target_id = initial.memories[0].id;
+    let engine = engine_with_mocks(
+        fact_store,
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("user b update")])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Update,
+                target_fact_id: Some(target_id),
+                reason: None,
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let error = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant_b,
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "user b update".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect_err("cross-tenant update should fail");
+
+    assert_eq!(
+        error,
+        MemcoreError::NotFound("memory not found".to_string())
+    );
+}
+
+#[tokio::test]
+async fn delete_target_from_another_tenant_returns_not_found() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant_a = tenant("org_a", "user_a");
+    let tenant_b = tenant("org_a", "user_b");
+    let initial = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant_a.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "user a fact".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("initial add should succeed");
+
+    let target_id = initial.memories[0].id;
+    let engine = engine_with_mocks(
+        fact_store,
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("user b delete")])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Delete,
+                target_fact_id: Some(target_id),
+                reason: None,
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let error = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant_b,
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "user b delete".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect_err("cross-tenant delete should fail");
+
+    assert_eq!(
+        error,
+        MemcoreError::NotFound("memory not found".to_string())
+    );
+}
+
+#[tokio::test]
+async fn lifecycle_operation_summary_counts_are_correct() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let engine = engine_with_mocks(
+        fact_store.clone(),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new(),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let tenant = tenant("org_a", "user_a");
+    let initial = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant.clone(),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "seed fact".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("seed add should succeed");
+
+    let target_id = initial.memories[0].id;
+    let engine = engine_with_mocks(
+        fact_store,
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![
+                high_importance_candidate("updated fact"),
+                high_importance_candidate("noop fact"),
+                high_importance_candidate("deleted fact"),
+            ])
+            .with_classification_decisions(vec![
+                FactOperationDecision {
+                    operation: FactOperation::Update,
+                    target_fact_id: Some(target_id),
+                    reason: None,
+                    confidence: 0.9,
+                },
+                FactOperationDecision {
+                    operation: FactOperation::NoOp,
+                    target_fact_id: None,
+                    reason: None,
+                    confidence: 0.9,
+                },
+                FactOperationDecision {
+                    operation: FactOperation::Delete,
+                    target_fact_id: Some(target_id),
+                    reason: None,
+                    confidence: 0.9,
+                },
+            ]),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let output = engine
+        .add_memory(AddMemoryInput {
+            tenant,
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "batch lifecycle".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("lifecycle batch should succeed");
+
+    assert_eq!(output.added, 0);
+    assert_eq!(output.updated, 1);
+    assert_eq!(output.noop, 1);
+    assert_eq!(output.deleted, 1);
+}
+
+#[tokio::test]
+async fn archive_operation_is_treated_as_noop() {
+    let engine = engine_with_mocks(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("archive me")])
+            .with_classification_decision(FactOperationDecision {
+                operation: FactOperation::Archive,
+                target_fact_id: None,
+                reason: None,
+                confidence: 0.9,
+            }),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let output = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant("org_a", "user_a"),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "archive me".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("archive should noop");
+
+    assert_eq!(output.noop, 1);
+    assert_eq!(output.added, 0);
+}
+
+#[tokio::test]
+async fn classification_provider_error_propagates() {
+    let engine = engine_with_mocks(
+        Arc::new(MockFactStore::new()),
+        Arc::new(MockVectorStore::new()),
+        MockLlmProvider::new()
+            .with_extraction_candidates(vec![high_importance_candidate("fail classify")])
+            .with_classification_fail_error(MemcoreError::ProviderError(
+                "classification unavailable".to_string(),
+            )),
+        MockEmbeddingProvider::new(4),
+    );
+
+    let error = engine
+        .add_memory(AddMemoryInput {
+            tenant: tenant("org_a", "user_a"),
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "fail classify".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect_err("classification failure should propagate");
+
+    assert_eq!(
+        error,
+        MemcoreError::ProviderError("classification unavailable".to_string())
+    );
 }

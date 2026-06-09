@@ -2,20 +2,18 @@ mod types;
 
 use std::sync::Arc;
 
-use chrono::Utc;
-use memcore_common::{MemcoreError, MemcoreResult};
-use uuid::Uuid;
+use memcore_common::MemcoreResult;
 
-use crate::{
-    assemble_context, BuildContextInput, BuildContextOutput, CandidateFact, Fact,
-    MemorySearchResult, MemorySource, TenantContext,
-};
 use crate::privacy::redact_messages_for_extraction;
 use crate::ports::MemoryMessage;
 use crate::ports::{
-    EmbeddingProvider, FactExtractionInput, FactSearchQuery, FactStore, LlmProvider, VectorRecord,
-    VectorSearchQuery, VectorStore,
+    EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
+    LlmProvider, VectorStore,
 };
+use crate::lifecycle::{
+    apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
+};
+use crate::{assemble_context, BuildContextInput, BuildContextOutput, MemorySearchResult, TenantContext};
 
 pub use types::{
     AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ForgetUserInput,
@@ -88,6 +86,12 @@ impl MemoryEngine {
         };
         let mut memories = Vec::new();
 
+        let lifecycle_ctx = LifecycleContext {
+            fact_store: self.fact_store.as_ref(),
+            vector_store: self.vector_store.as_ref(),
+            embedding_provider: self.embedding_provider.as_ref(),
+        };
+
         for candidate in candidates {
             if !passes_importance_threshold(&candidate, self.min_importance) {
                 summary.noop += 1;
@@ -96,34 +100,43 @@ impl MemoryEngine {
 
             validate_candidate(&candidate)?;
 
-            let fact = candidate_to_fact(&input.tenant, &candidate, &input.metadata)?;
-            let inserted = self
-                .fact_store
-                .insert_fact(&input.tenant, fact)
+            let related_facts =
+                find_related_facts(self.fact_store.as_ref(), &input.tenant, &candidate).await?;
+
+            let decision = self
+                .llm_provider
+                .classify_fact_operation(FactClassificationInput {
+                    tenant: input.tenant.clone(),
+                    candidate_fact: candidate.clone(),
+                    existing_facts: related_facts,
+                })
                 .await?;
 
-            let embedding = self
-                .embedding_provider
-                .embed_text(&inserted.content)
-                .await?;
+            let result = apply_fact_operation(
+                &lifecycle_ctx,
+                &input.tenant,
+                &candidate,
+                &decision,
+                &input.metadata,
+            )
+            .await?;
 
-            let vector_record = VectorRecord {
-                id: Uuid::new_v4(),
-                fact_id: inserted.id,
-                org_id: input.tenant.org_id.clone(),
-                user_id: input.tenant.user_id.clone(),
-                embedding,
-                content: inserted.content.clone(),
-                memory_type: inserted.memory_type,
-                metadata: inserted.metadata.clone(),
-            };
-
-            self.vector_store
-                .upsert_vector(&input.tenant, vector_record)
-                .await?;
-
-            summary.added += 1;
-            memories.push(inserted);
+            match result {
+                LifecycleApplyResult::Added(fact) => {
+                    summary.added += 1;
+                    memories.push(fact);
+                }
+                LifecycleApplyResult::Updated(fact) => {
+                    summary.updated += 1;
+                    memories.push(fact);
+                }
+                LifecycleApplyResult::Deleted => {
+                    summary.deleted += 1;
+                }
+                LifecycleApplyResult::NoOp => {
+                    summary.noop += 1;
+                }
+            }
         }
 
         Ok(AddMemoryOutput {
@@ -147,7 +160,7 @@ impl MemoryEngine {
 
         let vector_results = self
             .vector_store
-            .search_vectors(VectorSearchQuery {
+            .search_vectors(crate::ports::VectorSearchQuery {
                 tenant: input.tenant.clone(),
                 embedding,
                 limit,
@@ -252,7 +265,9 @@ impl MemoryEngine {
             .await?;
 
         if exists.is_none() {
-            return Err(MemcoreError::NotFound("memory not found".to_string()));
+            return Err(memcore_common::MemcoreError::NotFound(
+                "memory not found".to_string(),
+            ));
         }
 
         self.fact_store
@@ -293,6 +308,8 @@ fn messages_for_llm_extraction(
 }
 
 fn validate_tenant(tenant: &TenantContext) -> MemcoreResult<()> {
+    use memcore_common::MemcoreError;
+
     if tenant.org_id.trim().is_empty() {
         return Err(MemcoreError::ValidationError(
             "org_id cannot be empty".to_string(),
@@ -307,6 +324,8 @@ fn validate_tenant(tenant: &TenantContext) -> MemcoreResult<()> {
 }
 
 fn validate_query(query: &str) -> MemcoreResult<()> {
+    use memcore_common::MemcoreError;
+
     if query.trim().is_empty() {
         return Err(MemcoreError::ValidationError(
             "query cannot be empty".to_string(),
@@ -316,6 +335,8 @@ fn validate_query(query: &str) -> MemcoreResult<()> {
 }
 
 fn normalize_context_max_memories(max_memories: usize) -> MemcoreResult<usize> {
+    use memcore_common::MemcoreError;
+
     if max_memories == 0 {
         return Err(MemcoreError::ValidationError(
             "max_memories must be greater than 0".to_string(),
@@ -333,6 +354,8 @@ fn normalize_context_max_memories(max_memories: usize) -> MemcoreResult<usize> {
 }
 
 fn normalize_list_limit(limit: usize) -> MemcoreResult<usize> {
+    use memcore_common::MemcoreError;
+
     if limit == 0 {
         return Err(MemcoreError::ValidationError(
             "limit must be greater than 0".to_string(),
@@ -350,6 +373,8 @@ fn normalize_list_limit(limit: usize) -> MemcoreResult<usize> {
 }
 
 fn normalize_search_limit(limit: usize) -> MemcoreResult<usize> {
+    use memcore_common::MemcoreError;
+
     if limit == 0 {
         return Err(MemcoreError::ValidationError(
             "limit must be greater than 0".to_string(),
@@ -367,6 +392,8 @@ fn normalize_search_limit(limit: usize) -> MemcoreResult<usize> {
 }
 
 fn validate_messages(messages: &[crate::ports::MemoryMessage]) -> MemcoreResult<()> {
+    use memcore_common::MemcoreError;
+
     if messages.is_empty() {
         return Err(MemcoreError::ValidationError(
             "messages cannot be empty".to_string(),
@@ -384,7 +411,9 @@ fn validate_messages(messages: &[crate::ports::MemoryMessage]) -> MemcoreResult<
     Ok(())
 }
 
-fn validate_candidate(candidate: &CandidateFact) -> MemcoreResult<()> {
+fn validate_candidate(candidate: &crate::CandidateFact) -> MemcoreResult<()> {
+    use memcore_common::MemcoreError;
+
     if candidate.content.trim().is_empty() {
         return Err(MemcoreError::ValidationError(
             "candidate fact content cannot be empty".to_string(),
@@ -406,34 +435,6 @@ fn validate_candidate(candidate: &CandidateFact) -> MemcoreResult<()> {
     Ok(())
 }
 
-fn passes_importance_threshold(candidate: &CandidateFact, min_importance: f32) -> bool {
+fn passes_importance_threshold(candidate: &crate::CandidateFact, min_importance: f32) -> bool {
     candidate.importance >= min_importance
 }
-
-/// Converts a candidate fact into a persisted fact.
-///
-/// Candidate metadata is preserved as-is for this phase. Input metadata is not merged yet.
-fn candidate_to_fact(
-    tenant: &TenantContext,
-    candidate: &CandidateFact,
-    _input_metadata: &serde_json::Value,
-) -> MemcoreResult<Fact> {
-    let now = Utc::now();
-    Fact::new(
-        Uuid::new_v4(),
-        tenant.org_id.clone(),
-        tenant.user_id.clone(),
-        candidate.memory_type,
-        candidate.content.clone(),
-        None,
-        MemorySource::UserMessage,
-        candidate.confidence,
-        candidate.importance,
-        candidate.valid_at,
-        None,
-        now,
-        now,
-        candidate.metadata.clone(),
-    )
-}
-

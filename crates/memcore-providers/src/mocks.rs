@@ -53,6 +53,8 @@ pub fn deterministic_embedding(text: &str, dimensions: usize) -> MemcoreResult<V
 pub struct MockLlmProvider {
     extraction_candidates: RwLock<Option<Vec<CandidateFact>>>,
     classification_decision: RwLock<Option<FactOperationDecision>>,
+    classification_decisions: RwLock<Vec<FactOperationDecision>>,
+    classification_fail_with: RwLock<Option<MemcoreError>>,
     summary_prefix: RwLock<String>,
     fail_with: RwLock<Option<MemcoreError>>,
     last_extraction_messages: RwLock<Vec<MemoryMessage>>,
@@ -76,6 +78,23 @@ impl MockLlmProvider {
             .classification_decision
             .write()
             .expect("classification lock poisoned") = Some(decision);
+        self
+    }
+
+    /// Returns one decision per `classify_fact_operation` call, in order.
+    pub fn with_classification_decisions(self, decisions: Vec<FactOperationDecision>) -> Self {
+        *self
+            .classification_decisions
+            .write()
+            .expect("classification queue lock poisoned") = decisions;
+        self
+    }
+
+    pub fn with_classification_fail_error(self, error: MemcoreError) -> Self {
+        *self
+            .classification_fail_with
+            .write()
+            .expect("classification fail lock poisoned") = Some(error);
         self
     }
 
@@ -166,7 +185,21 @@ impl LlmProvider for MockLlmProvider {
         input: FactClassificationInput,
     ) -> MemcoreResult<FactOperationDecision> {
         check_fail(&self.fail_with.read().expect("fail lock poisoned"))?;
+        check_fail(
+            &self
+                .classification_fail_with
+                .read()
+                .expect("classification fail lock poisoned"),
+        )?;
         let _ = input;
+
+        let mut queue = self
+            .classification_decisions
+            .write()
+            .expect("classification queue lock poisoned");
+        if !queue.is_empty() {
+            return Ok(queue.remove(0));
+        }
 
         if let Some(decision) = self
             .classification_decision
