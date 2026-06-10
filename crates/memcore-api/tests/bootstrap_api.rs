@@ -1,6 +1,6 @@
 use memcore_api::AppState;
 use memcore_config::{
-    EmbeddingProviderKind, LlmProviderKind, Settings, VectorBackend,
+    EmbeddingProviderKind, EventBackend, LlmProviderKind, Settings, VectorBackend,
 };
 #[cfg(not(feature = "postgres"))]
 use memcore_config::FactBackend;
@@ -125,6 +125,27 @@ async fn unsupported_anthropic_llm_provider_fails_startup() {
 }
 
 #[tokio::test]
+async fn mock_event_backend_starts() {
+    let settings = Settings {
+        event_backend: EventBackend::Mock,
+        ..Settings::default()
+    };
+
+    AppState::initialize(settings)
+        .await
+        .expect("mock event backend should initialize");
+}
+
+#[tokio::test]
+async fn sqlite_event_backend_starts() {
+    let settings = Settings::sqlite_memory();
+
+    AppState::initialize(settings)
+        .await
+        .expect("sqlite event backend should initialize");
+}
+
+#[tokio::test]
 async fn sqlite_fact_backend_starts() {
     let settings = Settings::sqlite_memory();
 
@@ -140,6 +161,29 @@ async fn mock_fact_backend_starts() {
     AppState::initialize(settings)
         .await
         .expect("mock fact backend should initialize");
+}
+
+#[cfg(not(feature = "postgres"))]
+#[tokio::test]
+async fn postgres_event_backend_requires_postgres_feature() {
+    let settings = Settings {
+        fact_backend: FactBackend::Mock,
+        event_backend: EventBackend::Postgres,
+        postgres_url: Some("postgres://localhost:5432/memcore".to_string()),
+        ..Settings::default()
+    };
+
+    let error = match AppState::initialize(settings).await {
+        Ok(_) => panic!("postgres event backend should fail without postgres feature"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.code(), "validation_error");
+    assert!(
+        error
+            .to_string()
+            .contains("Postgres event backend requires the `postgres` cargo feature")
+    );
 }
 
 #[cfg(not(feature = "postgres"))]

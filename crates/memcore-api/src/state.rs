@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
-    EmbeddingProviderKind, FactBackend, LlmProviderKind, Settings, VectorBackend,
+    EmbeddingProviderKind, EventBackend, FactBackend, LlmProviderKind, Settings, VectorBackend,
 };
 use memcore_core::{EmbeddingProvider, FactStore, LlmProvider, MemoryEngine, MemoryEventStore, VectorStore};
 use memcore_providers::{
@@ -15,7 +15,7 @@ use memcore_storage::{
     SqliteMemoryEventStore,
 };
 #[cfg(feature = "postgres")]
-use memcore_storage::PostgresFactStore;
+use memcore_storage::{PostgresFactStore, PostgresMemoryEventStore};
 use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
 #[cfg(feature = "lancedb")]
@@ -46,11 +46,12 @@ impl AppState {
         })
     }
 
-    /// Synchronous helper for tests when both fact and vector backends are mock.
+    /// Synchronous helper for tests when fact, event, and vector backends are all mock.
     ///
-    /// For SQLite or LanceDB backends, call [`Self::initialize`] from async code instead.
+    /// For SQLite, Postgres, or LanceDB backends, call [`Self::initialize`] from async code instead.
     pub fn new(settings: Settings) -> Self {
         if settings.fact_backend == FactBackend::Mock
+            && settings.event_backend == EventBackend::Mock
             && settings.vector_backend == VectorBackend::Mock
         {
             Self {
@@ -112,35 +113,117 @@ pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEn
 async fn create_storage(
     settings: &Settings,
 ) -> MemcoreResult<(Arc<dyn FactStore>, Arc<dyn MemoryEventStore>)> {
-    match settings.fact_backend {
-        FactBackend::Mock => Ok((
+    let needs_postgres = settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres;
+
+    #[cfg(not(feature = "postgres"))]
+    if needs_postgres {
+        if settings.event_backend == EventBackend::Postgres {
+            return Err(MemcoreError::ValidationError(
+                "Postgres event backend requires the `postgres` cargo feature".to_string(),
+            ));
+        }
+        return Err(MemcoreError::ValidationError(
+            "Postgres fact backend requires the `postgres` cargo feature".to_string(),
+        ));
+    }
+
+    match (&settings.fact_backend, &settings.event_backend) {
+        (FactBackend::Mock, EventBackend::Mock) => Ok((
             Arc::new(MockFactStore::new()),
             Arc::new(MockMemoryEventStore::new()),
         )),
-        FactBackend::Sqlite => {
+        (FactBackend::Sqlite, EventBackend::Sqlite) => {
             let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
             let event_store = SqliteMemoryEventStore::new(fact_store.pool());
             Ok((Arc::new(fact_store), Arc::new(event_store)))
         }
-        FactBackend::Postgres => {
-            #[cfg(feature = "postgres")]
-            {
-                let postgres_url = require_postgres_url(settings)?;
-                let fact_store = PostgresFactStore::connect(&postgres_url).await?;
-                // Audit events remain in-memory until Postgres MemoryEventStore is implemented.
-                Ok((
-                    Arc::new(fact_store),
-                    Arc::new(MockMemoryEventStore::new()),
-                ))
-            }
-            #[cfg(not(feature = "postgres"))]
-            {
-                Err(MemcoreError::ValidationError(
-                    "Postgres fact backend requires the `postgres` cargo feature".to_string(),
-                ))
-            }
+        (FactBackend::Sqlite, EventBackend::Mock) => {
+            let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
+            Ok((
+                Arc::new(fact_store),
+                Arc::new(MockMemoryEventStore::new()),
+            ))
         }
+        (FactBackend::Mock, EventBackend::Sqlite) => {
+            let event_store =
+                SqliteMemoryEventStore::connect(&settings.database_url).await?;
+            Ok((
+                Arc::new(MockFactStore::new()),
+                Arc::new(event_store),
+            ))
+        }
+        #[cfg(feature = "postgres")]
+        (FactBackend::Postgres, EventBackend::Postgres) => {
+            let postgres_url = require_postgres_url(settings)?;
+            let fact_store = PostgresFactStore::connect(&postgres_url).await?;
+            let event_store = PostgresMemoryEventStore::new(fact_store.pool());
+            Ok((Arc::new(fact_store), Arc::new(event_store)))
+        }
+        #[cfg(feature = "postgres")]
+        (FactBackend::Postgres, EventBackend::Mock) => {
+            let postgres_url = require_postgres_url(settings)?;
+            let fact_store = PostgresFactStore::connect(&postgres_url).await?;
+            Ok((
+                Arc::new(fact_store),
+                Arc::new(MockMemoryEventStore::new()),
+            ))
+        }
+        #[cfg(feature = "postgres")]
+        (FactBackend::Mock, EventBackend::Postgres) => {
+            let postgres_url = require_postgres_url(settings)?;
+            let event_store = PostgresMemoryEventStore::connect(&postgres_url).await?;
+            Ok((
+                Arc::new(MockFactStore::new()),
+                Arc::new(event_store),
+            ))
+        }
+        #[cfg(feature = "postgres")]
+        (FactBackend::Sqlite, EventBackend::Postgres) => {
+            let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
+            let postgres_url = require_postgres_url(settings)?;
+            let event_store = PostgresMemoryEventStore::connect(&postgres_url).await?;
+            Ok((Arc::new(fact_store), Arc::new(event_store)))
+        }
+        #[cfg(feature = "postgres")]
+        (FactBackend::Postgres, EventBackend::Sqlite) => {
+            let postgres_url = require_postgres_url(settings)?;
+            let fact_store = PostgresFactStore::connect(&postgres_url).await?;
+            let event_store =
+                SqliteMemoryEventStore::connect(&settings.database_url).await?;
+            Ok((Arc::new(fact_store), Arc::new(event_store)))
+        }
+        #[cfg(not(feature = "postgres"))]
+        (FactBackend::Postgres, _) | (_, EventBackend::Postgres) => Err(
+            MemcoreError::ValidationError(
+                "Postgres storage requires the `postgres` cargo feature".to_string(),
+            ),
+        ),
     }
+}
+
+#[cfg(feature = "postgres")]
+fn require_postgres_url(settings: &Settings) -> MemcoreResult<String> {
+    settings
+        .postgres_url
+        .as_ref()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| {
+            if settings.event_backend == EventBackend::Postgres
+                && settings.fact_backend != FactBackend::Postgres
+            {
+                MemcoreError::ValidationError(
+                    "MEMCORE_POSTGRES_URL is required when MEMCORE_EVENT_BACKEND=postgres"
+                        .to_string(),
+                )
+            } else {
+                MemcoreError::ValidationError(
+                    "MEMCORE_POSTGRES_URL is required when MEMCORE_FACT_BACKEND=postgres"
+                        .to_string(),
+                )
+            }
+        })
 }
 
 fn create_llm_provider(settings: &Settings) -> MemcoreResult<Arc<dyn LlmProvider>> {
@@ -201,20 +284,6 @@ fn require_openai_api_key(settings: &Settings, message: &str) -> MemcoreResult<S
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty())
         .ok_or_else(|| MemcoreError::ValidationError(message.to_string()))
-}
-
-#[cfg(feature = "postgres")]
-fn require_postgres_url(settings: &Settings) -> MemcoreResult<String> {
-    settings
-        .postgres_url
-        .as_ref()
-        .map(|url| url.trim().to_string())
-        .filter(|url| !url.is_empty())
-        .ok_or_else(|| {
-            MemcoreError::ValidationError(
-                "MEMCORE_POSTGRES_URL is required when MEMCORE_FACT_BACKEND=postgres".to_string(),
-            )
-        })
 }
 
 fn provider_init_error(provider: &str, err: MemcoreError) -> MemcoreError {

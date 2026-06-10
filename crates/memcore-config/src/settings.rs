@@ -9,6 +9,7 @@ const MEMCORE_PORT: &str = "MEMCORE_PORT";
 const MEMCORE_STORAGE_MODE: &str = "MEMCORE_STORAGE_MODE";
 const MEMCORE_VECTOR_BACKEND: &str = "MEMCORE_VECTOR_BACKEND";
 const MEMCORE_FACT_BACKEND: &str = "MEMCORE_FACT_BACKEND";
+const MEMCORE_EVENT_BACKEND: &str = "MEMCORE_EVENT_BACKEND";
 const MEMCORE_DATABASE_URL: &str = "MEMCORE_DATABASE_URL";
 const MEMCORE_POSTGRES_URL: &str = "MEMCORE_POSTGRES_URL";
 const MEMCORE_QDRANT_URL: &str = "MEMCORE_QDRANT_URL";
@@ -88,6 +89,13 @@ pub enum FactBackend {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventBackend {
+    Mock,
+    Sqlite,
+    Postgres,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlmProviderKind {
     Mock,
     OpenAi,
@@ -110,6 +118,7 @@ pub struct Settings {
     pub storage_mode: StorageMode,
     pub vector_backend: VectorBackend,
     pub fact_backend: FactBackend,
+    pub event_backend: EventBackend,
     pub database_url: String,
     pub postgres_url: Option<String>,
     pub qdrant_url: String,
@@ -152,6 +161,7 @@ impl Default for Settings {
             storage_mode: StorageMode::Embedded,
             vector_backend: VectorBackend::Mock,
             fact_backend: FactBackend::Mock,
+            event_backend: EventBackend::Mock,
             database_url: "sqlite://./data/memcore.db".to_string(),
             postgres_url: None,
             qdrant_url: "http://localhost:6333".to_string(),
@@ -189,6 +199,10 @@ impl Settings {
         let vector_backend =
             VectorBackend::from_str(&read_env_or(MEMCORE_VECTOR_BACKEND, "lancedb"))?;
         let fact_backend = FactBackend::from_str(&read_env_or(MEMCORE_FACT_BACKEND, "sqlite"))?;
+        let event_backend = match read_env_optional(MEMCORE_EVENT_BACKEND) {
+            Some(value) => EventBackend::from_str(&value)?,
+            None => EventBackend::default_for_fact_backend(&fact_backend),
+        };
         let database_url = read_env_or(MEMCORE_DATABASE_URL, &defaults.database_url);
         let postgres_url = read_env_optional(MEMCORE_POSTGRES_URL);
         let qdrant_url = read_env_or(MEMCORE_QDRANT_URL, &defaults.qdrant_url);
@@ -234,6 +248,7 @@ impl Settings {
             storage_mode,
             vector_backend,
             fact_backend,
+            event_backend,
             database_url,
             postgres_url,
             qdrant_url,
@@ -265,6 +280,7 @@ impl Settings {
     pub fn sqlite_memory() -> Self {
         Self {
             fact_backend: FactBackend::Sqlite,
+            event_backend: EventBackend::Sqlite,
             database_url: "sqlite::memory:?cache=shared".to_string(),
             ..Self::default()
         }
@@ -358,6 +374,18 @@ impl Settings {
         {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_POSTGRES_URL is required when MEMCORE_FACT_BACKEND=postgres".to_string(),
+            ));
+        }
+
+        if self.event_backend == EventBackend::Postgres
+            && self
+                .postgres_url
+                .as_ref()
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
+        {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_POSTGRES_URL is required when MEMCORE_EVENT_BACKEND=postgres".to_string(),
             ));
         }
 
@@ -486,6 +514,31 @@ impl FromStr for FactBackend {
     }
 }
 
+impl EventBackend {
+    pub fn default_for_fact_backend(fact_backend: &FactBackend) -> Self {
+        match fact_backend {
+            FactBackend::Mock => Self::Mock,
+            FactBackend::Sqlite => Self::Sqlite,
+            FactBackend::Postgres => Self::Postgres,
+        }
+    }
+}
+
+impl FromStr for EventBackend {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "mock" => Ok(Self::Mock),
+            "sqlite" => Ok(Self::Sqlite),
+            "postgres" => Ok(Self::Postgres),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_EVENT_BACKEND value: {value}"
+            ))),
+        }
+    }
+}
+
 impl FromStr for LlmProviderKind {
     type Err = MemcoreError;
 
@@ -555,13 +608,14 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 27] = [
+    const ENV_KEYS: [&str; 28] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
         "MEMCORE_STORAGE_MODE",
         "MEMCORE_VECTOR_BACKEND",
         "MEMCORE_FACT_BACKEND",
+        "MEMCORE_EVENT_BACKEND",
         "MEMCORE_DATABASE_URL",
         "MEMCORE_POSTGRES_URL",
         "MEMCORE_QDRANT_URL",
@@ -643,6 +697,7 @@ mod tests {
         assert!(settings.auth_enabled);
         assert_eq!(settings.dev_api_key, "memcore_dev_key");
         assert_eq!(settings.fact_backend, super::FactBackend::Sqlite);
+        assert_eq!(settings.event_backend, super::EventBackend::Sqlite);
         assert!(settings.rate_limit_enabled);
         assert_eq!(settings.rate_limit_requests_per_minute, 60);
         assert_eq!(settings.log_format, super::LogFormat::Json);
@@ -655,6 +710,7 @@ mod tests {
     fn default_struct_uses_mock_backends() {
         let settings = Settings::default();
         assert_eq!(settings.fact_backend, super::FactBackend::Mock);
+        assert_eq!(settings.event_backend, super::EventBackend::Mock);
         assert_eq!(settings.vector_backend, super::VectorBackend::Mock);
     }
 
@@ -662,7 +718,27 @@ mod tests {
     fn sqlite_memory_settings_use_in_memory_database() {
         let settings = Settings::sqlite_memory();
         assert_eq!(settings.fact_backend, super::FactBackend::Sqlite);
+        assert_eq!(settings.event_backend, super::EventBackend::Sqlite);
         assert!(settings.database_url.contains(":memory:"));
+    }
+
+    #[test]
+    fn event_backend_defaults_to_match_fact_backend() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_FACT_BACKEND", "postgres");
+            std::env::set_var("MEMCORE_POSTGRES_URL", "postgres://localhost:5432/memcore");
+        }
+
+        let settings = Settings::from_env().expect("settings should load");
+        assert_eq!(settings.fact_backend, super::FactBackend::Postgres);
+        assert_eq!(settings.event_backend, super::EventBackend::Postgres);
     }
 
     #[test]
@@ -840,6 +916,51 @@ mod tests {
             error
                 .to_string()
                 .contains("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be a valid unsigned integer")
+        );
+    }
+
+    #[test]
+    fn postgres_event_backend_requires_postgres_url() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_FACT_BACKEND", "mock");
+            std::env::set_var("MEMCORE_EVENT_BACKEND", "postgres");
+        }
+
+        let error = Settings::from_env().expect_err("postgres event without url should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_POSTGRES_URL is required when MEMCORE_EVENT_BACKEND=postgres")
+        );
+    }
+
+    #[test]
+    fn fails_on_invalid_event_backend() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_EVENT_BACKEND", "not-a-backend");
+        }
+
+        let error = Settings::from_env().expect_err("invalid event backend should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid MEMCORE_EVENT_BACKEND value")
         );
     }
 

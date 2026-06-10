@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use memcore_api::{AppState, create_app};
-use memcore_config::{FactBackend, Settings};
+use memcore_config::{EventBackend, FactBackend, Settings};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -411,6 +411,7 @@ impl SqliteFileFixture {
     fn settings(&self) -> Settings {
         Settings {
             fact_backend: FactBackend::Sqlite,
+            event_backend: EventBackend::Sqlite,
             database_url: self.database_url.clone(),
             ..Settings::default()
         }

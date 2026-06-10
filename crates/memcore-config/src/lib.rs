@@ -2,6 +2,6 @@ pub mod settings;
 
 pub use settings::{
     DEFAULT_OPENAI_BASE_URL, DEFAULT_REQUEST_ID_HEADER, EmbeddingProviderKind, Environment,
-    FactBackend, LogFormat, LogLevel, LlmProviderKind, Settings, StorageMode, VectorBackend,
-    load_settings,
+    EventBackend, FactBackend, LogFormat, LogLevel, LlmProviderKind, Settings, StorageMode,
+    VectorBackend, load_settings,
 };
