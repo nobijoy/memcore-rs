@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
-use memcore_core::{Fact, MemorySource, MemoryType};
+use memcore_core::{Fact, MemoryEvent, MemoryEventOperation, MemorySource, MemoryType};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -87,5 +87,58 @@ pub(crate) fn row_to_fact(
         recorded_at,
         updated_at,
         metadata,
+    })
+}
+
+pub(crate) fn memory_event_operation_to_str(value: MemoryEventOperation) -> &'static str {
+    match value {
+        MemoryEventOperation::Add => "add",
+        MemoryEventOperation::Update => "update",
+        MemoryEventOperation::Delete => "delete",
+        MemoryEventOperation::NoOp => "no_op",
+        MemoryEventOperation::ForgetUser => "forget_user",
+    }
+}
+
+pub(crate) fn memory_event_operation_from_str(value: &str) -> MemcoreResult<MemoryEventOperation> {
+    match value {
+        "add" => Ok(MemoryEventOperation::Add),
+        "update" => Ok(MemoryEventOperation::Update),
+        "delete" => Ok(MemoryEventOperation::Delete),
+        "no_op" => Ok(MemoryEventOperation::NoOp),
+        "forget_user" => Ok(MemoryEventOperation::ForgetUser),
+        _ => Err(MemcoreError::StorageError(format!(
+            "invalid memory event operation value: {value}"
+        ))),
+    }
+}
+
+pub(crate) fn row_to_memory_event(
+    id: Uuid,
+    org_id: String,
+    user_id: String,
+    fact_id: Option<Uuid>,
+    operation: String,
+    input_text: Option<String>,
+    previous_content: Option<String>,
+    new_content: Option<String>,
+    provider_name: Option<String>,
+    model_name: Option<String>,
+    metadata: Value,
+    created_at: DateTime<Utc>,
+) -> MemcoreResult<MemoryEvent> {
+    Ok(MemoryEvent {
+        id,
+        org_id,
+        user_id,
+        fact_id,
+        operation: memory_event_operation_from_str(&operation)?,
+        input_text,
+        previous_content,
+        new_content,
+        provider_name,
+        model_name,
+        metadata,
+        created_at,
     })
 }

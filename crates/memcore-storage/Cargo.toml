@@ -43,3 +43,7 @@ required-features = ["lancedb"]
 [[test]]
 name = "postgres_fact_store"
 required-features = ["postgres"]
+
+[[test]]
+name = "postgres_event_store"
+required-features = ["postgres"]
