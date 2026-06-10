@@ -101,6 +101,11 @@ impl SqliteFactStore {
         Ok(Self::new(pool))
     }
 
+    /// Returns a clone of the underlying SQLite connection pool.
+    pub fn pool(&self) -> SqlitePool {
+        self.pool.clone()
+    }
+
     async fn fetch_fact_row(
         &self,
         tenant: &TenantContext,

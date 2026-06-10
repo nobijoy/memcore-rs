@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod context;
 pub mod engine;
 pub mod lifecycle;
@@ -16,12 +17,13 @@ pub use engine::{
     DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
 };
 pub use models::{
-    CandidateFact, Fact, FactOperation, FactOperationDecision, MemorySearchResult, MemorySource,
-    MemoryType, TenantContext,
+    CandidateFact, Fact, FactOperation, FactOperationDecision, MemoryEvent, MemoryEventOperation,
+    MemorySearchResult, MemorySource, MemoryType, TenantContext,
 };
 pub use privacy::PiiRedactor;
 pub use ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryMessage, MessageRole, SummarizationInput, VectorRecord, VectorSearchQuery,
-    VectorSearchResult, VectorStore,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
+    SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
+    DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };

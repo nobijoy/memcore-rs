@@ -10,8 +10,8 @@ use crate::{CandidateFact, Fact, FactOperation, FactOperationDecision, MemorySou
 #[derive(Debug, Clone, PartialEq)]
 pub enum LifecycleApplyResult {
     Added(Fact),
-    Updated(Fact),
-    Deleted,
+    Updated { previous: Fact, updated: Fact },
+    Deleted(Fact),
     NoOp,
 }
 
@@ -102,7 +102,10 @@ async fn apply_update(
     let updated = merge_candidate_into_fact(&existing, candidate)?;
     let stored = ctx.fact_store.update_fact(tenant, updated).await?;
     replace_fact_vector(ctx, tenant, &stored).await?;
-    Ok(LifecycleApplyResult::Updated(stored))
+    Ok(LifecycleApplyResult::Updated {
+        previous: existing,
+        updated: stored,
+    })
 }
 
 async fn apply_delete(
@@ -110,14 +113,11 @@ async fn apply_delete(
     tenant: &TenantContext,
     target_fact_id: Uuid,
 ) -> MemcoreResult<LifecycleApplyResult> {
-    let exists = ctx
+    let existing = ctx
         .fact_store
         .get_fact(tenant, target_fact_id)
-        .await?;
-
-    if exists.is_none() {
-        return Err(MemcoreError::NotFound("memory not found".to_string()));
-    }
+        .await?
+        .ok_or_else(|| MemcoreError::NotFound("memory not found".to_string()))?;
 
     ctx.fact_store
         .soft_delete_fact(tenant, target_fact_id)
@@ -133,7 +133,7 @@ async fn apply_delete(
         Err(error) => return Err(error),
     }
 
-    Ok(LifecycleApplyResult::Deleted)
+    Ok(LifecycleApplyResult::Deleted(existing))
 }
 
 async fn upsert_fact_vector(

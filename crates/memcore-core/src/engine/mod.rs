@@ -6,9 +6,13 @@ use memcore_common::MemcoreResult;
 
 use crate::privacy::redact_messages_for_extraction;
 use crate::ports::MemoryMessage;
+use crate::audit::{
+    build_add_event, build_delete_event, build_forget_user_event, build_noop_event,
+    build_update_event, record_event_best_effort,
+};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, VectorStore,
+    LlmProvider, MemoryEventStore, VectorStore,
 };
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
@@ -27,6 +31,9 @@ pub struct MemoryEngine {
     vector_store: Arc<dyn VectorStore>,
     llm_provider: Arc<dyn LlmProvider>,
     embedding_provider: Arc<dyn EmbeddingProvider>,
+    event_store: Option<Arc<dyn MemoryEventStore>>,
+    audit_provider_name: Option<String>,
+    audit_model_name: Option<String>,
     min_importance: f32,
     enable_pii_redaction: bool,
 }
@@ -43,9 +50,27 @@ impl MemoryEngine {
             vector_store,
             llm_provider,
             embedding_provider,
+            event_store: None,
+            audit_provider_name: None,
+            audit_model_name: None,
             min_importance: types::DEFAULT_MIN_IMPORTANCE,
             enable_pii_redaction: false,
         }
+    }
+
+    pub fn with_event_store(mut self, event_store: Arc<dyn MemoryEventStore>) -> Self {
+        self.event_store = Some(event_store);
+        self
+    }
+
+    pub fn with_audit_provider_info(
+        mut self,
+        provider_name: Option<String>,
+        model_name: Option<String>,
+    ) -> Self {
+        self.audit_provider_name = provider_name;
+        self.audit_model_name = model_name;
+        self
     }
 
     pub fn with_min_importance(mut self, min_importance: f32) -> Self {
@@ -124,17 +149,65 @@ impl MemoryEngine {
             match result {
                 LifecycleApplyResult::Added(fact) => {
                     summary.added += 1;
+                    record_event_best_effort(
+                        &self.event_store,
+                        &input.tenant,
+                        build_add_event(
+                            &input.tenant,
+                            &fact,
+                            &self.audit_provider_name,
+                            &self.audit_model_name,
+                            input.metadata.clone(),
+                        ),
+                    )
+                    .await;
                     memories.push(fact);
                 }
-                LifecycleApplyResult::Updated(fact) => {
+                LifecycleApplyResult::Updated { previous, updated } => {
                     summary.updated += 1;
-                    memories.push(fact);
+                    record_event_best_effort(
+                        &self.event_store,
+                        &input.tenant,
+                        build_update_event(
+                            &input.tenant,
+                            &previous,
+                            &updated,
+                            &self.audit_provider_name,
+                            &self.audit_model_name,
+                            input.metadata.clone(),
+                        ),
+                    )
+                    .await;
+                    memories.push(updated);
                 }
-                LifecycleApplyResult::Deleted => {
+                LifecycleApplyResult::Deleted(fact) => {
                     summary.deleted += 1;
+                    record_event_best_effort(
+                        &self.event_store,
+                        &input.tenant,
+                        build_delete_event(
+                            &input.tenant,
+                            &fact,
+                            &self.audit_provider_name,
+                            &self.audit_model_name,
+                            input.metadata.clone(),
+                        ),
+                    )
+                    .await;
                 }
                 LifecycleApplyResult::NoOp => {
                     summary.noop += 1;
+                    record_event_best_effort(
+                        &self.event_store,
+                        &input.tenant,
+                        build_noop_event(
+                            &input.tenant,
+                            &decision,
+                            &self.audit_provider_name,
+                            &self.audit_model_name,
+                        ),
+                    )
+                    .await;
                 }
             }
         }
@@ -270,6 +343,8 @@ impl MemoryEngine {
             ));
         }
 
+        let fact = exists.expect("fact existence checked above");
+
         self.fact_store
             .soft_delete_fact(&input.tenant, input.memory_id)
             .await?;
@@ -277,6 +352,19 @@ impl MemoryEngine {
         self.vector_store
             .delete_by_fact_id(&input.tenant, input.memory_id)
             .await?;
+
+        record_event_best_effort(
+            &self.event_store,
+            &input.tenant,
+            build_delete_event(
+                &input.tenant,
+                &fact,
+                &self.audit_provider_name,
+                &self.audit_model_name,
+                serde_json::json!({ "source": "delete_memory" }),
+            ),
+        )
+        .await;
 
         Ok(DeleteMemoryOutput { deleted: true })
     }
@@ -291,6 +379,17 @@ impl MemoryEngine {
         self.vector_store
             .delete_by_user(&input.tenant)
             .await?;
+
+        record_event_best_effort(
+            &self.event_store,
+            &input.tenant,
+            build_forget_user_event(
+                &input.tenant,
+                &self.audit_provider_name,
+                &self.audit_model_name,
+            ),
+        )
+        .await;
 
         Ok(ForgetUserOutput { deleted: true })
     }

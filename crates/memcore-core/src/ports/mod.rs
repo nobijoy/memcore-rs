@@ -1,6 +1,11 @@
+pub mod event_store;
 pub mod provider;
 pub mod storage;
 
+pub use event_store::{
+    MemoryEventQuery, MemoryEventStore, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
+    MAX_MEMORY_EVENT_LIST_LIMIT,
+};
 pub use provider::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, LlmProvider, MemoryMessage,
     MessageRole, SummarizationInput,

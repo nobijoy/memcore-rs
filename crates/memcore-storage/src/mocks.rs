@@ -8,8 +8,38 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use memcore_core::ports::{
-    FactSearchQuery, FactStore, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
+    FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, VectorRecord,
+    VectorSearchQuery, VectorSearchResult, VectorStore,
 };
+use memcore_core::MemoryEvent;
+
+fn event_matches_tenant(event: &MemoryEvent, tenant: &TenantContext) -> bool {
+    event.org_id == tenant.org_id && event.user_id == tenant.user_id
+}
+
+fn ensure_event_tenant(event: &MemoryEvent, tenant: &TenantContext) -> MemcoreResult<()> {
+    if event_matches_tenant(event, tenant) {
+        Ok(())
+    } else {
+        Err(MemcoreError::Forbidden)
+    }
+}
+
+fn normalize_event_list_limit(limit: usize) -> MemcoreResult<usize> {
+    use memcore_core::ports::{DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT};
+
+    if limit == 0 {
+        return Ok(DEFAULT_MEMORY_EVENT_LIST_LIMIT);
+    }
+
+    if limit > MAX_MEMORY_EVENT_LIST_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {MAX_MEMORY_EVENT_LIST_LIMIT}"
+        )));
+    }
+
+    Ok(limit)
+}
 
 fn tenant_key(tenant: &TenantContext) -> (String, String) {
     (tenant.org_id.clone(), tenant.user_id.clone())
@@ -301,6 +331,58 @@ impl VectorStore for MockVectorStore {
             .expect("records lock poisoned")
             .retain(|_, record| (record.org_id.as_str(), record.user_id.as_str()) != (&key.0, &key.1));
         Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MockMemoryEventStore {
+    events: RwLock<Vec<MemoryEvent>>,
+}
+
+impl MockMemoryEventStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl MemoryEventStore for MockMemoryEventStore {
+    async fn record_event(
+        &self,
+        tenant: &TenantContext,
+        event: MemoryEvent,
+    ) -> MemcoreResult<MemoryEvent> {
+        ensure_event_tenant(&event, tenant)?;
+        self.events
+            .write()
+            .expect("events lock poisoned")
+            .push(event.clone());
+        Ok(event)
+    }
+
+    async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>> {
+        let limit = normalize_event_list_limit(query.limit)?;
+        let events = self.events.read().expect("events lock poisoned");
+
+        let mut results: Vec<MemoryEvent> = events
+            .iter()
+            .filter(|event| event_matches_tenant(event, &query.tenant))
+            .filter(|event| {
+                query
+                    .fact_id
+                    .is_none_or(|fact_id| event.fact_id == Some(fact_id))
+            })
+            .filter(|event| {
+                query
+                    .operation
+                    .is_none_or(|operation| event.operation == operation)
+            })
+            .cloned()
+            .collect();
+
+        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        results.truncate(limit);
+        Ok(results)
     }
 }
 
@@ -680,5 +762,39 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn memory_event_store_enforces_tenant_on_record() {
+        use super::MockMemoryEventStore;
+        use memcore_common::MemcoreError;
+        use memcore_core::MemoryEventOperation;
+        use crate::traits::MemoryEventStore;
+
+        let store = MockMemoryEventStore::new();
+        let tenant_a = tenant("org_a", "user_a");
+        let tenant_b = tenant("org_a", "user_b");
+        let event = memcore_core::MemoryEvent::new(
+            tenant_a.org_id.clone(),
+            tenant_a.user_id.clone(),
+            None,
+            MemoryEventOperation::Add,
+            None,
+            Some("content".to_string()),
+            None,
+            None,
+            json!({}),
+        );
+
+        store
+            .record_event(&tenant_a, event.clone())
+            .await
+            .expect("record should succeed");
+
+        let error = store
+            .record_event(&tenant_b, event)
+            .await
+            .expect_err("cross-tenant record should fail");
+        assert_eq!(error, MemcoreError::Forbidden);
     }
 }

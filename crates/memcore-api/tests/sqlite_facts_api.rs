@@ -4,11 +4,40 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use memcore_api::{AppState, create_app};
-use memcore_config::Settings;
+use memcore_config::{FactBackend, Settings};
 use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::authorization_header;
+
+struct SqliteFileFixture {
+    _temp_dir: tempfile::TempDir,
+    database_url: String,
+}
+
+impl SqliteFileFixture {
+    fn new() -> Self {
+        let temp_dir = tempfile::tempdir().expect("tempdir should be created");
+        let db_path = temp_dir.path().join("memcore.db");
+        std::fs::File::create(&db_path).expect("sqlite database file should be created");
+        let database_url = format!(
+            "sqlite:{}",
+            db_path.to_string_lossy().replace('\\', "/")
+        );
+        Self {
+            _temp_dir: temp_dir,
+            database_url,
+        }
+    }
+
+    fn settings(&self) -> Settings {
+        Settings {
+            fact_backend: FactBackend::Sqlite,
+            database_url: self.database_url.clone(),
+            ..Settings::default()
+        }
+    }
+}
 
 const ORG_A: &str = "org_sqlite_a";
 const ORG_B: &str = "org_sqlite_b";
@@ -250,4 +279,71 @@ async fn forgetting_sqlite_user_does_not_delete_other_user_in_same_org() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["memories"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn add_memory_records_audit_event_in_sqlite() {
+    use memcore_core::{MemoryEventOperation, TenantContext};
+    use memcore_storage::{MemoryEventQuery, SqliteMemoryEventStore};
+    use memcore_storage::traits::MemoryEventStore;
+
+    let fixture = SqliteFileFixture::new();
+    let state = AppState::initialize(fixture.settings())
+        .await
+        .expect("sqlite app state should initialize");
+    let app = create_app(state);
+    seed_memory(&app, ORG_A, USER_A, MEMORY_A).await;
+
+    let event_store = SqliteMemoryEventStore::connect(&fixture.database_url)
+        .await
+        .expect("sqlite event store should connect");
+    let tenant = TenantContext::new(ORG_A, USER_A).expect("tenant should be valid");
+    let mut query = MemoryEventQuery::new(tenant, 10);
+    query.operation = Some(MemoryEventOperation::Add);
+
+    let events = event_store
+        .list_events(query)
+        .await
+        .expect("list events should succeed");
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].operation, MemoryEventOperation::Add);
+    assert_eq!(events[0].new_content.as_deref(), Some(MEMORY_A));
+    assert!(events[0].input_text.is_none());
+}
+
+#[tokio::test]
+async fn forget_user_records_audit_event_in_sqlite() {
+    use memcore_core::{MemoryEventOperation, TenantContext};
+    use memcore_storage::{MemoryEventQuery, SqliteMemoryEventStore};
+    use memcore_storage::traits::MemoryEventStore;
+
+    let fixture = SqliteFileFixture::new();
+    let state = AppState::initialize(fixture.settings())
+        .await
+        .expect("sqlite app state should initialize");
+    let app = create_app(state);
+    seed_memory(&app, ORG_A, USER_A, MEMORY_A).await;
+
+    let (status, _) = response_parts(
+        app,
+        delete_request(&format!("/api/v1/users/{USER_A}"), ORG_A),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let event_store = SqliteMemoryEventStore::connect(&fixture.database_url)
+        .await
+        .expect("sqlite event store should connect");
+    let tenant = TenantContext::new(ORG_A, USER_A).expect("tenant should be valid");
+    let events = event_store
+        .list_events(MemoryEventQuery::new(tenant, 10))
+        .await
+        .expect("list events should succeed");
+
+    assert!(
+        events
+            .iter()
+            .any(|event| event.operation == MemoryEventOperation::ForgetUser)
+    );
 }

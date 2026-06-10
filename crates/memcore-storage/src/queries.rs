@@ -1,1 +1,1 @@
-pub use memcore_core::ports::FactSearchQuery;
+pub use memcore_core::ports::{FactSearchQuery, MemoryEventQuery};

@@ -5,12 +5,15 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
     EmbeddingProviderKind, FactBackend, LlmProviderKind, Settings, VectorBackend,
 };
-use memcore_core::{EmbeddingProvider, FactStore, LlmProvider, MemoryEngine, VectorStore};
+use memcore_core::{EmbeddingProvider, FactStore, LlmProvider, MemoryEngine, MemoryEventStore, VectorStore};
 use memcore_providers::{
     MockEmbeddingProvider, MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider,
     OpenAiLlmProvider, default_embedding_dimensions_for_model,
 };
-use memcore_storage::{MockFactStore, MockVectorStore, SqliteFactStore};
+use memcore_storage::{
+    MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteFactStore,
+    SqliteMemoryEventStore,
+};
 #[cfg(feature = "lancedb")]
 use memcore_storage::LanceDbVectorStore;
 
@@ -67,7 +70,7 @@ impl AppState {
 
 /// Wires `MemoryEngine` from settings: configurable fact/vector stores and LLM/embedding providers.
 pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEngine> {
-    let fact_store = create_fact_store(settings).await?;
+    let (fact_store, event_store) = create_storage(settings).await?;
     let llm_provider = create_llm_provider(settings)?;
     let embedding_provider = create_embedding_provider(settings)?;
     let vector_store =
@@ -79,7 +82,31 @@ pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEn
         llm_provider,
         embedding_provider,
     )
-    .with_pii_redaction(settings.enable_pii_redaction))
+    .with_pii_redaction(settings.enable_pii_redaction)
+    .with_event_store(event_store)
+    .with_audit_provider_info(
+        Some(llm_provider_name(settings)),
+        Some(settings.llm_model.clone()),
+    ))
+}
+
+async fn create_storage(
+    settings: &Settings,
+) -> MemcoreResult<(Arc<dyn FactStore>, Arc<dyn MemoryEventStore>)> {
+    match settings.fact_backend {
+        FactBackend::Mock => Ok((
+            Arc::new(MockFactStore::new()),
+            Arc::new(MockMemoryEventStore::new()),
+        )),
+        FactBackend::Sqlite => {
+            let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
+            let event_store = SqliteMemoryEventStore::new(fact_store.pool());
+            Ok((Arc::new(fact_store), Arc::new(event_store)))
+        }
+        FactBackend::Postgres => Err(MemcoreError::ValidationError(
+            "postgres fact backend is not wired into the API yet".to_string(),
+        )),
+    }
 }
 
 fn create_llm_provider(settings: &Settings) -> MemcoreResult<Arc<dyn LlmProvider>> {
@@ -146,19 +173,6 @@ fn provider_init_error(provider: &str, err: MemcoreError) -> MemcoreError {
     MemcoreError::ValidationError(format!("failed to initialize {provider} provider: {err}"))
 }
 
-async fn create_fact_store(settings: &Settings) -> MemcoreResult<Arc<dyn FactStore>> {
-    match settings.fact_backend {
-        FactBackend::Mock => Ok(Arc::new(MockFactStore::new())),
-        FactBackend::Sqlite => {
-            let store = SqliteFactStore::connect(&settings.database_url).await?;
-            Ok(Arc::new(store))
-        }
-        FactBackend::Postgres => Err(MemcoreError::ValidationError(
-            "postgres fact backend is not wired into the API yet".to_string(),
-        )),
-    }
-}
-
 async fn create_vector_store(
     settings: &Settings,
     dimensions: usize,
@@ -199,4 +213,19 @@ pub fn create_mock_memory_engine(settings: &Settings) -> MemoryEngine {
         Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS)),
     )
     .with_pii_redaction(settings.enable_pii_redaction)
+    .with_event_store(Arc::new(MockMemoryEventStore::new()))
+    .with_audit_provider_info(
+        Some(llm_provider_name(settings)),
+        Some(settings.llm_model.clone()),
+    )
+}
+
+fn llm_provider_name(settings: &Settings) -> String {
+    match settings.llm_provider {
+        LlmProviderKind::Mock => "mock".to_string(),
+        LlmProviderKind::OpenAi => "openai".to_string(),
+        LlmProviderKind::OpenRouter => "openrouter".to_string(),
+        LlmProviderKind::Anthropic => "anthropic".to_string(),
+        LlmProviderKind::Groq => "groq".to_string(),
+    }
 }

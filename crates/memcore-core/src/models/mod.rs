@@ -1,8 +1,10 @@
+mod event;
 mod fact;
 mod memory;
 mod tenant;
 mod validation;
 
+pub use event::{MemoryEvent, MemoryEventOperation};
 pub use fact::{CandidateFact, Fact, FactOperationDecision, MemorySearchResult};
 pub use memory::{FactOperation, MemorySource, MemoryType};
 pub use tenant::TenantContext;
