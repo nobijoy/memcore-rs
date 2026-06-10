@@ -2,18 +2,20 @@ use chrono::{DateTime, Utc};
 use memcore_common::MemcoreError;
 use memcore_core::{ApiKeyRecord, ApiKeyScope};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateApiKeyRequest {
     pub name: String,
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CreateApiKeyResponse {
     pub status: &'static str,
     pub api_key: ApiKeyItemResponse,
+    /// Raw API key returned only once at creation time.
     pub raw_key: String,
 }
 
@@ -23,19 +25,19 @@ pub struct ListApiKeysQuery {
     pub include_revoked: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ListApiKeysResponse {
     pub status: &'static str,
     pub api_keys: Vec<ApiKeyItemResponse>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RevokeApiKeyResponse {
     pub status: &'static str,
     pub revoked: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ApiKeyItemResponse {
     pub id: Uuid,
     pub org_id: String,
@@ -46,7 +48,7 @@ pub struct ApiKeyItemResponse {
 }
 
 /// API-facing scope labels (PascalCase) separate from core snake_case serde.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "PascalCase")]
 pub enum ApiKeyScopeResponse {
     MemoryRead,

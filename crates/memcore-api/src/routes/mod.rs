@@ -9,9 +9,12 @@ pub mod users;
 use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{delete, get, post};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::middleware::{enforce_rate_limit, require_api_key, require_organization};
 use crate::observability::{log_protected_request, observe_request_lifecycle};
+use crate::openapi::ApiDoc;
 use crate::state::AppState;
 
 /// Protected routes middleware order (incoming request):
@@ -49,6 +52,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 
     Router::new()
+        .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
         .route("/metrics", get(health::metrics))

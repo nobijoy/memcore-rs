@@ -5,6 +5,7 @@ use memcore_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub fn default_list_memory_events_limit() -> usize {
@@ -20,14 +21,14 @@ pub struct ListMemoryEventsQuery {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ListMemoryEventsResponse {
     pub status: &'static str,
     pub events: Vec<MemoryEventItemResponse>,
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct MemoryEventItemResponse {
     pub id: Uuid,
     pub fact_id: Option<Uuid>,
@@ -41,7 +42,7 @@ pub struct MemoryEventItemResponse {
 }
 
 /// API-facing operation labels (PascalCase) separate from core snake_case serde.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "PascalCase")]
 pub enum MemoryEventOperationResponse {
     Add,

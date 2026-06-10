@@ -2,6 +2,7 @@ pub mod app;
 pub mod dto;
 pub mod middleware;
 pub mod observability;
+pub mod openapi;
 pub mod response;
 pub mod routes;
 pub mod security;

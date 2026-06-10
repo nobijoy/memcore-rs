@@ -1,13 +1,14 @@
 use axum::http::StatusCode;
 use memcore_common::MemcoreError;
 use serde::Serialize;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ErrorBody {
     pub error: ErrorDetail,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ErrorDetail {
     pub code: String,
     pub message: String,

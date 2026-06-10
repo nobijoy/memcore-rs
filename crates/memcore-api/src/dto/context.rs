@@ -4,12 +4,13 @@ use memcore_core::{BuildContextOutput, MemorySearchResult};
 use super::memories::SearchMemoryFiltersRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::ToSchema;
 
 pub fn default_context_max_memories() -> usize {
     memcore_core::DEFAULT_CONTEXT_MAX_MEMORIES
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct BuildContextRequest {
     pub user_id: String,
     pub query: String,
@@ -21,14 +22,14 @@ pub struct BuildContextRequest {
     pub filters: SearchMemoryFiltersRequest,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BuildContextResponse {
     pub status: &'static str,
     pub context: String,
     pub memories: Vec<ContextMemoryResponse>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ContextMemoryResponse {
     pub fact_id: uuid::Uuid,
     pub content: String,

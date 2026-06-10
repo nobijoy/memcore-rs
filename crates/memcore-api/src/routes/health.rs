@@ -5,17 +5,18 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use memcore_config::{Environment, FactBackend, StorageMode, VectorBackend};
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::state::AppState;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub service: &'static str,
     pub version: &'static str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ReadyResponse {
     pub status: &'static str,
     pub environment: String,

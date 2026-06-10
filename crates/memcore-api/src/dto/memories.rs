@@ -5,6 +5,7 @@ use memcore_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub fn default_search_limit() -> usize {
@@ -15,7 +16,7 @@ pub fn default_list_memories_limit() -> usize {
     memcore_core::DEFAULT_LIST_MEMORIES_LIMIT
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct AddMemoryRequest {
     pub user_id: String,
     pub messages: Vec<MemoryMessageRequest>,
@@ -23,20 +24,20 @@ pub struct AddMemoryRequest {
     pub metadata: Value,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct MemoryMessageRequest {
     pub role: String,
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AddMemoryResponse {
     pub status: &'static str,
     pub summary: MemoryOperationSummaryResponse,
     pub memories: Vec<MemoryItemResponse>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct MemoryOperationSummaryResponse {
     pub added: usize,
     pub updated: usize,
@@ -44,7 +45,7 @@ pub struct MemoryOperationSummaryResponse {
     pub noop: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct MemoryItemResponse {
     pub id: Uuid,
     pub content: String,
@@ -54,7 +55,7 @@ pub struct MemoryItemResponse {
 }
 
 /// API-facing memory type labels (PascalCase) separate from core snake_case serde.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "PascalCase")]
 pub enum MemoryTypeResponse {
     Profile,
@@ -109,7 +110,7 @@ impl From<AddMemoryOutput> for AddMemoryResponse {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
 pub struct SearchMemoryFiltersRequest {
     #[serde(default)]
     pub memory_type: Option<Vec<String>>,
@@ -133,7 +134,7 @@ impl SearchMemoryFiltersRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct SearchMemoryRequest {
     pub user_id: String,
     pub query: String,
@@ -143,13 +144,13 @@ pub struct SearchMemoryRequest {
     pub filters: SearchMemoryFiltersRequest,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SearchMemoryResponse {
     pub status: &'static str,
     pub results: Vec<SearchMemoryResultResponse>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SearchMemoryResultResponse {
     pub fact_id: Uuid,
     pub content: String,
@@ -193,14 +194,14 @@ pub struct ListMemoriesQuery {
     pub include_deleted: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ListMemoriesResponse {
     pub status: &'static str,
     pub memories: Vec<ListMemoryItemResponse>,
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ListMemoryItemResponse {
     pub id: Uuid,
     pub content: String,
@@ -233,7 +234,7 @@ impl From<&Fact> for ListMemoryItemResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct DeleteMemoryResponse {
     pub status: &'static str,
     pub deleted: bool,
@@ -248,7 +249,7 @@ impl From<DeleteMemoryOutput> for DeleteMemoryResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ForgetUserResponse {
     pub status: &'static str,
     pub deleted: bool,
