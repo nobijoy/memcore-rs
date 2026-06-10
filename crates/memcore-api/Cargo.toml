@@ -14,7 +14,6 @@ lancedb = ["memcore-storage/lancedb"]
 [[bin]]
 name = "memcore-api"
 path = "src/main.rs"
-required-features = ["lancedb"]
 
 [[test]]
 name = "lancedb_vectors_api"

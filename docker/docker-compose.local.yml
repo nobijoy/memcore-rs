@@ -1,0 +1,46 @@
+# Local development: SQLite facts + mock vector + mock LLM/embedding providers.
+# LanceDB is not enabled in this compose file (see docs/DEVELOPMENT.md).
+
+services:
+  memcore:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      MEMCORE_ENV: development
+      MEMCORE_HOST: 0.0.0.0
+      MEMCORE_PORT: 8080
+
+      MEMCORE_STORAGE_MODE: embedded
+      MEMCORE_FACT_BACKEND: sqlite
+      MEMCORE_VECTOR_BACKEND: mock
+
+      MEMCORE_DATABASE_URL: sqlite:///app/data/memcore.db
+
+      MEMCORE_LLM_PROVIDER: mock
+      MEMCORE_LLM_MODEL: mock-llm
+      MEMCORE_EMBEDDING_PROVIDER: mock
+      MEMCORE_EMBEDDING_MODEL: mock-embedding
+
+      MEMCORE_AUTH_ENABLED: "true"
+      MEMCORE_DEV_API_KEY: memcore_dev_key
+
+      MEMCORE_RATE_LIMIT_ENABLED: "true"
+      MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: 60
+
+      MEMCORE_LOG_FORMAT: pretty
+      MEMCORE_LOG_LEVEL: info
+      MEMCORE_METRICS_ENABLED: "true"
+    volumes:
+      - memcore_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  memcore_data:

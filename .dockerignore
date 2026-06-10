@@ -1,0 +1,13 @@
+target/
+.git/
+.github/
+.vscode/
+.idea/
+.env
+.env.*
+*.db
+*.sqlite
+data/
+**/*.png
+**/agent-transcripts/
+terminals/
