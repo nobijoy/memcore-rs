@@ -435,8 +435,19 @@ impl Settings {
     }
 }
 
+/// Loads optional `.env` from the current directory or parents, then reads settings
+/// from the process environment.
+///
+/// Missing `.env` is normal and does not fail startup. Variables already set in the
+/// process environment (Docker, CI, systemd, etc.) are never overwritten by `.env`.
 pub fn load_settings() -> MemcoreResult<Settings> {
+    load_dotenv_if_present();
     Settings::from_env()
+}
+
+/// Loads `.env` when present. No-op when the file is missing.
+fn load_dotenv_if_present() {
+    let _ = dotenvy::dotenv();
 }
 
 fn read_env_or(key: &str, default: &str) -> String {
@@ -1142,6 +1153,67 @@ mod tests {
         assert_eq!(settings.log_level, super::LogLevel::Debug);
         assert_eq!(settings.request_id_header, "X-Correlation-ID");
         assert!(!settings.metrics_enabled);
+    }
+
+    #[test]
+    fn load_settings_succeeds_when_dotenv_file_is_missing() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        super::load_settings().expect("missing .env should not fail startup");
+    }
+
+    #[test]
+    fn load_settings_reads_values_from_dotenv_file() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        let dir = std::env::temp_dir().join(format!("memcore-dotenv-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir should be created");
+        std::fs::write(dir.join(".env"), "MEMCORE_PORT=9123\n").expect(".env should be written");
+
+        let original = std::env::current_dir().expect("cwd should exist");
+        std::env::set_current_dir(&dir).expect("chdir should succeed");
+        let settings = super::load_settings().expect("settings should load from dotenv");
+        std::env::set_current_dir(&original).expect("cwd should be restored");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(settings.port, 9123);
+    }
+
+    #[test]
+    fn dotenv_does_not_override_existing_environment_variables() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        let dir = std::env::temp_dir().join(format!(
+            "memcore-dotenv-override-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir should be created");
+        std::fs::write(dir.join(".env"), "MEMCORE_PORT=9123\n").expect(".env should be written");
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe { std::env::set_var("MEMCORE_PORT", "7777") };
+
+        let original = std::env::current_dir().expect("cwd should exist");
+        std::env::set_current_dir(&dir).expect("chdir should succeed");
+        let settings = super::load_settings().expect("settings should load");
+        std::env::set_current_dir(&original).expect("cwd should be restored");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(settings.port, 7777);
     }
 
     #[test]

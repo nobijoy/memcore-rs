@@ -1,0 +1,82 @@
+# Production-shaped Docker Compose: Postgres-backed facts, events, and API keys.
+# Vector backend is mock by default (no LanceDB, no Qdrant).
+#
+# Override secrets via a `.env` file or environment — do not use placeholder values
+# in real deployments.
+#
+# Build with Postgres support (required for MEMCORE_FACT_BACKEND=postgres):
+#   docker compose -f docker/docker-compose.prod.yml up --build
+#
+# Enable OpenAI providers (optional):
+#   Set MEMCORE_LLM_PROVIDER=openai, MEMCORE_EMBEDDING_PROVIDER=openai, and OPENAI_API_KEY
+#   in a `.env` file or under `memcore.environment` below.
+#
+# Enable LanceDB vector backend (optional, heavier image build):
+#   build.args.CARGO_FEATURES: "postgres,lancedb"
+#   MEMCORE_VECTOR_BACKEND: lancedb
+#   MEMCORE_LANCEDB_PATH: /app/data/lancedb
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: memcore
+      POSTGRES_USER: memcore
+      POSTGRES_PASSWORD: memcore_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memcore -d memcore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  memcore:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        CARGO_FEATURES: postgres
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MEMCORE_ENV: production
+      MEMCORE_HOST: 0.0.0.0
+      MEMCORE_PORT: 8080
+
+      MEMCORE_STORAGE_MODE: production
+
+      MEMCORE_FACT_BACKEND: postgres
+      MEMCORE_EVENT_BACKEND: postgres
+      MEMCORE_POSTGRES_URL: postgres://memcore:memcore_password@postgres:5432/memcore
+
+      MEMCORE_VECTOR_BACKEND: mock
+
+      MEMCORE_LLM_PROVIDER: mock
+      MEMCORE_LLM_MODEL: mock-llm
+      MEMCORE_EMBEDDING_PROVIDER: mock
+      MEMCORE_EMBEDDING_MODEL: mock-embedding
+
+      MEMCORE_AUTH_ENABLED: "true"
+      MEMCORE_AUTH_MODE: dev
+      MEMCORE_DEV_API_KEY: change_this_dev_key
+      MEMCORE_API_KEY_PEPPER: change_this_pepper
+
+      MEMCORE_RATE_LIMIT_ENABLED: "true"
+      MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: 120
+
+      MEMCORE_LOG_FORMAT: json
+      MEMCORE_LOG_LEVEL: info
+      MEMCORE_METRICS_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:

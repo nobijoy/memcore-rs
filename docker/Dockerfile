@@ -1,6 +1,10 @@
-# Local development image: SQLite + mock vector/providers (no LanceDB by default).
-# Optional LanceDB build:
-#   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES=lancedb -t memcore-api:lancedb .
+# Multi-stage image for memcore-api (no LanceDB by default).
+# Optional features via CARGO_FEATURES build arg:
+#   postgres  — required for MEMCORE_FACT_BACKEND=postgres (production compose)
+#   lancedb   — optional vector backend (heavier build)
+# Examples:
+#   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES=postgres -t memcore-api:postgres .
+#   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES="postgres,lancedb" -t memcore-api:full .
 
 ARG CARGO_FEATURES=
 
