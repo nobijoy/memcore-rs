@@ -2,14 +2,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use axum::Json;
 use axum::extract::{Extension, Request, State};
 use axum::http::{HeaderValue, StatusCode, header::RETRY_AFTER};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 
 use crate::middleware::OrganizationContext;
-use crate::response::ErrorBody;
+use crate::observability::{attach_error_code, error_response};
 use crate::state::AppState;
 
 const WINDOW: Duration = Duration::from_secs(60);
@@ -92,22 +91,20 @@ pub async fn enforce_rate_limit(
 ) -> Response {
     match state.rate_limiter.check(&organization.org_id) {
         RateLimitDecision::Allowed => next.run(request).await,
-        RateLimitDecision::Limited { retry_after_secs } => rate_limited_response(retry_after_secs),
+        RateLimitDecision::Limited { retry_after_secs } => {
+            let mut response = error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "RATE_LIMITED",
+                "rate limit exceeded",
+                &request,
+            );
+            attach_error_code(&mut response, "RATE_LIMITED");
+            if let Ok(value) = HeaderValue::from_str(&retry_after_secs.to_string()) {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+            response
+        }
     }
-}
-
-fn rate_limited_response(retry_after_secs: u64) -> Response {
-    let mut response = (
-        StatusCode::TOO_MANY_REQUESTS,
-        Json(ErrorBody::new("RATE_LIMITED", "rate limit exceeded")),
-    )
-        .into_response();
-
-    if let Ok(value) = HeaderValue::from_str(&retry_after_secs.to_string()) {
-        response.headers_mut().insert(RETRY_AFTER, value);
-    }
-
-    response
 }
 
 #[cfg(test)]

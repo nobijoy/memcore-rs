@@ -23,6 +23,7 @@ required-features = ["lancedb"]
 [dependencies]
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
+http-body-util = "0.1"
 memcore-common = { path = "../memcore-common" }
 memcore-config = { path = "../memcore-config" }
 memcore-core = { path = "../memcore-core" }
@@ -33,7 +34,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]

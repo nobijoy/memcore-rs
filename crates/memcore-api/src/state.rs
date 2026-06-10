@@ -15,6 +15,7 @@ use memcore_storage::{
     SqliteMemoryEventStore,
 };
 use crate::middleware::RateLimiter;
+use crate::observability::Metrics;
 #[cfg(feature = "lancedb")]
 use memcore_storage::LanceDbVectorStore;
 
@@ -27,6 +28,7 @@ pub struct AppState {
     pub started_at: DateTime<Utc>,
     pub memory_engine: Arc<MemoryEngine>,
     pub rate_limiter: Arc<RateLimiter>,
+    pub metrics: Arc<Metrics>,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
             started_at: Utc::now(),
             memory_engine,
             rate_limiter: create_rate_limiter(&settings),
+            metrics: Arc::new(Metrics::default()),
         })
     }
 
@@ -53,6 +56,7 @@ impl AppState {
                 memory_engine: Arc::new(create_mock_memory_engine(&settings)),
                 settings: settings.clone(),
                 rate_limiter: create_rate_limiter(&settings),
+                metrics: Arc::new(Metrics::default()),
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -69,6 +73,7 @@ impl AppState {
             started_at: Utc::now(),
             memory_engine,
             rate_limiter: create_rate_limiter(&settings),
+            metrics: Arc::new(Metrics::default()),
         }
     }
 }

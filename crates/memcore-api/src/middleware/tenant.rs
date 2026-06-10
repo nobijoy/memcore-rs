@@ -1,12 +1,11 @@
-use axum::Json;
 use axum::extract::Request;
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use memcore_common::MemcoreResult;
 use memcore_core::TenantContext;
 
-use crate::response::ErrorBody;
+use crate::observability::{attach_error_code, error_response};
 
 pub const ORG_HEADER: &str = "X-Organization-ID";
 
@@ -25,41 +24,52 @@ impl OrganizationContext {
 /// Validates `X-Organization-ID` and attaches [`OrganizationContext`] to the request.
 ///
 /// Runs after auth middleware on protected routes. Does not validate `user_id` (request body).
-pub async fn require_organization(mut request: Request, next: Next) -> Response {
+pub async fn require_organization(request: Request, next: Next) -> Response {
     match extract_organization(request.headers()) {
         Ok(org) => {
+            let mut request = request;
             request.extensions_mut().insert(org);
             next.run(request).await
         }
-        Err(response) => response,
+        Err((status, code, message)) => {
+            let mut response = error_response(status, code, message, &request);
+            attach_error_code(&mut response, code);
+            response
+        }
     }
 }
 
-fn extract_organization(headers: &HeaderMap) -> Result<OrganizationContext, Response> {
+fn extract_organization(
+    headers: &HeaderMap,
+) -> Result<OrganizationContext, (StatusCode, &'static str, &'static str)> {
     let Some(value) = headers.get(ORG_HEADER) else {
-        return Err(validation_response("missing X-Organization-ID header"));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_ERROR",
+            "missing X-Organization-ID header",
+        ));
     };
 
-    let header_str = value
-        .to_str()
-        .map_err(|_| validation_response("X-Organization-ID must be valid UTF-8"))?;
+    let header_str = value.to_str().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_ERROR",
+            "X-Organization-ID must be valid UTF-8",
+        )
+    })?;
 
     let org_id = header_str.trim();
     if org_id.is_empty() {
-        return Err(validation_response("X-Organization-ID cannot be empty"));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_ERROR",
+            "X-Organization-ID cannot be empty",
+        ));
     }
 
     Ok(OrganizationContext {
         org_id: org_id.to_string(),
     })
-}
-
-fn validation_response(message: &str) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(ErrorBody::new("VALIDATION_ERROR", message)),
-    )
-        .into_response()
 }
 
 #[cfg(test)]

@@ -11,6 +11,8 @@ pub struct ErrorBody {
 pub struct ErrorDetail {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 impl ErrorBody {
@@ -19,8 +21,14 @@ impl ErrorBody {
             error: ErrorDetail {
                 code: code.into(),
                 message: message.into(),
+                request_id: None,
             },
         }
+    }
+
+    pub fn with_request_id(mut self, request_id: Option<String>) -> Self {
+        self.error.request_id = request_id;
+        self
     }
 
     pub fn from_memcore_error(error: MemcoreError) -> (StatusCode, Self) {
@@ -65,6 +73,6 @@ fn api_error_message(error: &MemcoreError) -> String {
         | MemcoreError::Internal(message) => message.clone(),
         MemcoreError::Unauthorized => "unauthorized".to_string(),
         MemcoreError::Forbidden => "forbidden".to_string(),
-        MemcoreError::RateLimited => "rate limited".to_string(),
+        MemcoreError::RateLimited => "rate limit exceeded".to_string(),
     }
 }

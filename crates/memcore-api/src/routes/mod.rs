@@ -9,14 +9,15 @@ use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{delete, get, post};
 
-use crate::middleware::{require_api_key, require_organization, enforce_rate_limit};
+use crate::middleware::{enforce_rate_limit, require_api_key, require_organization};
+use crate::observability::{log_protected_request, observe_request_lifecycle};
 use crate::state::AppState;
 
 /// Protected routes middleware order (incoming request):
-/// `require_api_key` → `require_organization` → `enforce_rate_limit` → handler.
+/// `observe_request_lifecycle` → `require_api_key` → `require_organization` →
+/// `enforce_rate_limit` → `log_protected_request` → handler.
 ///
-/// Axum applies `.route_layer()` in reverse add order, so layers are registered
-/// innermost-first: rate limit, then tenant, then auth.
+/// Axum applies `.route_layer()` in reverse add order on the protected sub-router.
 pub fn router(state: &AppState) -> Router<AppState> {
     let protected = Router::new()
         .route("/api/v1/memories", post(memories::add_memory))
@@ -35,6 +36,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
             delete(memories::delete_user_memory),
         )
         .route("/api/v1/users/{user_id}", delete(users::forget_user))
+        .route_layer(from_fn(log_protected_request))
         .route_layer(from_fn_with_state(state.clone(), enforce_rate_limit))
         .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
@@ -42,5 +44,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
     Router::new()
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
+        .route("/metrics", get(health::metrics))
         .merge(protected)
+        .layer(from_fn_with_state(state.clone(), observe_request_lifecycle))
 }

@@ -24,10 +24,42 @@ const MEMCORE_AUTH_ENABLED: &str = "MEMCORE_AUTH_ENABLED";
 const MEMCORE_DEV_API_KEY: &str = "MEMCORE_DEV_API_KEY";
 const MEMCORE_RATE_LIMIT_ENABLED: &str = "MEMCORE_RATE_LIMIT_ENABLED";
 const MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: &str = "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE";
+const MEMCORE_LOG_FORMAT: &str = "MEMCORE_LOG_FORMAT";
+const MEMCORE_LOG_LEVEL: &str = "MEMCORE_LOG_LEVEL";
+const MEMCORE_REQUEST_ID_HEADER: &str = "MEMCORE_REQUEST_ID_HEADER";
+const MEMCORE_METRICS_ENABLED: &str = "MEMCORE_METRICS_ENABLED";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+pub const DEFAULT_REQUEST_ID_HEADER: &str = "X-Request-ID";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFormat {
+    Json,
+    Pretty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub fn as_filter_str(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Environment {
@@ -101,6 +133,14 @@ pub struct Settings {
     pub rate_limit_enabled: bool,
     /// Maximum protected-route requests per organization per minute.
     pub rate_limit_requests_per_minute: u32,
+    /// Structured log output format.
+    pub log_format: LogFormat,
+    /// Minimum tracing log level.
+    pub log_level: LogLevel,
+    /// HTTP header used for request correlation IDs.
+    pub request_id_header: String,
+    /// Expose in-process metrics at `GET /metrics`.
+    pub metrics_enabled: bool,
 }
 
 impl Default for Settings {
@@ -129,6 +169,10 @@ impl Default for Settings {
             openai_base_url: DEFAULT_OPENAI_BASE_URL.to_string(),
             rate_limit_enabled: true,
             rate_limit_requests_per_minute: 60,
+            log_format: LogFormat::Json,
+            log_level: LogLevel::Info,
+            request_id_header: DEFAULT_REQUEST_ID_HEADER.to_string(),
+            metrics_enabled: true,
         }
     }
 }
@@ -171,6 +215,11 @@ impl Settings {
             MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE,
             defaults.rate_limit_requests_per_minute,
         )?;
+        let log_format = LogFormat::from_str(&read_env_or(MEMCORE_LOG_FORMAT, "json"))?;
+        let log_level = LogLevel::from_str(&read_env_or(MEMCORE_LOG_LEVEL, "info"))?;
+        let request_id_header =
+            read_env_or(MEMCORE_REQUEST_ID_HEADER, &defaults.request_id_header);
+        let metrics_enabled = parse_bool(MEMCORE_METRICS_ENABLED, defaults.metrics_enabled)?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -202,6 +251,10 @@ impl Settings {
             openai_base_url,
             rate_limit_enabled,
             rate_limit_requests_per_minute,
+            log_format,
+            log_level,
+            request_id_header,
+            metrics_enabled,
         };
 
         settings.validate()?;
@@ -272,6 +325,12 @@ impl Settings {
         if self.rate_limit_requests_per_minute == 0 {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.request_id_header.trim().is_empty() {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_REQUEST_ID_HEADER cannot be empty".to_string(),
             ));
         }
 
@@ -459,6 +518,37 @@ impl FromStr for EmbeddingProviderKind {
     }
 }
 
+impl FromStr for LogFormat {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "json" => Ok(Self::Json),
+            "pretty" => Ok(Self::Pretty),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_LOG_FORMAT value: {value}"
+            ))),
+        }
+    }
+}
+
+impl FromStr for LogLevel {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "trace" => Ok(Self::Trace),
+            "debug" => Ok(Self::Debug),
+            "info" => Ok(Self::Info),
+            "warn" => Ok(Self::Warn),
+            "error" => Ok(Self::Error),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_LOG_LEVEL value: {value}"
+            ))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
@@ -466,7 +556,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 23] = [
+    const ENV_KEYS: [&str; 27] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -488,6 +578,10 @@ mod tests {
         "MEMCORE_DEV_API_KEY",
         "MEMCORE_RATE_LIMIT_ENABLED",
         "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE",
+        "MEMCORE_LOG_FORMAT",
+        "MEMCORE_LOG_LEVEL",
+        "MEMCORE_REQUEST_ID_HEADER",
+        "MEMCORE_METRICS_ENABLED",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     ];
@@ -552,6 +646,10 @@ mod tests {
         assert_eq!(settings.fact_backend, super::FactBackend::Sqlite);
         assert!(settings.rate_limit_enabled);
         assert_eq!(settings.rate_limit_requests_per_minute, 60);
+        assert_eq!(settings.log_format, super::LogFormat::Json);
+        assert_eq!(settings.log_level, super::LogLevel::Info);
+        assert_eq!(settings.request_id_header, super::DEFAULT_REQUEST_ID_HEADER);
+        assert!(settings.metrics_enabled);
     }
 
     #[test]
@@ -744,6 +842,69 @@ mod tests {
                 .to_string()
                 .contains("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be a valid unsigned integer")
         );
+    }
+
+    #[test]
+    fn fails_on_invalid_log_format() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe { std::env::set_var("MEMCORE_LOG_FORMAT", "yaml") };
+
+        let error = Settings::from_env().expect_err("invalid log format should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid MEMCORE_LOG_FORMAT value")
+        );
+    }
+
+    #[test]
+    fn fails_on_invalid_log_level() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe { std::env::set_var("MEMCORE_LOG_LEVEL", "verbose") };
+
+        let error = Settings::from_env().expect_err("invalid log level should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid MEMCORE_LOG_LEVEL value")
+        );
+    }
+
+    #[test]
+    fn loads_observability_settings_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_LOG_FORMAT", "pretty");
+            std::env::set_var("MEMCORE_LOG_LEVEL", "debug");
+            std::env::set_var("MEMCORE_REQUEST_ID_HEADER", "X-Correlation-ID");
+            std::env::set_var("MEMCORE_METRICS_ENABLED", "false");
+        }
+
+        let settings = Settings::from_env().expect("observability settings should load");
+        assert_eq!(settings.log_format, super::LogFormat::Pretty);
+        assert_eq!(settings.log_level, super::LogLevel::Debug);
+        assert_eq!(settings.request_id_header, "X-Correlation-ID");
+        assert!(!settings.metrics_enabled);
     }
 
     #[test]
