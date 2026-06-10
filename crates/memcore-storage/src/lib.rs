@@ -1,5 +1,7 @@
 #[cfg(feature = "lancedb")]
 pub mod lancedb;
+#[cfg(feature = "qdrant")]
+pub mod qdrant;
 pub mod mocks;
 pub mod queries;
 #[cfg(feature = "postgres")]
@@ -11,6 +13,8 @@ pub mod vector;
 
 #[cfg(feature = "lancedb")]
 pub use lancedb::LanceDbVectorStore;
+#[cfg(feature = "qdrant")]
+pub use qdrant::QdrantVectorStore;
 pub use mocks::{MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore};
 pub use queries::{FactSearchQuery, MemoryEventQuery};
 #[cfg(feature = "postgres")]
