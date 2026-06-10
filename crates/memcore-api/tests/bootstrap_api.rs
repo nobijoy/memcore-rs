@@ -1,7 +1,9 @@
 use memcore_api::AppState;
 use memcore_config::{
-    EmbeddingProviderKind, FactBackend, LlmProviderKind, Settings, VectorBackend,
+    EmbeddingProviderKind, LlmProviderKind, Settings, VectorBackend,
 };
+#[cfg(not(feature = "postgres"))]
+use memcore_config::FactBackend;
 
 #[tokio::test]
 async fn mock_providers_start_without_openai_api_key() {
@@ -123,7 +125,26 @@ async fn unsupported_anthropic_llm_provider_fails_startup() {
 }
 
 #[tokio::test]
-async fn unsupported_postgres_fact_backend_fails_startup() {
+async fn sqlite_fact_backend_starts() {
+    let settings = Settings::sqlite_memory();
+
+    AppState::initialize(settings)
+        .await
+        .expect("sqlite fact backend should initialize");
+}
+
+#[tokio::test]
+async fn mock_fact_backend_starts() {
+    let settings = Settings::default();
+
+    AppState::initialize(settings)
+        .await
+        .expect("mock fact backend should initialize");
+}
+
+#[cfg(not(feature = "postgres"))]
+#[tokio::test]
+async fn postgres_fact_backend_requires_postgres_feature() {
     let settings = Settings {
         fact_backend: FactBackend::Postgres,
         postgres_url: Some("postgres://localhost:5432/memcore".to_string()),
@@ -131,7 +152,7 @@ async fn unsupported_postgres_fact_backend_fails_startup() {
     };
 
     let error = match AppState::initialize(settings).await {
-        Ok(_) => panic!("postgres backend should not initialize"),
+        Ok(_) => panic!("postgres backend should fail without postgres feature"),
         Err(error) => error,
     };
 
@@ -139,7 +160,7 @@ async fn unsupported_postgres_fact_backend_fails_startup() {
     assert!(
         error
             .to_string()
-            .contains("postgres fact backend is not wired into the API yet")
+            .contains("Postgres fact backend requires the `postgres` cargo feature")
     );
 }
 

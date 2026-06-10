@@ -349,20 +349,19 @@ impl Settings {
             ));
         }
 
-        if self.storage_mode == StorageMode::Production {
-            if self.fact_backend == FactBackend::Postgres
-                && self
-                    .postgres_url
-                    .as_ref()
-                    .map(|v| v.trim().is_empty())
-                    .unwrap_or(true)
-            {
-                return Err(MemcoreError::ValidationError(
-                    "MEMCORE_POSTGRES_URL is required when production mode uses postgres"
-                        .to_string(),
-                ));
-            }
+        if self.fact_backend == FactBackend::Postgres
+            && self
+                .postgres_url
+                .as_ref()
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
+        {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_POSTGRES_URL is required when MEMCORE_FACT_BACKEND=postgres".to_string(),
+            ));
+        }
 
+        if self.storage_mode == StorageMode::Production {
             if self.vector_backend == VectorBackend::Qdrant && self.qdrant_url.trim().is_empty() {
                 return Err(MemcoreError::ValidationError(
                     "MEMCORE_QDRANT_URL is required when production mode uses qdrant".to_string(),
@@ -841,6 +840,28 @@ mod tests {
             error
                 .to_string()
                 .contains("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be a valid unsigned integer")
+        );
+    }
+
+    #[test]
+    fn postgres_fact_backend_requires_postgres_url() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_FACT_BACKEND", "postgres");
+        }
+
+        let error = Settings::from_env().expect_err("postgres without url should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_POSTGRES_URL is required when MEMCORE_FACT_BACKEND=postgres")
         );
     }
 

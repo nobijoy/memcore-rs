@@ -9,11 +9,16 @@ path = "src/lib.rs"
 
 [features]
 default = []
+postgres = ["memcore-storage/postgres"]
 lancedb = ["memcore-storage/lancedb", "memcore-storage/sqlite"]
 
 [[bin]]
 name = "memcore-api"
 path = "src/main.rs"
+
+[[test]]
+name = "bootstrap_postgres_api"
+required-features = ["postgres"]
 
 [[test]]
 name = "lancedb_vectors_api"

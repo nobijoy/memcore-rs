@@ -14,6 +14,8 @@ use memcore_storage::{
     MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteFactStore,
     SqliteMemoryEventStore,
 };
+#[cfg(feature = "postgres")]
+use memcore_storage::PostgresFactStore;
 use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
 #[cfg(feature = "lancedb")]
@@ -120,9 +122,24 @@ async fn create_storage(
             let event_store = SqliteMemoryEventStore::new(fact_store.pool());
             Ok((Arc::new(fact_store), Arc::new(event_store)))
         }
-        FactBackend::Postgres => Err(MemcoreError::ValidationError(
-            "postgres fact backend is not wired into the API yet".to_string(),
-        )),
+        FactBackend::Postgres => {
+            #[cfg(feature = "postgres")]
+            {
+                let postgres_url = require_postgres_url(settings)?;
+                let fact_store = PostgresFactStore::connect(&postgres_url).await?;
+                // Audit events remain in-memory until Postgres MemoryEventStore is implemented.
+                Ok((
+                    Arc::new(fact_store),
+                    Arc::new(MockMemoryEventStore::new()),
+                ))
+            }
+            #[cfg(not(feature = "postgres"))]
+            {
+                Err(MemcoreError::ValidationError(
+                    "Postgres fact backend requires the `postgres` cargo feature".to_string(),
+                ))
+            }
+        }
     }
 }
 
@@ -184,6 +201,20 @@ fn require_openai_api_key(settings: &Settings, message: &str) -> MemcoreResult<S
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty())
         .ok_or_else(|| MemcoreError::ValidationError(message.to_string()))
+}
+
+#[cfg(feature = "postgres")]
+fn require_postgres_url(settings: &Settings) -> MemcoreResult<String> {
+    settings
+        .postgres_url
+        .as_ref()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| {
+            MemcoreError::ValidationError(
+                "MEMCORE_POSTGRES_URL is required when MEMCORE_FACT_BACKEND=postgres".to_string(),
+            )
+        })
 }
 
 fn provider_init_error(provider: &str, err: MemcoreError) -> MemcoreError {
