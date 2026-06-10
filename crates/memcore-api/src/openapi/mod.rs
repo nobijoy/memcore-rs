@@ -6,11 +6,12 @@ use utoipa::{Modify, OpenApi};
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, ApiKeyItemResponse, ApiKeyScopeResponse,
     BuildContextRequest, BuildContextResponse, ContextMemoryResponse, CreateApiKeyRequest,
-    CreateApiKeyResponse, DeleteMemoryResponse, ForgetUserResponse, ListApiKeysResponse,
-    ListMemoriesResponse, ListMemoryEventsResponse, ListMemoryItemResponse, MemoryEventItemResponse,
+    CreateApiKeyResponse, DeleteMemoryResponse, ExportFactItemResponse, ExportMemorySourceResponse,
+    ExportUserResponse, ForgetUserResponse, ListApiKeysResponse, ListMemoriesResponse,
+    ListMemoryEventsResponse, ListMemoryItemResponse, MemoryEventItemResponse,
     MemoryEventOperationResponse, MemoryItemResponse, MemoryMessageRequest,
     MemoryOperationSummaryResponse, RevokeApiKeyResponse, SearchMemoryFiltersRequest,
-    SearchMemoryRequest, SearchMemoryResponse, SearchMemoryResultResponse,
+    SearchMemoryRequest, SearchMemoryResponse, SearchMemoryResultResponse, UserMemoryExportResponse,
 };
 use crate::dto::memories::MemoryTypeResponse;
 use crate::response::{ErrorBody, ErrorDetail};
@@ -35,6 +36,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         paths::build_context,
         paths::list_user_memories,
         paths::delete_user_memory,
+        paths::export_user_data,
         paths::forget_user,
         paths::list_user_memory_events,
         paths::create_api_key,
@@ -60,6 +62,10 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         ListMemoryItemResponse,
         DeleteMemoryResponse,
         ForgetUserResponse,
+        ExportUserResponse,
+        UserMemoryExportResponse,
+        ExportFactItemResponse,
+        ExportMemorySourceResponse,
         BuildContextRequest,
         BuildContextResponse,
         ContextMemoryResponse,

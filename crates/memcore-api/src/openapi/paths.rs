@@ -4,9 +4,9 @@
 
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, BuildContextRequest, BuildContextResponse,
-    CreateApiKeyRequest, CreateApiKeyResponse, DeleteMemoryResponse, ForgetUserResponse,
-    ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse, RevokeApiKeyResponse,
-    SearchMemoryRequest, SearchMemoryResponse,
+    CreateApiKeyRequest, CreateApiKeyResponse, DeleteMemoryResponse, ExportUserResponse,
+    ForgetUserResponse, ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse,
+    RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
 };
 use crate::response::ErrorBody;
 use crate::routes::health::{HealthResponse, ReadyResponse};
@@ -155,6 +155,29 @@ pub fn list_user_memories() {}
     )
 )]
 pub fn delete_user_memory() {}
+
+/// Export memory facts and optional audit events for a user as JSON. Does not include API keys or event `input_text`.
+#[utoipa::path(
+    get,
+    path = "/api/v1/users/{user_id}/export",
+    tag = "Users",
+    params(
+        ("user_id" = String, Path, description = "User identifier"),
+        ("include_events" = Option<bool>, Query, description = "Include memory audit events (default true)"),
+        ("include_deleted" = Option<bool>, Query, description = "Include soft-deleted facts (default false)"),
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "User memory export", body = ExportUserResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing required scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn export_user_data() {}
 
 /// Delete all memories and vectors for a user within the organization.
 #[utoipa::path(

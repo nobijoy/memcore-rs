@@ -14,18 +14,19 @@ use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryEventQuery, MemoryEventStore, VectorStore,
 };
+use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
 };
 use crate::{assemble_context, BuildContextInput, BuildContextOutput, MemorySearchResult, TenantContext};
 
 pub use types::{
-    AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ForgetUserInput,
-    ForgetUserOutput, ListMemoriesInput, ListMemoriesOutput, ListMemoryEventsInput,
-    ListMemoryEventsOutput, MemoryOperationSummary, SearchMemoryInput, SearchMemoryOutput,
-    DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_LIST_MEMORY_EVENTS_LIMIT, DEFAULT_MIN_IMPORTANCE,
-    DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_LIST_MEMORY_EVENTS_LIMIT,
-    MAX_SEARCH_LIMIT,
+    AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ExportUserDataInput,
+    ForgetUserInput, ForgetUserOutput, ListMemoriesInput, ListMemoriesOutput,
+    ListMemoryEventsInput, ListMemoryEventsOutput, MemoryOperationSummary, SearchMemoryInput,
+    SearchMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_LIST_MEMORY_EVENTS_LIMIT,
+    DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT,
+    MAX_LIST_MEMORY_EVENTS_LIMIT, MAX_SEARCH_LIMIT,
 };
 
 pub struct MemoryEngine {
@@ -394,6 +395,48 @@ impl MemoryEngine {
         .await;
 
         Ok(ForgetUserOutput { deleted: true })
+    }
+
+    pub async fn export_user_data(
+        &self,
+        input: ExportUserDataInput,
+    ) -> MemcoreResult<UserMemoryExport> {
+        validate_tenant(&input.tenant)?;
+
+        let facts = self
+            .fact_store
+            .search_facts(FactSearchQuery {
+                tenant: input.tenant.clone(),
+                memory_types: None,
+                query_text: None,
+                limit: EXPORT_FACTS_LIMIT,
+                cursor: None,
+                include_deleted: input.include_deleted,
+            })
+            .await?;
+
+        let memory_events = if input.include_events {
+            match &self.event_store {
+                Some(event_store) => {
+                    event_store
+                        .list_events(MemoryEventQuery::new(
+                            input.tenant.clone(),
+                            EXPORT_EVENTS_LIMIT,
+                        ))
+                        .await?
+                }
+                None => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+
+        Ok(UserMemoryExport::new(
+            input.tenant.org_id,
+            input.tenant.user_id,
+            facts,
+            memory_events,
+        ))
     }
 
     pub async fn list_memory_events(

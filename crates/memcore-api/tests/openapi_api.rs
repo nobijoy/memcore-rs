@@ -66,6 +66,7 @@ async fn openapi_json_is_valid_json_with_expected_paths() {
     assert_eq!(json["info"]["title"], "memcore API");
     assert!(json["paths"]["/api/v1/memories"].is_object());
     assert!(json["paths"]["/api/v1/api-keys"].is_object());
+    assert!(json["paths"]["/api/v1/users/{user_id}/export"].is_object());
     assert!(json["paths"]["/health"].is_object());
 
     let global_security = json.get("security");

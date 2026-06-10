@@ -97,6 +97,13 @@ pub struct DeleteMemoryOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExportUserDataInput {
+    pub tenant: TenantContext,
+    pub include_events: bool,
+    pub include_deleted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForgetUserInput {
     pub tenant: TenantContext,
 }

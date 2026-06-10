@@ -1,5 +1,6 @@
 pub mod api_keys;
 pub mod context;
+pub mod export;
 pub mod memories;
 pub mod memory_events;
 
@@ -11,6 +12,10 @@ pub use api_keys::{
 pub use context::{
     validate_build_context_request, BuildContextRequest, BuildContextResponse,
     ContextMemoryResponse,
+};
+pub use export::{
+    ExportFactItemResponse, ExportMemorySourceResponse, ExportUserQuery, ExportUserResponse,
+    UserMemoryExportResponse,
 };
 pub use memories::{
     parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse,
