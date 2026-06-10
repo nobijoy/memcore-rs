@@ -209,14 +209,22 @@ async fn postgres_fact_backend_requires_postgres_feature() {
 }
 
 #[tokio::test]
-async fn unsupported_qdrant_vector_backend_fails_startup() {
-    let settings = Settings {
-        vector_backend: VectorBackend::Qdrant,
-        ..Settings::default()
-    };
+async fn default_api_startup_uses_mock_vector_backend() {
+    let settings = Settings::default();
+    assert_eq!(settings.vector_backend, VectorBackend::Mock);
+
+    AppState::initialize(settings)
+        .await
+        .expect("default mock vector backend should initialize");
+}
+
+#[cfg(not(feature = "qdrant"))]
+#[tokio::test]
+async fn qdrant_vector_backend_requires_qdrant_feature() {
+    let settings = Settings::qdrant_with_url("http://localhost:6333");
 
     let error = match AppState::initialize(settings).await {
-        Ok(_) => panic!("qdrant vector backend should not initialize"),
+        Ok(_) => panic!("qdrant vector backend should fail without qdrant feature"),
         Err(error) => error,
     };
 
@@ -224,6 +232,42 @@ async fn unsupported_qdrant_vector_backend_fails_startup() {
     assert!(
         error
             .to_string()
-            .contains("qdrant vector backend is not wired into the API yet")
+            .contains("Qdrant vector backend requires the `qdrant` cargo feature")
+    );
+}
+
+#[cfg(feature = "qdrant")]
+#[tokio::test]
+async fn missing_qdrant_url_fails_when_qdrant_selected() {
+    let settings = Settings {
+        vector_backend: VectorBackend::Qdrant,
+        qdrant_url: String::new(),
+        ..Settings::default()
+    };
+
+    let error = match AppState::initialize(settings).await {
+        Ok(_) => panic!("qdrant without url should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.code(), "validation_error");
+    assert!(
+        error
+            .to_string()
+            .contains("MEMCORE_QDRANT_URL is required when MEMCORE_VECTOR_BACKEND=qdrant")
+    );
+}
+
+#[tokio::test]
+async fn unsupported_vector_backend_fails_config() {
+    use std::str::FromStr;
+
+    let error =
+        VectorBackend::from_str("bad-backend").expect_err("invalid backend should fail");
+    assert_eq!(error.code(), "validation_error");
+    assert!(
+        error
+            .to_string()
+            .contains("Invalid MEMCORE_VECTOR_BACKEND value")
     );
 }

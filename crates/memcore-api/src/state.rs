@@ -21,6 +21,8 @@ use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
 #[cfg(feature = "lancedb")]
 use memcore_storage::LanceDbVectorStore;
+#[cfg(feature = "qdrant")]
+use memcore_storage::QdrantVectorStore;
 
 /// Default embedding dimensions for the mock embedding provider.
 const MOCK_EMBEDDING_DIMENSIONS: usize = 4;
@@ -348,10 +350,38 @@ async fn create_vector_store(
                 ))
             }
         }
-        VectorBackend::Qdrant => Err(MemcoreError::ValidationError(
-            "qdrant vector backend is not wired into the API yet".to_string(),
-        )),
+        VectorBackend::Qdrant => {
+            #[cfg(feature = "qdrant")]
+            {
+                let url = require_qdrant_url(settings)?;
+                let store = QdrantVectorStore::connect(
+                    &url,
+                    &settings.qdrant_collection,
+                    dimensions,
+                )
+                .await?;
+                Ok(Arc::new(store))
+            }
+            #[cfg(not(feature = "qdrant"))]
+            {
+                let _ = dimensions;
+                Err(MemcoreError::ValidationError(
+                    "Qdrant vector backend requires the `qdrant` cargo feature".to_string(),
+                ))
+            }
+        }
     }
+}
+
+#[cfg(feature = "qdrant")]
+fn require_qdrant_url(settings: &Settings) -> MemcoreResult<String> {
+    let url = settings.qdrant_url.trim();
+    if url.is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "MEMCORE_QDRANT_URL is required when MEMCORE_VECTOR_BACKEND=qdrant".to_string(),
+        ));
+    }
+    Ok(url.to_string())
 }
 
 /// In-memory mock fact and vector stores for fast API tests.

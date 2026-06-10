@@ -13,6 +13,7 @@ const MEMCORE_EVENT_BACKEND: &str = "MEMCORE_EVENT_BACKEND";
 const MEMCORE_DATABASE_URL: &str = "MEMCORE_DATABASE_URL";
 const MEMCORE_POSTGRES_URL: &str = "MEMCORE_POSTGRES_URL";
 const MEMCORE_QDRANT_URL: &str = "MEMCORE_QDRANT_URL";
+const MEMCORE_QDRANT_COLLECTION: &str = "MEMCORE_QDRANT_COLLECTION";
 const MEMCORE_LANCEDB_PATH: &str = "MEMCORE_LANCEDB_PATH";
 const MEMCORE_LANCEDB_TABLE: &str = "MEMCORE_LANCEDB_TABLE";
 const MEMCORE_LLM_PROVIDER: &str = "MEMCORE_LLM_PROVIDER";
@@ -130,6 +131,7 @@ pub struct Settings {
     pub database_url: String,
     pub postgres_url: Option<String>,
     pub qdrant_url: String,
+    pub qdrant_collection: String,
     pub lancedb_path: String,
     pub lancedb_table: String,
     pub llm_provider: LlmProviderKind,
@@ -177,6 +179,7 @@ impl Default for Settings {
             database_url: "sqlite://./data/memcore.db".to_string(),
             postgres_url: None,
             qdrant_url: "http://localhost:6333".to_string(),
+            qdrant_collection: "memcore_vectors".to_string(),
             lancedb_path: "./data/lancedb".to_string(),
             lancedb_table: "memcore_vectors".to_string(),
             llm_provider: LlmProviderKind::Mock,
@@ -220,6 +223,8 @@ impl Settings {
         let database_url = read_env_or(MEMCORE_DATABASE_URL, &defaults.database_url);
         let postgres_url = read_env_optional(MEMCORE_POSTGRES_URL);
         let qdrant_url = read_env_or(MEMCORE_QDRANT_URL, &defaults.qdrant_url);
+        let qdrant_collection =
+            read_env_or(MEMCORE_QDRANT_COLLECTION, &defaults.qdrant_collection);
         let lancedb_path = read_env_or(MEMCORE_LANCEDB_PATH, &defaults.lancedb_path);
         let lancedb_table = read_env_or(MEMCORE_LANCEDB_TABLE, &defaults.lancedb_table);
         let llm_provider =
@@ -268,6 +273,7 @@ impl Settings {
             database_url,
             postgres_url,
             qdrant_url,
+            qdrant_collection,
             lancedb_path,
             lancedb_table,
             llm_provider,
@@ -313,6 +319,28 @@ impl Settings {
         }
     }
 
+    /// Qdrant vector store with mock facts (API integration tests).
+    pub fn qdrant_with_url(qdrant_url: impl Into<String>) -> Self {
+        Self {
+            vector_backend: VectorBackend::Qdrant,
+            qdrant_url: qdrant_url.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Qdrant vector store with explicit collection name (API integration tests).
+    pub fn qdrant_with_collection(
+        qdrant_url: impl Into<String>,
+        qdrant_collection: impl Into<String>,
+    ) -> Self {
+        Self {
+            vector_backend: VectorBackend::Qdrant,
+            qdrant_url: qdrant_url.into(),
+            qdrant_collection: qdrant_collection.into(),
+            ..Self::default()
+        }
+    }
+
     fn validate(&self) -> MemcoreResult<()> {
         if self.host.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
@@ -323,12 +351,6 @@ impl Settings {
         if self.database_url.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_DATABASE_URL cannot be empty".to_string(),
-            ));
-        }
-
-        if self.qdrant_url.trim().is_empty() {
-            return Err(MemcoreError::ValidationError(
-                "MEMCORE_QDRANT_URL cannot be empty".to_string(),
             ));
         }
 
@@ -423,10 +445,16 @@ impl Settings {
             ));
         }
 
-        if self.storage_mode == StorageMode::Production {
-            if self.vector_backend == VectorBackend::Qdrant && self.qdrant_url.trim().is_empty() {
+        if self.vector_backend == VectorBackend::Qdrant {
+            if self.qdrant_url.trim().is_empty() {
                 return Err(MemcoreError::ValidationError(
-                    "MEMCORE_QDRANT_URL is required when production mode uses qdrant".to_string(),
+                    "MEMCORE_QDRANT_URL is required when MEMCORE_VECTOR_BACKEND=qdrant".to_string(),
+                ));
+            }
+            if self.qdrant_collection.trim().is_empty() {
+                return Err(MemcoreError::ValidationError(
+                    "MEMCORE_QDRANT_COLLECTION cannot be empty when MEMCORE_VECTOR_BACKEND=qdrant"
+                        .to_string(),
                 ));
             }
         }
@@ -667,7 +695,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 30] = [
+    const ENV_KEYS: [&str; 31] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -678,6 +706,7 @@ mod tests {
         "MEMCORE_DATABASE_URL",
         "MEMCORE_POSTGRES_URL",
         "MEMCORE_QDRANT_URL",
+        "MEMCORE_QDRANT_COLLECTION",
         "MEMCORE_LANCEDB_PATH",
         "MEMCORE_LANCEDB_TABLE",
         "MEMCORE_LLM_PROVIDER",
@@ -1214,6 +1243,66 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         assert_eq!(settings.port, 7777);
+    }
+
+    #[test]
+    fn qdrant_backend_requires_qdrant_url() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_VECTOR_BACKEND", "qdrant");
+            std::env::set_var("MEMCORE_QDRANT_URL", "   ");
+        }
+
+        let error = Settings::from_env().expect_err("qdrant without url should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_QDRANT_URL is required when MEMCORE_VECTOR_BACKEND=qdrant")
+        );
+    }
+
+    #[test]
+    fn qdrant_collection_defaults_to_memcore_vectors() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_VECTOR_BACKEND", "qdrant");
+        }
+
+        let settings = Settings::from_env().expect("qdrant settings should load");
+        assert_eq!(settings.vector_backend, VectorBackend::Qdrant);
+        assert_eq!(settings.qdrant_url, "http://localhost:6333");
+        assert_eq!(settings.qdrant_collection, "memcore_vectors");
+    }
+
+    #[test]
+    fn loads_qdrant_collection_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_VECTOR_BACKEND", "qdrant");
+            std::env::set_var("MEMCORE_QDRANT_COLLECTION", "custom_vectors");
+        }
+
+        let settings = Settings::from_env().expect("qdrant collection should load");
+        assert_eq!(settings.qdrant_collection, "custom_vectors");
     }
 
     #[test]

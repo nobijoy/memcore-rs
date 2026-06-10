@@ -11,6 +11,7 @@ path = "src/lib.rs"
 default = []
 postgres = ["memcore-storage/postgres"]
 lancedb = ["memcore-storage/lancedb", "memcore-storage/sqlite"]
+qdrant = ["memcore-storage/qdrant"]
 
 [[bin]]
 name = "memcore-api"
@@ -26,6 +27,10 @@ name = "database_auth_api"
 [[test]]
 name = "lancedb_vectors_api"
 required-features = ["lancedb"]
+
+[[test]]
+name = "qdrant_vectors_api"
+required-features = ["qdrant"]
 
 [dependencies]
 axum = "0.8"
