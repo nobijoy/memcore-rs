@@ -1,10 +1,12 @@
-# Multi-stage image for memcore-api (no LanceDB by default).
-# Optional features via CARGO_FEATURES build arg:
+# Multi-stage image for memcore-api (no LanceDB or Qdrant by default).
+# Optional features via CARGO_FEATURES build arg (comma-separated):
 #   postgres  — required for MEMCORE_FACT_BACKEND=postgres (production compose)
-#   lancedb   — optional vector backend (heavier build)
+#   qdrant    — required for MEMCORE_VECTOR_BACKEND=qdrant (production compose)
+#   lancedb   — optional embedded vector backend (heavier build)
 # Examples:
 #   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES=postgres -t memcore-api:postgres .
-#   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES="postgres,lancedb" -t memcore-api:full .
+#   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES="postgres,qdrant" -t memcore-api:prod .
+#   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES="postgres,lancedb" -t memcore-api:lancedb .
 
 ARG CARGO_FEATURES=
 

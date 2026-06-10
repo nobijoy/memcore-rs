@@ -1,17 +1,21 @@
-# Production-shaped Docker Compose: Postgres-backed facts, events, and API keys.
-# Vector backend is mock by default (no LanceDB, no Qdrant).
+# Production-shaped Docker Compose: Postgres (facts/events/API keys) + Qdrant (vectors).
+# LanceDB is not enabled in this stack.
 #
 # Override secrets via a `.env` file or environment — do not use placeholder values
 # in real deployments.
 #
-# Build with Postgres support (required for MEMCORE_FACT_BACKEND=postgres):
+# Build with Postgres + Qdrant support (required for configured backends):
 #   docker compose -f docker/docker-compose.prod.yml up --build
 #
 # Enable OpenAI providers (optional):
 #   Set MEMCORE_LLM_PROVIDER=openai, MEMCORE_EMBEDDING_PROVIDER=openai, and OPENAI_API_KEY
 #   in a `.env` file or under `memcore.environment` below.
 #
-# Enable LanceDB vector backend (optional, heavier image build):
+# Revert to mock vector backend (optional):
+#   build.args.CARGO_FEATURES: "postgres"
+#   MEMCORE_VECTOR_BACKEND: mock
+#
+# Enable LanceDB vector backend instead (optional, heavier image build — not recommended here):
 #   build.args.CARGO_FEATURES: "postgres,lancedb"
 #   MEMCORE_VECTOR_BACKEND: lancedb
 #   MEMCORE_LANCEDB_PATH: /app/data/lancedb
@@ -31,17 +35,29 @@ services:
       timeout: 5s
       retries: 5
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # The official Qdrant image does not include curl/wget; health is checked via
+    # host: curl http://localhost:6333/healthz (see docs/DEPLOYMENT.md).
+
   memcore:
     build:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        CARGO_FEATURES: postgres
+        CARGO_FEATURES: postgres,qdrant
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     environment:
       MEMCORE_ENV: production
       MEMCORE_HOST: 0.0.0.0
@@ -53,12 +69,20 @@ services:
       MEMCORE_EVENT_BACKEND: postgres
       MEMCORE_POSTGRES_URL: postgres://memcore:memcore_password@postgres:5432/memcore
 
-      MEMCORE_VECTOR_BACKEND: mock
+      MEMCORE_VECTOR_BACKEND: qdrant
+      MEMCORE_QDRANT_URL: http://qdrant:6333
+      MEMCORE_QDRANT_COLLECTION: memcore_vectors
 
       MEMCORE_LLM_PROVIDER: mock
       MEMCORE_LLM_MODEL: mock-llm
       MEMCORE_EMBEDDING_PROVIDER: mock
       MEMCORE_EMBEDDING_MODEL: mock-embedding
+      # Optional OpenAI providers (uncomment and set OPENAI_API_KEY):
+      # MEMCORE_LLM_PROVIDER: openai
+      # MEMCORE_LLM_MODEL: gpt-4.1-mini
+      # MEMCORE_EMBEDDING_PROVIDER: openai
+      # MEMCORE_EMBEDDING_MODEL: text-embedding-3-small
+      # OPENAI_API_KEY: your_key_here
 
       MEMCORE_AUTH_ENABLED: "true"
       MEMCORE_AUTH_MODE: dev
@@ -80,3 +104,4 @@ services:
 
 volumes:
   postgres_data:
+  qdrant_data:
