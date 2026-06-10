@@ -12,7 +12,7 @@ use crate::audit::{
 };
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventStore, VectorStore,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, VectorStore,
 };
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
@@ -21,9 +21,11 @@ use crate::{assemble_context, BuildContextInput, BuildContextOutput, MemorySearc
 
 pub use types::{
     AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ForgetUserInput,
-    ForgetUserOutput, ListMemoriesInput, ListMemoriesOutput, MemoryOperationSummary,
-    SearchMemoryInput, SearchMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_MIN_IMPORTANCE,
-    DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_SEARCH_LIMIT,
+    ForgetUserOutput, ListMemoriesInput, ListMemoriesOutput, ListMemoryEventsInput,
+    ListMemoryEventsOutput, MemoryOperationSummary, SearchMemoryInput, SearchMemoryOutput,
+    DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_LIST_MEMORY_EVENTS_LIMIT, DEFAULT_MIN_IMPORTANCE,
+    DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT, MAX_LIST_MEMORY_EVENTS_LIMIT,
+    MAX_SEARCH_LIMIT,
 };
 
 pub struct MemoryEngine {
@@ -393,6 +395,33 @@ impl MemoryEngine {
 
         Ok(ForgetUserOutput { deleted: true })
     }
+
+    pub async fn list_memory_events(
+        &self,
+        input: ListMemoryEventsInput,
+    ) -> MemcoreResult<ListMemoryEventsOutput> {
+        validate_tenant(&input.tenant)?;
+        let limit = normalize_memory_event_list_limit(input.limit)?;
+
+        let Some(event_store) = &self.event_store else {
+            return Ok(ListMemoryEventsOutput {
+                events: Vec::new(),
+                next_cursor: None,
+            });
+        };
+
+        let mut query = MemoryEventQuery::new(input.tenant, limit);
+        query.fact_id = input.fact_id;
+        query.operation = input.operation;
+        query.cursor = input.cursor;
+
+        let events = event_store.list_events(query).await?;
+
+        Ok(ListMemoryEventsOutput {
+            events,
+            next_cursor: None,
+        })
+    }
 }
 
 fn messages_for_llm_extraction(
@@ -484,6 +513,25 @@ fn normalize_search_limit(limit: usize) -> MemcoreResult<usize> {
         return Err(MemcoreError::ValidationError(format!(
             "limit cannot exceed {}",
             types::MAX_SEARCH_LIMIT
+        )));
+    }
+
+    Ok(limit)
+}
+
+fn normalize_memory_event_list_limit(limit: usize) -> MemcoreResult<usize> {
+    use memcore_common::MemcoreError;
+
+    if limit == 0 {
+        return Err(MemcoreError::ValidationError(
+            "limit must be greater than 0".to_string(),
+        ));
+    }
+
+    if limit > types::MAX_LIST_MEMORY_EVENTS_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {}",
+            types::MAX_LIST_MEMORY_EVENTS_LIMIT
         )));
     }
 

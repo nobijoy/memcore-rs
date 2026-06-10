@@ -2,6 +2,7 @@ pub mod common;
 pub mod context;
 pub mod health;
 pub mod memories;
+pub mod memory_events;
 pub mod users;
 
 use axum::Router;
@@ -20,6 +21,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route(
             "/api/v1/users/{user_id}/memories",
             get(memories::list_user_memories),
+        )
+        .route(
+            "/api/v1/users/{user_id}/memory-events",
+            get(memory_events::list_user_memory_events),
         )
         .route(
             "/api/v1/users/{user_id}/memories/{memory_id}",

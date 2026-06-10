@@ -105,3 +105,24 @@ pub struct ForgetUserInput {
 pub struct ForgetUserOutput {
     pub deleted: bool,
 }
+
+/// Default limit for listing memory audit events when callers omit an explicit limit.
+pub const DEFAULT_LIST_MEMORY_EVENTS_LIMIT: usize = crate::ports::DEFAULT_MEMORY_EVENT_LIST_LIMIT;
+
+/// Maximum allowed limit for listing memory audit events via the API.
+pub const MAX_LIST_MEMORY_EVENTS_LIMIT: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListMemoryEventsInput {
+    pub tenant: TenantContext,
+    pub fact_id: Option<Uuid>,
+    pub operation: Option<crate::MemoryEventOperation>,
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListMemoryEventsOutput {
+    pub events: Vec<crate::MemoryEvent>,
+    pub next_cursor: Option<String>,
+}
