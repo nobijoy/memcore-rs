@@ -6,6 +6,7 @@ use memcore_common::MemcoreResult;
 use memcore_core::TenantContext;
 
 use crate::observability::{attach_error_code, error_response};
+use crate::security::AuthContext;
 
 pub const ORG_HEADER: &str = "X-Organization-ID";
 
@@ -23,10 +24,26 @@ impl OrganizationContext {
 
 /// Validates `X-Organization-ID` and attaches [`OrganizationContext`] to the request.
 ///
-/// Runs after auth middleware on protected routes. Does not validate `user_id` (request body).
+/// Runs after auth middleware on protected routes. In database auth mode, the header must
+/// match the authenticated API key's `org_id`.
 pub async fn require_organization(request: Request, next: Next) -> Response {
+    let auth_context = request.extensions().get::<AuthContext>().cloned();
+
     match extract_organization(request.headers()) {
         Ok(org) => {
+            if let Some(auth) = &auth_context {
+                if auth.org_id != org.org_id {
+                    let mut response = error_response(
+                        StatusCode::FORBIDDEN,
+                        "FORBIDDEN",
+                        "organization header does not match api key",
+                        &request,
+                    );
+                    attach_error_code(&mut response, "FORBIDDEN");
+                    return response;
+                }
+            }
+
             let mut request = request;
             request.extensions_mut().insert(org);
             next.run(request).await

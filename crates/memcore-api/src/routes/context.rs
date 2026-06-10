@@ -1,17 +1,20 @@
 use axum::Json;
 use axum::extract::{Extension, State};
-use memcore_core::BuildContextInput;
+use memcore_core::{ApiKeyScope, BuildContextInput};
 
 use crate::dto::{BuildContextRequest, BuildContextResponse, validate_build_context_request};
 use crate::middleware::OrganizationContext;
-use crate::routes::common::ApiError;
+use crate::routes::common::{check_scope, ApiError};
+use crate::security::AuthContext;
 use crate::state::AppState;
 
 pub async fn build_context(
     State(state): State<AppState>,
     Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
     Json(request): Json<BuildContextRequest>,
 ) -> Result<Json<BuildContextResponse>, ApiError> {
+    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryRead)?;
     validate_build_context_request(&request)?;
 
     let tenant = organization.tenant_with_user_id(request.user_id)?;

@@ -21,6 +21,9 @@ name = "bootstrap_postgres_api"
 required-features = ["postgres"]
 
 [[test]]
+name = "database_auth_api"
+
+[[test]]
 name = "lancedb_vectors_api"
 required-features = ["lancedb"]
 

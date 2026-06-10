@@ -90,6 +90,33 @@ pub(crate) fn row_to_fact(
     })
 }
 
+pub(crate) fn api_key_scope_to_str(value: memcore_core::ApiKeyScope) -> &'static str {
+    match value {
+        memcore_core::ApiKeyScope::MemoryRead => "memory_read",
+        memcore_core::ApiKeyScope::MemoryWrite => "memory_write",
+        memcore_core::ApiKeyScope::MemoryDelete => "memory_delete",
+        memcore_core::ApiKeyScope::UserDelete => "user_delete",
+        memcore_core::ApiKeyScope::AuditRead => "audit_read",
+        memcore_core::ApiKeyScope::AdminRead => "admin_read",
+        memcore_core::ApiKeyScope::AdminWrite => "admin_write",
+    }
+}
+
+pub(crate) fn api_key_scope_from_str(value: &str) -> MemcoreResult<memcore_core::ApiKeyScope> {
+    match value {
+        "memory_read" => Ok(memcore_core::ApiKeyScope::MemoryRead),
+        "memory_write" => Ok(memcore_core::ApiKeyScope::MemoryWrite),
+        "memory_delete" => Ok(memcore_core::ApiKeyScope::MemoryDelete),
+        "user_delete" => Ok(memcore_core::ApiKeyScope::UserDelete),
+        "audit_read" => Ok(memcore_core::ApiKeyScope::AuditRead),
+        "admin_read" => Ok(memcore_core::ApiKeyScope::AdminRead),
+        "admin_write" => Ok(memcore_core::ApiKeyScope::AdminWrite),
+        _ => Err(MemcoreError::StorageError(format!(
+            "invalid api key scope value: {value}"
+        ))),
+    }
+}
+
 pub(crate) fn memory_event_operation_to_str(value: MemoryEventOperation) -> &'static str {
     match value {
         MemoryEventOperation::Add => "add",

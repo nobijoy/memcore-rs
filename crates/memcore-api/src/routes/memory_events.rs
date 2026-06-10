@@ -1,22 +1,25 @@
 use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use memcore_common::MemcoreError;
-use memcore_core::{ListMemoryEventsInput, MAX_LIST_MEMORY_EVENTS_LIMIT, TenantContext};
+use memcore_core::{ApiKeyScope, ListMemoryEventsInput, MAX_LIST_MEMORY_EVENTS_LIMIT, TenantContext};
 use uuid::Uuid;
 
 use crate::dto::{
     parse_memory_event_operation_label, ListMemoryEventsQuery, ListMemoryEventsResponse,
 };
 use crate::middleware::OrganizationContext;
-use crate::routes::common::ApiError;
+use crate::routes::common::{check_scope, ApiError};
+use crate::security::AuthContext;
 use crate::state::AppState;
 
 pub async fn list_user_memory_events(
     State(state): State<AppState>,
     Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
     Path(user_id): Path<String>,
     Query(query): Query<ListMemoryEventsQuery>,
 ) -> Result<Json<ListMemoryEventsResponse>, ApiError> {
+    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::AuditRead)?;
     validate_path_user_id(&user_id)?;
 
     let operation = query

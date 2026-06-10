@@ -3,19 +3,20 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
-    EmbeddingProviderKind, EventBackend, FactBackend, LlmProviderKind, Settings, VectorBackend,
+    AuthMode, EmbeddingProviderKind, EventBackend, FactBackend, LlmProviderKind, Settings,
+    VectorBackend,
 };
-use memcore_core::{EmbeddingProvider, FactStore, LlmProvider, MemoryEngine, MemoryEventStore, VectorStore};
+use memcore_core::{ApiKeyStore, EmbeddingProvider, FactStore, LlmProvider, MemoryEngine, MemoryEventStore, VectorStore};
 use memcore_providers::{
     MockEmbeddingProvider, MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider,
     OpenAiLlmProvider, default_embedding_dimensions_for_model,
 };
 use memcore_storage::{
-    MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteFactStore,
-    SqliteMemoryEventStore,
+    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteApiKeyStore,
+    SqliteFactStore, SqliteMemoryEventStore,
 };
 #[cfg(feature = "postgres")]
-use memcore_storage::{PostgresFactStore, PostgresMemoryEventStore};
+use memcore_storage::{PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore};
 use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
 #[cfg(feature = "lancedb")]
@@ -29,6 +30,7 @@ pub struct AppState {
     pub settings: Settings,
     pub started_at: DateTime<Utc>,
     pub memory_engine: Arc<MemoryEngine>,
+    pub api_key_store: Arc<dyn ApiKeyStore>,
     pub rate_limiter: Arc<RateLimiter>,
     pub metrics: Arc<Metrics>,
 }
@@ -37,10 +39,12 @@ impl AppState {
     /// Builds application state using configured storage and providers.
     pub async fn initialize(settings: Settings) -> MemcoreResult<Self> {
         let memory_engine = Arc::new(create_memory_engine(&settings).await?);
+        let api_key_store = create_api_key_store(&settings).await?;
         Ok(Self {
             settings: settings.clone(),
             started_at: Utc::now(),
             memory_engine,
+            api_key_store,
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
         })
@@ -57,6 +61,7 @@ impl AppState {
             Self {
                 started_at: Utc::now(),
                 memory_engine: Arc::new(create_mock_memory_engine(&settings)),
+                api_key_store: Arc::new(MockApiKeyStore::new()),
                 settings: settings.clone(),
                 rate_limiter: create_rate_limiter(&settings),
                 metrics: Arc::new(Metrics::default()),
@@ -75,6 +80,7 @@ impl AppState {
             settings: settings.clone(),
             started_at: Utc::now(),
             memory_engine,
+            api_key_store: Arc::new(MockApiKeyStore::new()),
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
         }
@@ -108,6 +114,33 @@ pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEn
         Some(llm_provider_name(settings)),
         Some(settings.llm_model.clone()),
     ))
+}
+
+async fn create_api_key_store(settings: &Settings) -> MemcoreResult<Arc<dyn ApiKeyStore>> {
+    if settings.auth_mode == AuthMode::Dev {
+        return Ok(Arc::new(MockApiKeyStore::new()));
+    }
+
+    #[cfg(feature = "postgres")]
+    if settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres
+    {
+        let postgres_url = require_postgres_url(settings)?;
+        let store = PostgresApiKeyStore::connect(&postgres_url).await?;
+        return Ok(Arc::new(store));
+    }
+
+    #[cfg(not(feature = "postgres"))]
+    if settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres
+    {
+        return Err(MemcoreError::ValidationError(
+            "database auth with postgres storage requires the `postgres` cargo feature".to_string(),
+        ));
+    }
+
+    let store = SqliteApiKeyStore::connect(&settings.database_url).await?;
+    Ok(Arc::new(store))
 }
 
 async fn create_storage(

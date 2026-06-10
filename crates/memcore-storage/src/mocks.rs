@@ -2,16 +2,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::{Fact, TenantContext};
 use serde_json::Value;
 use uuid::Uuid;
 
 use memcore_core::ports::{
-    FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, VectorRecord,
+    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, VectorRecord,
     VectorSearchQuery, VectorSearchResult, VectorStore,
 };
-use memcore_core::MemoryEvent;
+use memcore_core::{ApiKeyRecord, MemoryEvent};
 
 fn event_matches_tenant(event: &MemoryEvent, tenant: &TenantContext) -> bool {
     event.org_id == tenant.org_id && event.user_id == tenant.user_id
@@ -383,6 +384,96 @@ impl MemoryEventStore for MockMemoryEventStore {
         results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         results.truncate(limit);
         Ok(results)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MockApiKeyStore {
+    keys: RwLock<Vec<ApiKeyRecord>>,
+}
+
+impl MockApiKeyStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl ApiKeyStore for MockApiKeyStore {
+    async fn find_by_hash(&self, key_hash: &str) -> MemcoreResult<Option<ApiKeyRecord>> {
+        let keys = self.keys.read().expect("api keys lock poisoned");
+        Ok(keys
+            .iter()
+            .find(|record| record.key_hash == key_hash && record.is_active())
+            .cloned())
+    }
+
+    async fn insert_api_key(&self, record: ApiKeyRecord) -> MemcoreResult<ApiKeyRecord> {
+        self.keys
+            .write()
+            .expect("api keys lock poisoned")
+            .push(record.clone());
+        Ok(record)
+    }
+
+    async fn revoke_api_key(&self, org_id: &str, key_id: Uuid) -> MemcoreResult<()> {
+        let mut keys = self.keys.write().expect("api keys lock poisoned");
+        let Some(record) = keys
+            .iter_mut()
+            .find(|record| record.id == key_id && record.org_id == org_id && record.is_active())
+        else {
+            return Err(MemcoreError::NotFound(format!("api key not found: {key_id}")));
+        };
+
+        record.revoked_at = Some(Utc::now());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod api_key_store_tests {
+    use chrono::Utc;
+    use memcore_common::hash_api_key;
+    use memcore_core::ApiKeyScope;
+    use uuid::Uuid;
+
+    use super::MockApiKeyStore;
+    use crate::traits::ApiKeyStore;
+    use memcore_core::ApiKeyRecord;
+
+    #[tokio::test]
+    async fn mock_api_key_store_insert_find_revoke() {
+        let store = MockApiKeyStore::new();
+        let record = ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: "org_mock".to_string(),
+            name: "mock".to_string(),
+            key_hash: hash_api_key("pepper", "token"),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: None,
+        };
+
+        store
+            .insert_api_key(record.clone())
+            .await
+            .expect("insert should succeed");
+        let found = store
+            .find_by_hash(&record.key_hash)
+            .await
+            .expect("find should succeed")
+            .expect("record should exist");
+        assert_eq!(found.id, record.id);
+
+        store
+            .revoke_api_key("org_mock", record.id)
+            .await
+            .expect("revoke should succeed");
+        assert!(store
+            .find_by_hash(&record.key_hash)
+            .await
+            .expect("find should succeed")
+            .is_none());
     }
 }
 

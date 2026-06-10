@@ -19,13 +19,13 @@ pub use engine::{
     MAX_LIST_MEMORY_EVENTS_LIMIT, MAX_SEARCH_LIMIT,
 };
 pub use models::{
-    CandidateFact, Fact, FactOperation, FactOperationDecision, MemoryEvent, MemoryEventOperation,
-    MemorySearchResult, MemorySource, MemoryType, TenantContext,
+    ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
+    MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,
 };
 pub use privacy::PiiRedactor;
 pub use ports::{
-    EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
+    ApiKeyStore, EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery,
+    FactStore, LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
     SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
     DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };

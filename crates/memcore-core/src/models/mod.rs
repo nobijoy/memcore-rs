@@ -1,9 +1,11 @@
+mod api_key;
 mod event;
 mod fact;
 mod memory;
 mod tenant;
 mod validation;
 
+pub use api_key::{ApiKeyRecord, ApiKeyScope};
 pub use event::{MemoryEvent, MemoryEventOperation};
 pub use fact::{CandidateFact, Fact, FactOperationDecision, MemorySearchResult};
 pub use memory::{FactOperation, MemorySource, MemoryType};

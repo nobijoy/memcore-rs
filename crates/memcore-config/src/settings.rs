@@ -22,7 +22,9 @@ const MEMCORE_EMBEDDING_MODEL: &str = "MEMCORE_EMBEDDING_MODEL";
 const MEMCORE_ENABLE_PII_REDACTION: &str = "MEMCORE_ENABLE_PII_REDACTION";
 const MEMCORE_MIN_IMPORTANCE: &str = "MEMCORE_MIN_IMPORTANCE";
 const MEMCORE_AUTH_ENABLED: &str = "MEMCORE_AUTH_ENABLED";
+const MEMCORE_AUTH_MODE: &str = "MEMCORE_AUTH_MODE";
 const MEMCORE_DEV_API_KEY: &str = "MEMCORE_DEV_API_KEY";
+const MEMCORE_API_KEY_PEPPER: &str = "MEMCORE_API_KEY_PEPPER";
 const MEMCORE_RATE_LIMIT_ENABLED: &str = "MEMCORE_RATE_LIMIT_ENABLED";
 const MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: &str = "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE";
 const MEMCORE_LOG_FORMAT: &str = "MEMCORE_LOG_FORMAT";
@@ -34,6 +36,12 @@ const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_REQUEST_ID_HEADER: &str = "X-Request-ID";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthMode {
+    Dev,
+    Database,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFormat {
@@ -130,10 +138,14 @@ pub struct Settings {
     pub embedding_model: String,
     pub enable_pii_redaction: bool,
     pub min_importance: f32,
-    /// Temporary development auth toggle. Production will use hashed keys from storage.
+    /// Temporary development auth toggle.
     pub auth_enabled: bool,
+    /// Authentication mode: dev API key or database-backed hashed keys.
+    pub auth_mode: AuthMode,
     /// Temporary plaintext dev API key. Do not log this value.
     pub dev_api_key: String,
+    /// Pepper for HMAC hashing of database-backed API keys. Required in database auth mode.
+    pub api_key_pepper: Option<String>,
     /// OpenAI API key. Required only when LLM or embedding provider is OpenAI.
     pub openai_api_key: Option<String>,
     /// OpenAI API base URL (supports OpenAI-compatible gateways).
@@ -174,7 +186,9 @@ impl Default for Settings {
             enable_pii_redaction: true,
             min_importance: 0.55,
             auth_enabled: true,
+            auth_mode: AuthMode::Dev,
             dev_api_key: "memcore_dev_key".to_string(),
+            api_key_pepper: None,
             openai_api_key: None,
             openai_base_url: DEFAULT_OPENAI_BASE_URL.to_string(),
             rate_limit_enabled: true,
@@ -220,7 +234,9 @@ impl Settings {
             parse_bool(MEMCORE_ENABLE_PII_REDACTION, defaults.enable_pii_redaction)?;
         let min_importance = parse_f32(MEMCORE_MIN_IMPORTANCE, defaults.min_importance)?;
         let auth_enabled = parse_bool(MEMCORE_AUTH_ENABLED, defaults.auth_enabled)?;
+        let auth_mode = AuthMode::from_str(&read_env_or(MEMCORE_AUTH_MODE, "dev"))?;
         let dev_api_key = read_env_or(MEMCORE_DEV_API_KEY, &defaults.dev_api_key);
+        let api_key_pepper = read_env_optional(MEMCORE_API_KEY_PEPPER);
         let openai_api_key = read_env_optional(OPENAI_API_KEY);
         let openai_base_url = read_env_or(OPENAI_BASE_URL, &defaults.openai_base_url);
         let rate_limit_enabled =
@@ -261,7 +277,9 @@ impl Settings {
             enable_pii_redaction,
             min_importance,
             auth_enabled,
+            auth_mode,
             dev_api_key,
+            api_key_pepper,
             openai_api_key,
             openai_base_url,
             rate_limit_enabled,
@@ -326,9 +344,25 @@ impl Settings {
             ));
         }
 
-        if self.auth_enabled && self.dev_api_key.trim().is_empty() {
+        if self.auth_enabled
+            && self.auth_mode == AuthMode::Dev
+            && self.dev_api_key.trim().is_empty()
+        {
             return Err(MemcoreError::ValidationError(
-                "MEMCORE_DEV_API_KEY cannot be empty when MEMCORE_AUTH_ENABLED=true".to_string(),
+                "MEMCORE_DEV_API_KEY cannot be empty when MEMCORE_AUTH_ENABLED=true and MEMCORE_AUTH_MODE=dev"
+                    .to_string(),
+            ));
+        }
+
+        if self.auth_mode == AuthMode::Database
+            && self
+                .api_key_pepper
+                .as_ref()
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
+        {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_API_KEY_PEPPER is required when MEMCORE_AUTH_MODE=database".to_string(),
             ));
         }
 
@@ -570,6 +604,20 @@ impl FromStr for EmbeddingProviderKind {
     }
 }
 
+impl FromStr for AuthMode {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "dev" => Ok(Self::Dev),
+            "database" => Ok(Self::Database),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_AUTH_MODE value: {value}"
+            ))),
+        }
+    }
+}
+
 impl FromStr for LogFormat {
     type Err = MemcoreError;
 
@@ -608,7 +656,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 28] = [
+    const ENV_KEYS: [&str; 30] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -628,7 +676,9 @@ mod tests {
         "MEMCORE_ENABLE_PII_REDACTION",
         "MEMCORE_MIN_IMPORTANCE",
         "MEMCORE_AUTH_ENABLED",
+        "MEMCORE_AUTH_MODE",
         "MEMCORE_DEV_API_KEY",
+        "MEMCORE_API_KEY_PEPPER",
         "MEMCORE_RATE_LIMIT_ENABLED",
         "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE",
         "MEMCORE_LOG_FORMAT",
@@ -712,6 +762,7 @@ mod tests {
         assert_eq!(settings.fact_backend, super::FactBackend::Mock);
         assert_eq!(settings.event_backend, super::EventBackend::Mock);
         assert_eq!(settings.vector_backend, super::VectorBackend::Mock);
+        assert_eq!(settings.auth_mode, super::AuthMode::Dev);
     }
 
     #[test]
@@ -739,6 +790,50 @@ mod tests {
         let settings = Settings::from_env().expect("settings should load");
         assert_eq!(settings.fact_backend, super::FactBackend::Postgres);
         assert_eq!(settings.event_backend, super::EventBackend::Postgres);
+    }
+
+    #[test]
+    fn database_auth_mode_requires_api_key_pepper() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_AUTH_MODE", "database");
+        }
+
+        let error = Settings::from_env().expect_err("database auth without pepper should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_API_KEY_PEPPER is required when MEMCORE_AUTH_MODE=database")
+        );
+    }
+
+    #[test]
+    fn fails_on_invalid_auth_mode() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_AUTH_MODE", "invalid-mode");
+        }
+
+        let error = Settings::from_env().expect_err("invalid auth mode should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid MEMCORE_AUTH_MODE value")
+        );
     }
 
     #[test]

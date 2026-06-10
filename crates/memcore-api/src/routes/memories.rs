@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, DeleteMemoryInput, ListMemoriesInput, MemoryMessage, MessageRole,
+    AddMemoryInput, ApiKeyScope, DeleteMemoryInput, ListMemoriesInput, MemoryMessage, MessageRole,
     SearchMemoryInput, TenantContext,
 };
 use uuid::Uuid;
@@ -13,14 +13,17 @@ use crate::dto::{
     SearchMemoryResponse,
 };
 use crate::middleware::OrganizationContext;
-use crate::routes::common::ApiError;
+use crate::routes::common::{check_scope, ApiError};
+use crate::security::AuthContext;
 use crate::state::AppState;
 
 pub async fn add_memory(
     State(state): State<AppState>,
     Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
     Json(request): Json<AddMemoryRequest>,
 ) -> Result<Json<AddMemoryResponse>, ApiError> {
+    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryWrite)?;
     validate_add_memory_request(&request)?;
 
     let tenant = organization.tenant_with_user_id(request.user_id)?;
@@ -41,8 +44,10 @@ pub async fn add_memory(
 pub async fn search_memory(
     State(state): State<AppState>,
     Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
     Json(request): Json<SearchMemoryRequest>,
 ) -> Result<Json<SearchMemoryResponse>, ApiError> {
+    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryRead)?;
     validate_search_memory_request(&request)?;
 
     let tenant = organization.tenant_with_user_id(request.user_id)?;
@@ -65,9 +70,11 @@ pub async fn search_memory(
 pub async fn list_user_memories(
     State(state): State<AppState>,
     Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
     Path(user_id): Path<String>,
     Query(query): Query<ListMemoriesQuery>,
 ) -> Result<Json<ListMemoriesResponse>, ApiError> {
+    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryRead)?;
     validate_path_user_id(&user_id)?;
 
     let memory_type = query
@@ -110,8 +117,10 @@ pub async fn list_user_memories(
 pub async fn delete_user_memory(
     State(state): State<AppState>,
     Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
     Path((user_id, memory_id)): Path<(String, String)>,
 ) -> Result<Json<DeleteMemoryResponse>, ApiError> {
+    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryDelete)?;
     validate_path_user_id(&user_id)?;
 
     let memory_id = Uuid::parse_str(memory_id.trim()).map_err(|_| {
