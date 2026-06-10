@@ -2,6 +2,7 @@ pub mod audit;
 pub mod context;
 pub mod engine;
 pub mod export;
+pub mod import;
 pub mod lifecycle;
 pub mod models;
 pub mod ports;
@@ -22,6 +23,7 @@ pub use engine::{
 pub use export::{
     UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT, USER_EXPORT_FORMAT_VERSION,
 };
+pub use import::{ImportMode, ImportUserDataInput, ImportUserDataOutput};
 pub use models::{
     ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
     MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,

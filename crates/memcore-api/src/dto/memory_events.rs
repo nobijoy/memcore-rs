@@ -28,7 +28,7 @@ pub struct ListMemoryEventsResponse {
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MemoryEventItemResponse {
     pub id: Uuid,
     pub fact_id: Option<Uuid>,
@@ -42,7 +42,7 @@ pub struct MemoryEventItemResponse {
 }
 
 /// API-facing operation labels (PascalCase) separate from core snake_case serde.
-#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "PascalCase")]
 pub enum MemoryEventOperationResponse {
     Add,

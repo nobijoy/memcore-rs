@@ -7,18 +7,26 @@ use memcore_common::MemcoreResult;
 use crate::privacy::redact_messages_for_extraction;
 use crate::ports::MemoryMessage;
 use crate::audit::{
-    build_add_event, build_delete_event, build_forget_user_event, build_noop_event,
-    build_update_event, record_event_best_effort,
+    build_add_event, build_delete_event, build_forget_user_event, build_import_replace_event,
+    build_noop_event, build_update_event, record_event_best_effort,
+};
+use crate::import::{
+    ImportMode, ImportUserDataInput, ImportUserDataOutput, resolve_import_fact_id,
+    validate_event_for_import, validate_export_for_import, validate_fact_for_import,
 };
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventQuery, MemoryEventStore, VectorStore,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, VectorRecord, VectorStore,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
 };
-use crate::{assemble_context, BuildContextInput, BuildContextOutput, MemorySearchResult, TenantContext};
+use crate::{
+    assemble_context, BuildContextInput, BuildContextOutput, Fact, MemoryEvent, MemorySearchResult,
+    TenantContext,
+};
+use uuid::Uuid;
 
 pub use types::{
     AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ExportUserDataInput,
@@ -397,6 +405,108 @@ impl MemoryEngine {
         Ok(ForgetUserOutput { deleted: true })
     }
 
+    pub async fn import_user_data(
+        &self,
+        input: ImportUserDataInput,
+    ) -> MemcoreResult<ImportUserDataOutput> {
+        validate_tenant(&input.tenant)?;
+        validate_export_for_import(&input.export, &input.tenant)?;
+
+        for fact in &input.export.facts {
+            validate_fact_for_import(fact, &input.tenant)?;
+        }
+
+        if input.restore_events {
+            for event in &input.export.memory_events {
+                validate_event_for_import(event, &input.tenant)?;
+            }
+        }
+
+        let mut replaced_existing = false;
+
+        if matches!(input.mode, ImportMode::Replace) {
+            self.fact_store
+                .delete_user_data(&input.tenant)
+                .await?;
+            self.vector_store
+                .delete_by_user(&input.tenant)
+                .await?;
+            replaced_existing = true;
+
+            record_event_best_effort(
+                &self.event_store,
+                &input.tenant,
+                build_import_replace_event(
+                    &input.tenant,
+                    &self.audit_provider_name,
+                    &self.audit_model_name,
+                ),
+            )
+            .await;
+        }
+
+        let mut imported_facts = 0usize;
+        let skipped_facts = 0usize;
+
+        for exported_fact in &input.export.facts {
+            let id_exists = self
+                .fact_store
+                .get_fact(&input.tenant, exported_fact.id)
+                .await?
+                .is_some();
+
+            let fact_id = resolve_import_fact_id(exported_fact.id, id_exists, input.mode);
+            let fact = fact_for_import(exported_fact, &input.tenant, fact_id)?;
+
+            self.fact_store
+                .insert_fact(&input.tenant, fact.clone())
+                .await?;
+
+            let embedding = self
+                .embedding_provider
+                .embed_text(&fact.content)
+                .await?;
+
+            let record = VectorRecord {
+                id: Uuid::new_v4(),
+                fact_id: fact.id,
+                org_id: fact.org_id.clone(),
+                user_id: fact.user_id.clone(),
+                embedding,
+                content: fact.content.clone(),
+                memory_type: fact.memory_type,
+                metadata: fact.metadata.clone(),
+            };
+
+            self.vector_store
+                .upsert_vector(&input.tenant, record)
+                .await?;
+
+            imported_facts += 1;
+        }
+
+        let mut imported_events = 0usize;
+
+        if input.restore_events {
+            if let Some(event_store) = &self.event_store {
+                for exported_event in &input.export.memory_events {
+                    let event = restored_event_from_export(exported_event);
+                    event_store
+                        .record_event(&input.tenant, event)
+                        .await?;
+                    imported_events += 1;
+                }
+            }
+        }
+
+        Ok(ImportUserDataOutput {
+            imported_facts,
+            imported_events,
+            skipped_facts,
+            replaced_existing,
+        })
+    }
+
     pub async fn export_user_data(
         &self,
         input: ExportUserDataInput,
@@ -627,4 +737,44 @@ fn validate_candidate(candidate: &crate::CandidateFact) -> MemcoreResult<()> {
 
 fn passes_importance_threshold(candidate: &crate::CandidateFact, min_importance: f32) -> bool {
     candidate.importance >= min_importance
+}
+
+fn fact_for_import(
+    exported: &Fact,
+    tenant: &TenantContext,
+    fact_id: Uuid,
+) -> MemcoreResult<Fact> {
+    Fact::new(
+        fact_id,
+        tenant.org_id.clone(),
+        tenant.user_id.clone(),
+        exported.memory_type,
+        exported.content.clone(),
+        exported.summary.clone(),
+        exported.source,
+        exported.confidence,
+        exported.importance,
+        exported.valid_at,
+        exported.invalid_at,
+        exported.recorded_at,
+        exported.updated_at,
+        exported.metadata.clone(),
+    )
+}
+
+fn restored_event_from_export(exported: &MemoryEvent) -> MemoryEvent {
+    MemoryEvent {
+        id: Uuid::new_v4(),
+        org_id: exported.org_id.clone(),
+        user_id: exported.user_id.clone(),
+        fact_id: exported.fact_id,
+        operation: exported.operation,
+        input_text: None,
+        previous_content: exported.previous_content.clone(),
+        new_content: exported.new_content.clone(),
+        provider_name: exported.provider_name.clone(),
+        model_name: exported.model_name.clone(),
+        metadata: exported.metadata.clone(),
+        created_at: exported.created_at,
+    }
 }

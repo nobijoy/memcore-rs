@@ -55,7 +55,7 @@ pub struct MemoryItemResponse {
 }
 
 /// API-facing memory type labels (PascalCase) separate from core snake_case serde.
-#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "PascalCase")]
 pub enum MemoryTypeResponse {
     Profile,

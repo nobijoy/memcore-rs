@@ -5,7 +5,8 @@
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, BuildContextRequest, BuildContextResponse,
     CreateApiKeyRequest, CreateApiKeyResponse, DeleteMemoryResponse, ExportUserResponse,
-    ForgetUserResponse, ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse,
+    ForgetUserResponse, ImportUserDataRequest, ImportUserDataResponse, ListApiKeysResponse,
+    ListMemoriesResponse, ListMemoryEventsResponse,
     RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
 };
 use crate::response::ErrorBody;
@@ -178,6 +179,28 @@ pub fn delete_user_memory() {}
     )
 )]
 pub fn export_user_data() {}
+
+/// Import user memory data from a `memcore.user_export.v1` JSON export.
+#[utoipa::path(
+    post,
+    path = "/api/v1/users/{user_id}/import",
+    tag = "Users",
+    params(
+        ("user_id" = String, Path, description = "User identifier"),
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    request_body = ImportUserDataRequest,
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Import completed", body = ImportUserDataResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing required scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn import_user_data() {}
 
 /// Delete all memories and vectors for a user within the organization.
 #[utoipa::path(

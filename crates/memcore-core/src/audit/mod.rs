@@ -105,6 +105,24 @@ pub fn build_noop_event(
     )
 }
 
+pub fn build_import_replace_event(
+    tenant: &TenantContext,
+    provider_name: &Option<String>,
+    model_name: &Option<String>,
+) -> MemoryEvent {
+    MemoryEvent::new(
+        tenant.org_id.clone(),
+        tenant.user_id.clone(),
+        None,
+        MemoryEventOperation::NoOp,
+        None,
+        None,
+        provider_name.clone(),
+        model_name.clone(),
+        json!({ "source": "import_replace" }),
+    )
+}
+
 pub fn build_forget_user_event(
     tenant: &TenantContext,
     provider_name: &Option<String>,

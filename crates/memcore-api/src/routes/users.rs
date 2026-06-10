@@ -3,7 +3,10 @@ use axum::extract::{Extension, Path, Query, State};
 use memcore_common::MemcoreError;
 use memcore_core::{ApiKeyScope, ExportUserDataInput, ForgetUserInput, TenantContext};
 
-use crate::dto::{ExportUserQuery, ExportUserResponse, ForgetUserResponse};
+use crate::dto::{
+    ExportUserQuery, ExportUserResponse, ForgetUserResponse, ImportUserDataRequest,
+    ImportUserDataResponse,
+};
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_any_scope, check_scope, ApiError};
 use crate::security::AuthContext;
@@ -68,4 +71,33 @@ pub async fn export_user_data(
         .await?;
 
     Ok(Json(ExportUserResponse::from(export)))
+}
+
+pub async fn import_user_data(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Path(user_id): Path<String>,
+    Json(body): Json<ImportUserDataRequest>,
+) -> Result<Json<ImportUserDataResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite, ApiKeyScope::MemoryWrite],
+    )?;
+
+    if user_id.trim().is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "user_id cannot be empty".to_string(),
+        )
+        .into());
+    }
+
+    let tenant = TenantContext::new(organization.org_id, user_id)?;
+
+    let output = state
+        .memory_engine
+        .import_user_data(body.into_input(tenant))
+        .await?;
+
+    Ok(Json(ImportUserDataResponse::from(output)))
 }
