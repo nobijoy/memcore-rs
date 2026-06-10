@@ -147,4 +147,29 @@ impl ApiKeyStore for PostgresApiKeyStore {
 
         Ok(())
     }
+
+    async fn list_api_keys(
+        &self,
+        org_id: &str,
+        include_revoked: bool,
+    ) -> MemcoreResult<Vec<ApiKeyRecord>> {
+        let rows = if include_revoked {
+            sqlx::query(
+                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC",
+            )
+            .bind(org_id)
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query(
+                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC",
+            )
+            .bind(org_id)
+            .fetch_all(&self.pool)
+            .await
+        }
+        .map_err(|error| storage_error("failed to list api keys", error))?;
+
+        rows.iter().map(parse_row).collect()
+    }
 }

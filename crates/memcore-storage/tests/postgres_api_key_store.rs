@@ -29,6 +29,62 @@ where
 }
 
 #[tokio::test]
+async fn postgres_list_api_keys_by_org() {
+    with_postgres_store("postgres_list_api_keys_by_org", |store| async move {
+        let active = ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: "org_pg_list_a".to_string(),
+            name: "active".to_string(),
+            key_hash: hash_api_key("pepper", "pg-active"),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: None,
+        };
+        let revoked = ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: "org_pg_list_a".to_string(),
+            name: "revoked".to_string(),
+            key_hash: hash_api_key("pepper", "pg-revoked"),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: Some(Utc::now()),
+        };
+        let other_org = ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: "org_pg_list_b".to_string(),
+            name: "other".to_string(),
+            key_hash: hash_api_key("pepper", "pg-other"),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: None,
+        };
+
+        store.insert_api_key(active).await.expect("insert");
+        store.insert_api_key(revoked).await.expect("insert");
+        store.insert_api_key(other_org).await.expect("insert");
+
+        let active_only = store
+            .list_api_keys("org_pg_list_a", false)
+            .await
+            .expect("list");
+        assert_eq!(active_only.len(), 1);
+
+        let with_revoked = store
+            .list_api_keys("org_pg_list_a", true)
+            .await
+            .expect("list");
+        assert_eq!(with_revoked.len(), 2);
+
+        let org_b = store
+            .list_api_keys("org_pg_list_b", false)
+            .await
+            .expect("list");
+        assert_eq!(org_b.len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn postgres_insert_find_and_revoke_api_key() {
     with_postgres_store("postgres_insert_find_and_revoke_api_key", |store| async move {
         let record = ApiKeyRecord {

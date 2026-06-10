@@ -11,4 +11,10 @@ pub trait ApiKeyStore: Send + Sync {
     async fn insert_api_key(&self, record: ApiKeyRecord) -> MemcoreResult<ApiKeyRecord>;
 
     async fn revoke_api_key(&self, org_id: &str, key_id: Uuid) -> MemcoreResult<()>;
+
+    async fn list_api_keys(
+        &self,
+        org_id: &str,
+        include_revoked: bool,
+    ) -> MemcoreResult<Vec<ApiKeyRecord>>;
 }

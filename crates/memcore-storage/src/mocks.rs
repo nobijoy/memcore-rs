@@ -428,6 +428,22 @@ impl ApiKeyStore for MockApiKeyStore {
         record.revoked_at = Some(Utc::now());
         Ok(())
     }
+
+    async fn list_api_keys(
+        &self,
+        org_id: &str,
+        include_revoked: bool,
+    ) -> MemcoreResult<Vec<ApiKeyRecord>> {
+        let keys = self.keys.read().expect("api keys lock poisoned");
+        let mut results: Vec<ApiKeyRecord> = keys
+            .iter()
+            .filter(|record| record.org_id == org_id)
+            .filter(|record| include_revoked || record.is_active())
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -440,6 +456,62 @@ mod api_key_store_tests {
     use super::MockApiKeyStore;
     use crate::traits::ApiKeyStore;
     use memcore_core::ApiKeyRecord;
+
+    #[tokio::test]
+    async fn mock_list_api_keys_by_org() {
+        let store = MockApiKeyStore::new();
+        let active = ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: "org_a".to_string(),
+            name: "active".to_string(),
+            key_hash: hash_api_key("pepper", "active"),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: None,
+        };
+        let revoked = ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: "org_a".to_string(),
+            name: "revoked".to_string(),
+            key_hash: hash_api_key("pepper", "revoked"),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: Some(Utc::now()),
+        };
+        let other_org = ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: "org_b".to_string(),
+            name: "other".to_string(),
+            key_hash: hash_api_key("pepper", "other"),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: None,
+        };
+
+        store.insert_api_key(active).await.expect("insert");
+        store.insert_api_key(revoked).await.expect("insert");
+        store.insert_api_key(other_org).await.expect("insert");
+
+        let active_only = store
+            .list_api_keys("org_a", false)
+            .await
+            .expect("list");
+        assert_eq!(active_only.len(), 1);
+        assert_eq!(active_only[0].name, "active");
+
+        let with_revoked = store
+            .list_api_keys("org_a", true)
+            .await
+            .expect("list");
+        assert_eq!(with_revoked.len(), 2);
+
+        let org_b = store
+            .list_api_keys("org_b", false)
+            .await
+            .expect("list");
+        assert_eq!(org_b.len(), 1);
+        assert_eq!(org_b[0].org_id, "org_b");
+    }
 
     #[tokio::test]
     async fn mock_api_key_store_insert_find_revoke() {

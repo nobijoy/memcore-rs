@@ -199,6 +199,31 @@ impl ApiKeyStore for SqliteApiKeyStore {
 
         Ok(())
     }
+
+    async fn list_api_keys(
+        &self,
+        org_id: &str,
+        include_revoked: bool,
+    ) -> MemcoreResult<Vec<ApiKeyRecord>> {
+        let rows = if include_revoked {
+            sqlx::query(
+                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = ? ORDER BY created_at DESC",
+            )
+            .bind(org_id)
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query(
+                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = ? AND revoked_at IS NULL ORDER BY created_at DESC",
+            )
+            .bind(org_id)
+            .fetch_all(&self.pool)
+            .await
+        }
+        .map_err(|error| storage_error("failed to list api keys", error))?;
+
+        rows.iter().map(parse_row).collect()
+    }
 }
 
 #[cfg(test)]
@@ -226,6 +251,44 @@ mod tests {
             created_at: Utc::now(),
             revoked_at: None,
         }
+    }
+
+    #[tokio::test]
+    async fn sqlite_list_api_keys_by_org() {
+        let store = SqliteApiKeyStore::connect("sqlite::memory:?cache=shared")
+            .await
+            .expect("sqlite api key store should connect");
+        let active = sample_record("org_a", "active", "pepper", "active-token");
+        let revoked = {
+            let mut record = sample_record("org_a", "revoked", "pepper", "revoked-token");
+            record.revoked_at = Some(Utc::now());
+            record
+        };
+        let other_org = sample_record("org_b", "other", "pepper", "other-token");
+
+        store.insert_api_key(active).await.expect("insert");
+        store.insert_api_key(revoked).await.expect("insert");
+        store.insert_api_key(other_org).await.expect("insert");
+
+        let active_only = store
+            .list_api_keys("org_a", false)
+            .await
+            .expect("list");
+        assert_eq!(active_only.len(), 1);
+        assert_eq!(active_only[0].name, "active");
+
+        let with_revoked = store
+            .list_api_keys("org_a", true)
+            .await
+            .expect("list");
+        assert_eq!(with_revoked.len(), 2);
+
+        let org_b = store
+            .list_api_keys("org_b", false)
+            .await
+            .expect("list");
+        assert_eq!(org_b.len(), 1);
+        assert_eq!(org_b[0].org_id, "org_b");
     }
 
     #[tokio::test]

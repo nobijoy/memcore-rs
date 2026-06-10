@@ -1,3 +1,4 @@
+pub mod api_keys;
 pub mod common;
 pub mod context;
 pub mod health;
@@ -36,6 +37,12 @@ pub fn router(state: &AppState) -> Router<AppState> {
             delete(memories::delete_user_memory),
         )
         .route("/api/v1/users/{user_id}", delete(users::forget_user))
+        .route("/api/v1/api-keys", post(api_keys::create_api_key))
+        .route("/api/v1/api-keys", get(api_keys::list_api_keys))
+        .route(
+            "/api/v1/api-keys/{api_key_id}",
+            delete(api_keys::revoke_api_key),
+        )
         .route_layer(from_fn(log_protected_request))
         .route_layer(from_fn_with_state(state.clone(), enforce_rate_limit))
         .route_layer(from_fn(require_organization))

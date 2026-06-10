@@ -4,7 +4,7 @@ use memcore_common::MemcoreError;
 use memcore_core::ApiKeyScope;
 
 use crate::response::ErrorBody;
-use crate::security::{ensure_scope, AuthContext};
+use crate::security::{ensure_any_scope, ensure_scope, AuthContext};
 
 #[derive(Debug)]
 pub struct ApiError((axum::http::StatusCode, Json<ErrorBody>));
@@ -26,6 +26,18 @@ impl From<MemcoreError> for ApiError {
 pub fn check_scope(auth: Option<&AuthContext>, scope: ApiKeyScope) -> Result<(), ApiError> {
     if let Some(auth) = auth {
         ensure_scope(auth, scope).map_err(|error| {
+            ApiError((
+                error.status,
+                Json(ErrorBody::new(error.code, error.message)),
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+pub fn check_any_scope(auth: Option<&AuthContext>, scopes: &[ApiKeyScope]) -> Result<(), ApiError> {
+    if let Some(auth) = auth {
+        ensure_any_scope(auth, scopes).map_err(|error| {
             ApiError((
                 error.status,
                 Json(ErrorBody::new(error.code, error.message)),

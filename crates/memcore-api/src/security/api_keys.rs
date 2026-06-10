@@ -21,3 +21,8 @@ impl AuthContext {
 pub fn hash_api_key_with_pepper(pepper: &str, raw_key: &str) -> String {
     hash_api_key(pepper, raw_key)
 }
+
+/// Generates a one-time raw API key in `mc_live_<token>` format.
+pub fn generate_raw_api_key() -> String {
+    format!("mc_live_{}", Uuid::new_v4().simple())
+}

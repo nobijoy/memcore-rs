@@ -22,3 +22,15 @@ pub fn ensure_scope(auth: &AuthContext, scope: ApiKeyScope) -> Result<(), ScopeE
         })
     }
 }
+
+pub fn ensure_any_scope(auth: &AuthContext, scopes: &[ApiKeyScope]) -> Result<(), ScopeError> {
+    if scopes.iter().any(|scope| auth.has_scope(*scope)) {
+        Ok(())
+    } else {
+        Err(ScopeError {
+            status: StatusCode::FORBIDDEN,
+            code: "FORBIDDEN",
+            message: "missing required scope",
+        })
+    }
+}
