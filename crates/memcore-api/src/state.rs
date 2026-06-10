@@ -14,6 +14,7 @@ use memcore_storage::{
     MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteFactStore,
     SqliteMemoryEventStore,
 };
+use crate::middleware::RateLimiter;
 #[cfg(feature = "lancedb")]
 use memcore_storage::LanceDbVectorStore;
 
@@ -25,6 +26,7 @@ pub struct AppState {
     pub settings: Settings,
     pub started_at: DateTime<Utc>,
     pub memory_engine: Arc<MemoryEngine>,
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
@@ -32,9 +34,10 @@ impl AppState {
     pub async fn initialize(settings: Settings) -> MemcoreResult<Self> {
         let memory_engine = Arc::new(create_memory_engine(&settings).await?);
         Ok(Self {
-            settings,
+            settings: settings.clone(),
             started_at: Utc::now(),
             memory_engine,
+            rate_limiter: create_rate_limiter(&settings),
         })
     }
 
@@ -48,7 +51,8 @@ impl AppState {
             Self {
                 started_at: Utc::now(),
                 memory_engine: Arc::new(create_mock_memory_engine(&settings)),
-                settings,
+                settings: settings.clone(),
+                rate_limiter: create_rate_limiter(&settings),
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -61,11 +65,19 @@ impl AppState {
 
     pub fn with_memory_engine(settings: Settings, memory_engine: Arc<MemoryEngine>) -> Self {
         Self {
-            settings,
+            settings: settings.clone(),
             started_at: Utc::now(),
             memory_engine,
+            rate_limiter: create_rate_limiter(&settings),
         }
     }
+}
+
+fn create_rate_limiter(settings: &Settings) -> Arc<RateLimiter> {
+    Arc::new(RateLimiter::new(
+        settings.rate_limit_enabled,
+        settings.rate_limit_requests_per_minute,
+    ))
 }
 
 /// Wires `MemoryEngine` from settings: configurable fact/vector stores and LLM/embedding providers.

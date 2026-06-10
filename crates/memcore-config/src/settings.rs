@@ -22,6 +22,8 @@ const MEMCORE_ENABLE_PII_REDACTION: &str = "MEMCORE_ENABLE_PII_REDACTION";
 const MEMCORE_MIN_IMPORTANCE: &str = "MEMCORE_MIN_IMPORTANCE";
 const MEMCORE_AUTH_ENABLED: &str = "MEMCORE_AUTH_ENABLED";
 const MEMCORE_DEV_API_KEY: &str = "MEMCORE_DEV_API_KEY";
+const MEMCORE_RATE_LIMIT_ENABLED: &str = "MEMCORE_RATE_LIMIT_ENABLED";
+const MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: &str = "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 
@@ -95,6 +97,10 @@ pub struct Settings {
     pub openai_api_key: Option<String>,
     /// OpenAI API base URL (supports OpenAI-compatible gateways).
     pub openai_base_url: String,
+    /// In-memory rate limiting toggle for protected API routes.
+    pub rate_limit_enabled: bool,
+    /// Maximum protected-route requests per organization per minute.
+    pub rate_limit_requests_per_minute: u32,
 }
 
 impl Default for Settings {
@@ -121,6 +127,8 @@ impl Default for Settings {
             dev_api_key: "memcore_dev_key".to_string(),
             openai_api_key: None,
             openai_base_url: DEFAULT_OPENAI_BASE_URL.to_string(),
+            rate_limit_enabled: true,
+            rate_limit_requests_per_minute: 60,
         }
     }
 }
@@ -157,6 +165,12 @@ impl Settings {
         let dev_api_key = read_env_or(MEMCORE_DEV_API_KEY, &defaults.dev_api_key);
         let openai_api_key = read_env_optional(OPENAI_API_KEY);
         let openai_base_url = read_env_or(OPENAI_BASE_URL, &defaults.openai_base_url);
+        let rate_limit_enabled =
+            parse_bool(MEMCORE_RATE_LIMIT_ENABLED, defaults.rate_limit_enabled)?;
+        let rate_limit_requests_per_minute = parse_u32(
+            MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE,
+            defaults.rate_limit_requests_per_minute,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -186,6 +200,8 @@ impl Settings {
             dev_api_key,
             openai_api_key,
             openai_base_url,
+            rate_limit_enabled,
+            rate_limit_requests_per_minute,
         };
 
         settings.validate()?;
@@ -253,6 +269,12 @@ impl Settings {
             ));
         }
 
+        if self.rate_limit_requests_per_minute == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be greater than 0".to_string(),
+            ));
+        }
+
         let needs_openai_key = self.llm_provider == LlmProviderKind::OpenAi
             || self.embedding_provider == EmbeddingProviderKind::OpenAi;
         if needs_openai_key
@@ -312,6 +334,15 @@ fn parse_u16(key: &str, default: u16) -> MemcoreResult<u16> {
     match env::var(key) {
         Ok(value) => value.parse::<u16>().map_err(|_| {
             MemcoreError::ValidationError(format!("{key} must be a valid u16 port"))
+        }),
+        Err(_) => Ok(default),
+    }
+}
+
+fn parse_u32(key: &str, default: u32) -> MemcoreResult<u32> {
+    match env::var(key) {
+        Ok(value) => value.parse::<u32>().map_err(|_| {
+            MemcoreError::ValidationError(format!("{key} must be a valid unsigned integer"))
         }),
         Err(_) => Ok(default),
     }
@@ -435,7 +466,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 21] = [
+    const ENV_KEYS: [&str; 23] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -455,6 +486,8 @@ mod tests {
         "MEMCORE_MIN_IMPORTANCE",
         "MEMCORE_AUTH_ENABLED",
         "MEMCORE_DEV_API_KEY",
+        "MEMCORE_RATE_LIMIT_ENABLED",
+        "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     ];
@@ -517,6 +550,8 @@ mod tests {
         assert!(settings.auth_enabled);
         assert_eq!(settings.dev_api_key, "memcore_dev_key");
         assert_eq!(settings.fact_backend, super::FactBackend::Sqlite);
+        assert!(settings.rate_limit_enabled);
+        assert_eq!(settings.rate_limit_requests_per_minute, 60);
     }
 
     #[test]
@@ -650,6 +685,65 @@ mod tests {
         let settings = Settings::from_env().expect("mock providers should load without openai key");
         assert_eq!(settings.llm_provider, super::LlmProviderKind::Mock);
         assert!(settings.openai_api_key.is_none());
+    }
+
+    #[test]
+    fn loads_rate_limit_settings_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_RATE_LIMIT_ENABLED", "false");
+            std::env::set_var("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE", "120");
+        }
+
+        let settings = Settings::from_env().expect("rate limit settings should load");
+        assert!(!settings.rate_limit_enabled);
+        assert_eq!(settings.rate_limit_requests_per_minute, 120);
+    }
+
+    #[test]
+    fn fails_on_zero_rate_limit_requests_per_minute() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe { std::env::set_var("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE", "0") };
+
+        let error = Settings::from_env().expect_err("zero rate limit should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn fails_on_invalid_rate_limit_requests_per_minute() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe { std::env::set_var("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE", "not-a-number") };
+
+        let error = Settings::from_env().expect_err("invalid rate limit should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be a valid unsigned integer")
+        );
     }
 
     #[test]

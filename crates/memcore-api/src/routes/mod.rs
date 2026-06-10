@@ -9,10 +9,14 @@ use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{delete, get, post};
 
-use crate::middleware::{require_api_key, require_organization};
+use crate::middleware::{require_api_key, require_organization, enforce_rate_limit};
 use crate::state::AppState;
 
-/// Protected routes: outer `require_api_key` runs first, then `require_organization`, then handler.
+/// Protected routes middleware order (incoming request):
+/// `require_api_key` → `require_organization` → `enforce_rate_limit` → handler.
+///
+/// Axum applies `.route_layer()` in reverse add order, so layers are registered
+/// innermost-first: rate limit, then tenant, then auth.
 pub fn router(state: &AppState) -> Router<AppState> {
     let protected = Router::new()
         .route("/api/v1/memories", post(memories::add_memory))
@@ -31,6 +35,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
             delete(memories::delete_user_memory),
         )
         .route("/api/v1/users/{user_id}", delete(users::forget_user))
+        .route_layer(from_fn_with_state(state.clone(), enforce_rate_limit))
         .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 
