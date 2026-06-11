@@ -180,7 +180,7 @@ pub fn delete_user_memory() {}
 )]
 pub fn export_user_data() {}
 
-/// Import user memory data from a `memcore.user_export.v1` JSON export.
+/// Import user memory data from a `memcore.user_export.v1` JSON export. Set `dry_run=true` to validate without writes.
 #[utoipa::path(
     post,
     path = "/api/v1/users/{user_id}/import",
@@ -193,7 +193,7 @@ pub fn export_user_data() {}
     request_body = ImportUserDataRequest,
     security(("BearerAuth" = [])),
     responses(
-        (status = 200, description = "Import completed", body = ImportUserDataResponse),
+        (status = 200, description = "Import completed or dry-run validation summary", body = ImportUserDataResponse),
         (status = 400, description = "Validation error", body = ErrorBody),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 403, description = "Missing required scope in database auth mode", body = ErrorBody),

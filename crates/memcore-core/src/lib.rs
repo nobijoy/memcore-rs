@@ -23,7 +23,10 @@ pub use engine::{
 pub use export::{
     UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT, USER_EXPORT_FORMAT_VERSION,
 };
-pub use import::{ImportMode, ImportUserDataInput, ImportUserDataOutput};
+pub use import::{
+    ImportMode, ImportUserDataInput, ImportUserDataOutput, ImportValidationIssue,
+    ImportValidationSummary,
+};
 pub use models::{
     ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
     MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,

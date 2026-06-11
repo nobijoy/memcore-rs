@@ -1,4 +1,7 @@
-use memcore_core::{ImportMode, ImportUserDataInput, ImportUserDataOutput, TenantContext, UserMemoryExport};
+use memcore_core::{
+    ImportMode, ImportUserDataInput, ImportUserDataOutput, ImportValidationIssue,
+    ImportValidationSummary, TenantContext, UserMemoryExport,
+};
 use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 
@@ -29,6 +32,8 @@ pub struct ImportUserDataRequest {
     pub mode: ImportMode,
     #[serde(default = "default_restore_events_false")]
     pub restore_events: bool,
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -43,6 +48,42 @@ pub struct ImportUserDataSummaryResponse {
     pub imported_events: usize,
     pub skipped_facts: usize,
     pub replaced_existing: bool,
+    pub dry_run: bool,
+    pub validation: ImportValidationSummaryResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ImportValidationSummaryResponse {
+    pub valid: bool,
+    pub errors: Vec<ImportValidationIssueResponse>,
+    pub warnings: Vec<ImportValidationIssueResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ImportValidationIssueResponse {
+    pub code: String,
+    pub message: String,
+    pub path: Option<String>,
+}
+
+impl From<ImportValidationIssue> for ImportValidationIssueResponse {
+    fn from(issue: ImportValidationIssue) -> Self {
+        Self {
+            code: issue.code,
+            message: issue.message,
+            path: issue.path,
+        }
+    }
+}
+
+impl From<ImportValidationSummary> for ImportValidationSummaryResponse {
+    fn from(summary: ImportValidationSummary) -> Self {
+        Self {
+            valid: summary.valid,
+            errors: summary.errors.into_iter().map(Into::into).collect(),
+            warnings: summary.warnings.into_iter().map(Into::into).collect(),
+        }
+    }
 }
 
 impl From<ImportUserDataOutput> for ImportUserDataSummaryResponse {
@@ -52,6 +93,8 @@ impl From<ImportUserDataOutput> for ImportUserDataSummaryResponse {
             imported_events: output.imported_events,
             skipped_facts: output.skipped_facts,
             replaced_existing: output.replaced_existing,
+            dry_run: output.dry_run,
+            validation: output.validation.into(),
         }
     }
 }
@@ -63,6 +106,7 @@ impl ImportUserDataRequest {
             export: self.export,
             mode: self.mode,
             restore_events: self.restore_events,
+            dry_run: self.dry_run,
         }
     }
 }
@@ -88,9 +132,13 @@ mod tests {
             imported_events: 1,
             skipped_facts: 0,
             replaced_existing: false,
+            dry_run: false,
+            validation: ImportValidationSummary::valid_empty(),
         });
         assert_eq!(response.status, "success");
         assert_eq!(response.summary.imported_facts, 2);
+        assert!(!response.summary.dry_run);
+        assert!(response.summary.validation.valid);
     }
 
     #[test]
@@ -110,7 +158,28 @@ mod tests {
         let request: ImportUserDataRequest =
             serde_json::from_str(&json).expect("deserialize import request");
         assert!(!request.restore_events);
+        assert!(!request.dry_run);
         assert_eq!(request.mode, ImportMode::Append);
+    }
+
+    #[test]
+    fn import_request_accepts_dry_run_flag() {
+        let json = format!(
+            r#"{{
+              "export": {{
+                "format_version": "{USER_EXPORT_FORMAT_VERSION}",
+                "org_id": "org_a",
+                "user_id": "user_a",
+                "exported_at": "2026-06-10T10:00:00Z",
+                "facts": [],
+                "memory_events": []
+              }},
+              "dry_run": true
+            }}"#
+        );
+        let request: ImportUserDataRequest =
+            serde_json::from_str(&json).expect("deserialize dry_run request");
+        assert!(request.dry_run);
     }
 
     #[test]

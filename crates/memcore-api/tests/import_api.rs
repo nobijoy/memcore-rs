@@ -98,10 +98,20 @@ async fn seed_memory(app: &axum::Router, org_id: &str, user_id: &str, content: &
 }
 
 fn import_body(export: &serde_json::Value, mode: &str, restore_events: bool) -> String {
+    import_body_with_dry_run(export, mode, restore_events, false)
+}
+
+fn import_body_with_dry_run(
+    export: &serde_json::Value,
+    mode: &str,
+    restore_events: bool,
+    dry_run: bool,
+) -> String {
     serde_json::json!({
         "export": export,
         "mode": mode,
         "restore_events": restore_events,
+        "dry_run": dry_run,
     })
     .to_string()
 }
@@ -358,6 +368,171 @@ async fn import_does_not_expose_api_key_fields() {
         "memory_events": []
     });
     let body = import_body(&export, "append", false);
+
+    let (status, json) = response_parts(
+        app,
+        post_request(
+            &format!("/api/v1/users/{USER_A}/import"),
+            &body,
+            ORG_A,
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn dry_run_import_returns_validation_summary() {
+    let app = test_app();
+    seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
+    let export = export_user(&app, ORG_A, USER_A).await;
+
+    let body = import_body_with_dry_run(&export, "append", false, true);
+    let (status, json) = response_parts(
+        app,
+        post_request(
+            &format!("/api/v1/users/{USER_A}/import"),
+            &body,
+            ORG_A,
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["summary"]["dry_run"], true);
+    assert_eq!(json["summary"]["validation"]["valid"], true);
+    assert_eq!(json["summary"]["imported_facts"], 1);
+}
+
+#[tokio::test]
+async fn dry_run_does_not_create_listed_memories() {
+    let app = test_app();
+    let export = serde_json::json!({
+        "format_version": USER_EXPORT_FORMAT_VERSION,
+        "org_id": ORG_A,
+        "user_id": USER_A,
+        "exported_at": "2026-06-10T10:00:00Z",
+        "facts": [{
+            "id": "00000000-0000-4000-8000-000000000002",
+            "org_id": ORG_A,
+            "user_id": USER_A,
+            "content": "dry-run only",
+            "summary": null,
+            "memory_type": "Profile",
+            "source": "api_import",
+            "confidence": 0.9,
+            "importance": 0.8,
+            "valid_at": null,
+            "invalid_at": null,
+            "recorded_at": "2026-06-10T10:00:00Z",
+            "updated_at": "2026-06-10T10:00:00Z",
+            "metadata": {}
+        }],
+        "memory_events": []
+    });
+
+    let body = import_body_with_dry_run(&export, "append", false, true);
+    let (status, _) = response_parts(
+        app.clone(),
+        post_request(
+            &format!("/api/v1/users/{USER_A}/import"),
+            &body,
+            ORG_A,
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (list_status, list_json) = response_parts(
+        app,
+        get_request(&format!("/api/v1/users/{USER_A}/memories"), ORG_A),
+    )
+    .await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert!(list_json["memories"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn dry_run_replace_mode_does_not_delete_existing_memories() {
+    let app = test_app();
+    seed_memory(&app, ORG_A, USER_A, "keep during dry-run").await;
+    let export = export_user(&app, ORG_A, USER_A).await;
+
+    let body = import_body_with_dry_run(&export, "replace", false, true);
+    let (status, json) = response_parts(
+        app.clone(),
+        post_request(
+            &format!("/api/v1/users/{USER_A}/import"),
+            &body,
+            ORG_A,
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["summary"]["replaced_existing"], true);
+
+    let (list_status, list_json) = response_parts(
+        app,
+        get_request(&format!("/api/v1/users/{USER_A}/memories"), ORG_A),
+    )
+    .await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(list_json["memories"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn dry_run_invalid_payload_returns_validation_summary() {
+    let app = test_app();
+    let export = serde_json::json!({
+        "format_version": USER_EXPORT_FORMAT_VERSION,
+        "org_id": ORG_A,
+        "user_id": "other_user",
+        "exported_at": "2026-06-10T10:00:00Z",
+        "facts": [],
+        "memory_events": []
+    });
+    let body = import_body_with_dry_run(&export, "append", false, true);
+
+    let (status, json) = response_parts(
+        app,
+        post_request(
+            &format!("/api/v1/users/{USER_A}/import"),
+            &body,
+            ORG_A,
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["summary"]["validation"]["valid"], false);
+    assert!(json["summary"]["validation"]["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|issue| issue["code"] == "USER_ID_MISMATCH"));
+}
+
+#[tokio::test]
+async fn non_dry_run_invalid_payload_returns_validation_error() {
+    let app = test_app();
+    let export = serde_json::json!({
+        "format_version": USER_EXPORT_FORMAT_VERSION,
+        "org_id": ORG_A,
+        "user_id": "other_user",
+        "exported_at": "2026-06-10T10:00:00Z",
+        "facts": [],
+        "memory_events": []
+    });
+    let body = import_body_with_dry_run(&export, "append", false, false);
 
     let (status, json) = response_parts(
         app,

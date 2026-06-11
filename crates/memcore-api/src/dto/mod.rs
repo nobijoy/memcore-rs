@@ -20,6 +20,7 @@ pub use export::{
 };
 pub use import::{
     ImportUserDataRequest, ImportUserDataResponse, ImportUserDataSummaryResponse,
+    ImportValidationIssueResponse, ImportValidationSummaryResponse,
 };
 pub use memories::{
     parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse,

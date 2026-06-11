@@ -11,8 +11,8 @@ use crate::audit::{
     build_noop_event, build_update_event, record_event_best_effort,
 };
 use crate::import::{
-    ImportMode, ImportUserDataInput, ImportUserDataOutput, resolve_import_fact_id,
-    validate_event_for_import, validate_export_for_import, validate_fact_for_import,
+    collect_import_validation, ImportMode, ImportUserDataInput, ImportUserDataOutput,
+    ImportValidationSummary, resolve_import_fact_id,
 };
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
@@ -410,16 +410,31 @@ impl MemoryEngine {
         input: ImportUserDataInput,
     ) -> MemcoreResult<ImportUserDataOutput> {
         validate_tenant(&input.tenant)?;
-        validate_export_for_import(&input.export, &input.tenant)?;
 
-        for fact in &input.export.facts {
-            validate_fact_for_import(fact, &input.tenant)?;
+        let validation =
+            collect_import_validation(&input.export, &input.tenant, input.restore_events);
+
+        if !validation.valid {
+            if input.dry_run {
+                return Ok(dry_run_output(
+                    &input,
+                    validation,
+                    self.event_store.is_some(),
+                ));
+            }
+            return Err(memcore_common::MemcoreError::ValidationError(
+                validation
+                    .first_error_message()
+                    .unwrap_or_else(|| "import validation failed".to_string()),
+            ));
         }
 
-        if input.restore_events {
-            for event in &input.export.memory_events {
-                validate_event_for_import(event, &input.tenant)?;
-            }
+        if input.dry_run {
+            return Ok(dry_run_output(
+                &input,
+                validation,
+                self.event_store.is_some(),
+            ));
         }
 
         let mut replaced_existing = false;
@@ -504,6 +519,8 @@ impl MemoryEngine {
             imported_events,
             skipped_facts,
             replaced_existing,
+            dry_run: false,
+            validation,
         })
     }
 
@@ -776,5 +793,39 @@ fn restored_event_from_export(exported: &MemoryEvent) -> MemoryEvent {
         model_name: exported.model_name.clone(),
         metadata: exported.metadata.clone(),
         created_at: exported.created_at,
+    }
+}
+
+fn dry_run_output(
+    input: &ImportUserDataInput,
+    validation: ImportValidationSummary,
+    event_store_configured: bool,
+) -> ImportUserDataOutput {
+    let replaced_existing = matches!(input.mode, ImportMode::Replace);
+
+    if !validation.valid {
+        return ImportUserDataOutput {
+            imported_facts: 0,
+            imported_events: 0,
+            skipped_facts: input.export.facts.len(),
+            replaced_existing,
+            dry_run: true,
+            validation,
+        };
+    }
+
+    let imported_events = if input.restore_events && event_store_configured {
+        input.export.memory_events.len()
+    } else {
+        0
+    };
+
+    ImportUserDataOutput {
+        imported_facts: input.export.facts.len(),
+        imported_events,
+        skipped_facts: 0,
+        replaced_existing,
+        dry_run: true,
+        validation,
     }
 }
