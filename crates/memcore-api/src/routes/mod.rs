@@ -47,6 +47,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/v1/users/{user_id}/import",
             post(users::import_user_data),
         )
+        .route(
+            "/api/v1/users/{user_id}/retention/apply",
+            post(users::apply_retention),
+        )
         .route("/api/v1/users/{user_id}", delete(users::forget_user))
         .route("/api/v1/api-keys", post(api_keys::create_api_key))
         .route("/api/v1/api-keys", get(api_keys::list_api_keys))

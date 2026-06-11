@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use memcore_common::MemcoreResult;
 use uuid::Uuid;
 
@@ -40,4 +41,13 @@ pub trait MemoryEventStore: Send + Sync {
     ) -> MemcoreResult<MemoryEvent>;
 
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>>;
+
+    /// Hard-deletes memory audit events with `created_at` older than `cutoff` for the tenant.
+    /// When `dry_run` is true, counts matches without deleting.
+    async fn delete_events_older_than(
+        &self,
+        tenant: &TenantContext,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<usize>;
 }

@@ -32,6 +32,9 @@ const MEMCORE_LOG_FORMAT: &str = "MEMCORE_LOG_FORMAT";
 const MEMCORE_LOG_LEVEL: &str = "MEMCORE_LOG_LEVEL";
 const MEMCORE_REQUEST_ID_HEADER: &str = "MEMCORE_REQUEST_ID_HEADER";
 const MEMCORE_METRICS_ENABLED: &str = "MEMCORE_METRICS_ENABLED";
+const MEMCORE_RETENTION_ENABLED: &str = "MEMCORE_RETENTION_ENABLED";
+const MEMCORE_FACT_RETENTION_DAYS: &str = "MEMCORE_FACT_RETENTION_DAYS";
+const MEMCORE_EVENT_RETENTION_DAYS: &str = "MEMCORE_EVENT_RETENTION_DAYS";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 
@@ -164,6 +167,12 @@ pub struct Settings {
     pub request_id_header: String,
     /// Expose in-process metrics at `GET /metrics`.
     pub metrics_enabled: bool,
+    /// Global retention toggle for user-scoped retention apply endpoint.
+    pub retention_enabled: bool,
+    /// Default fact retention window in days (`0` disables fact retention).
+    pub fact_retention_days: u32,
+    /// Default event retention window in days (`0` disables event retention).
+    pub event_retention_days: u32,
 }
 
 impl Default for Settings {
@@ -200,6 +209,9 @@ impl Default for Settings {
             log_level: LogLevel::Info,
             request_id_header: DEFAULT_REQUEST_ID_HEADER.to_string(),
             metrics_enabled: true,
+            retention_enabled: false,
+            fact_retention_days: 0,
+            event_retention_days: 0,
         }
     }
 }
@@ -255,6 +267,12 @@ impl Settings {
         let request_id_header =
             read_env_or(MEMCORE_REQUEST_ID_HEADER, &defaults.request_id_header);
         let metrics_enabled = parse_bool(MEMCORE_METRICS_ENABLED, defaults.metrics_enabled)?;
+        let retention_enabled =
+            parse_bool(MEMCORE_RETENTION_ENABLED, defaults.retention_enabled)?;
+        let fact_retention_days =
+            parse_u32(MEMCORE_FACT_RETENTION_DAYS, defaults.fact_retention_days)?;
+        let event_retention_days =
+            parse_u32(MEMCORE_EVENT_RETENTION_DAYS, defaults.event_retention_days)?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -294,6 +312,9 @@ impl Settings {
             log_level,
             request_id_header,
             metrics_enabled,
+            retention_enabled,
+            fact_retention_days,
+            event_retention_days,
         };
 
         settings.validate()?;
@@ -442,6 +463,18 @@ impl Settings {
         {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_POSTGRES_URL is required when MEMCORE_EVENT_BACKEND=postgres".to_string(),
+            ));
+        }
+
+        if self.fact_retention_days > 365_000 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_FACT_RETENTION_DAYS is unreasonably large".to_string(),
+            ));
+        }
+
+        if self.event_retention_days > 365_000 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_EVENT_RETENTION_DAYS is unreasonably large".to_string(),
             ));
         }
 
@@ -695,7 +728,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 31] = [
+    const ENV_KEYS: [&str; 34] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -725,6 +758,9 @@ mod tests {
         "MEMCORE_LOG_LEVEL",
         "MEMCORE_REQUEST_ID_HEADER",
         "MEMCORE_METRICS_ENABLED",
+        "MEMCORE_RETENTION_ENABLED",
+        "MEMCORE_FACT_RETENTION_DAYS",
+        "MEMCORE_EVENT_RETENTION_DAYS",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     ];
@@ -794,6 +830,60 @@ mod tests {
         assert_eq!(settings.log_level, super::LogLevel::Info);
         assert_eq!(settings.request_id_header, super::DEFAULT_REQUEST_ID_HEADER);
         assert!(settings.metrics_enabled);
+        assert!(!settings.retention_enabled);
+        assert_eq!(settings.fact_retention_days, 0);
+        assert_eq!(settings.event_retention_days, 0);
+    }
+
+    #[test]
+    fn retention_disabled_by_default() {
+        let settings = Settings::default();
+        assert!(!settings.retention_enabled);
+        assert_eq!(settings.fact_retention_days, 0);
+        assert_eq!(settings.event_retention_days, 0);
+    }
+
+    #[test]
+    fn loads_retention_settings_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_RETENTION_ENABLED", "true");
+            std::env::set_var("MEMCORE_FACT_RETENTION_DAYS", "365");
+            std::env::set_var("MEMCORE_EVENT_RETENTION_DAYS", "90");
+        }
+
+        let settings = Settings::from_env().expect("retention settings should load");
+        assert!(settings.retention_enabled);
+        assert_eq!(settings.fact_retention_days, 365);
+        assert_eq!(settings.event_retention_days, 90);
+    }
+
+    #[test]
+    fn fails_on_negative_retention_days() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_FACT_RETENTION_DAYS", "-1");
+        }
+
+        let error = Settings::from_env().expect_err("negative retention days should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_FACT_RETENTION_DAYS must be a valid unsigned integer")
+        );
     }
 
     #[test]

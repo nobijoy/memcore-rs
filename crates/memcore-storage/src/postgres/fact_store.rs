@@ -1,12 +1,12 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::{Fact, TenantContext};
 use sqlx::postgres::PgPool;
 use sqlx::{Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
-use memcore_core::ports::{FactSearchQuery, FactStore};
+use memcore_core::ports::{FactSearchQuery, FactStore, RetentionPruneResult};
 
 use super::conversions::{memory_source_to_str, memory_type_to_str, row_to_fact};
 
@@ -291,5 +291,61 @@ impl FactStore for PostgresFactStore {
             .map_err(|error| storage_error("failed to delete user data", error))?;
 
         Ok(())
+    }
+
+    async fn delete_facts_older_than(
+        &self,
+        tenant: &TenantContext,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<RetentionPruneResult> {
+        let rows = sqlx::query(
+            "SELECT id FROM facts WHERE org_id = $1 AND user_id = $2 AND deleted_at IS NULL AND updated_at < $3",
+        )
+        .bind(&tenant.org_id)
+        .bind(&tenant.user_id)
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to list facts for retention", error))?;
+
+        let fact_ids: Vec<Uuid> = rows
+            .iter()
+            .map(|row| {
+                row.try_get("id")
+                    .map_err(|error| storage_error("row id", error))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if dry_run {
+            return Ok(RetentionPruneResult {
+                count: fact_ids.len(),
+                fact_ids: Vec::new(),
+            });
+        }
+
+        if fact_ids.is_empty() {
+            return Ok(RetentionPruneResult {
+                count: 0,
+                fact_ids: Vec::new(),
+            });
+        }
+
+        let deleted_at = Utc::now();
+        let result = sqlx::query(
+            "UPDATE facts SET deleted_at = $1 WHERE org_id = $2 AND user_id = $3 AND deleted_at IS NULL AND updated_at < $4",
+        )
+        .bind(deleted_at)
+        .bind(&tenant.org_id)
+        .bind(&tenant.user_id)
+        .bind(cutoff)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to soft delete facts for retention", error))?;
+
+        Ok(RetentionPruneResult {
+            count: result.rows_affected() as usize,
+            fact_ids,
+        })
     }
 }

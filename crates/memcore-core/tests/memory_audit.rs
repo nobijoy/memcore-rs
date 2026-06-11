@@ -58,6 +58,17 @@ impl MemoryEventStore for FailingMemoryEventStore {
             "audit store unavailable".to_string(),
         ))
     }
+
+    async fn delete_events_older_than(
+        &self,
+        _tenant: &TenantContext,
+        _cutoff: chrono::DateTime<chrono::Utc>,
+        _dry_run: bool,
+    ) -> MemcoreResult<usize> {
+        Err(MemcoreError::StorageError(
+            "audit store unavailable".to_string(),
+        ))
+    }
 }
 
 #[tokio::test]

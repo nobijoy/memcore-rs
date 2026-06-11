@@ -3,6 +3,7 @@ pub mod context;
 pub mod engine;
 pub mod export;
 pub mod import;
+pub mod retention;
 pub mod lifecycle;
 pub mod models;
 pub mod ports;
@@ -27,6 +28,7 @@ pub use import::{
     ImportMode, ImportUserDataInput, ImportUserDataOutput, ImportValidationIssue,
     ImportValidationSummary,
 };
+pub use retention::{ApplyRetentionInput, ApplyRetentionOutput, RetentionPolicy};
 pub use models::{
     ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
     MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,
@@ -35,6 +37,7 @@ pub use privacy::PiiRedactor;
 pub use ports::{
     ApiKeyStore, EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery,
     FactStore, LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
-    SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
+    RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
+    VectorStore,
     DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };

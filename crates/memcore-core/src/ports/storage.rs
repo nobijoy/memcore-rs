@@ -1,10 +1,20 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use memcore_common::MemcoreResult;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{Fact, MemoryType, TenantContext};
+
+/// Result of a fact retention prune operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetentionPruneResult {
+    /// Number of facts matched (dry-run) or soft-deleted (apply).
+    pub count: usize,
+    /// Fact IDs soft-deleted on apply; empty on dry-run.
+    pub fact_ids: Vec<Uuid>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FactSearchQuery {
@@ -80,6 +90,15 @@ pub trait FactStore: Send + Sync {
     ) -> MemcoreResult<()>;
 
     async fn delete_user_data(&self, tenant: &TenantContext) -> MemcoreResult<()>;
+
+    /// Soft-deletes active facts with `updated_at` older than `cutoff` for the tenant.
+    /// When `dry_run` is true, counts matches without deleting.
+    async fn delete_facts_older_than(
+        &self,
+        tenant: &TenantContext,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<RetentionPruneResult>;
 }
 
 #[async_trait]

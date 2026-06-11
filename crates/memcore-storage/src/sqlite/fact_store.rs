@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::{Fact, TenantContext};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -11,7 +11,7 @@ use crate::sqlite::conversions::{
     datetime_to_str, memory_source_to_str, memory_type_to_str, metadata_to_str,
     optional_datetime_to_str, row_to_fact,
 };
-use memcore_core::ports::FactStore;
+use memcore_core::ports::{FactStore, RetentionPruneResult};
 
 fn storage_error(context: impl Into<String>, error: impl std::fmt::Display) -> MemcoreError {
     MemcoreError::StorageError(format!("{}: {error}", context.into()))
@@ -315,6 +315,67 @@ impl FactStore for SqliteFactStore {
             .map_err(|error| storage_error("failed to delete user data", error))?;
 
         Ok(())
+    }
+
+    async fn delete_facts_older_than(
+        &self,
+        tenant: &TenantContext,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<RetentionPruneResult> {
+        let cutoff_str = datetime_to_str(cutoff);
+
+        let rows = sqlx::query(
+            "SELECT id FROM facts WHERE org_id = ? AND user_id = ? AND deleted_at IS NULL AND updated_at < ?",
+        )
+        .bind(&tenant.org_id)
+        .bind(&tenant.user_id)
+        .bind(&cutoff_str)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to list facts for retention", error))?;
+
+        let fact_ids: Vec<Uuid> = rows
+            .iter()
+            .map(|row| {
+                let id_str: String = row
+                    .try_get("id")
+                    .map_err(|error| storage_error("row id", error))?;
+                Uuid::parse_str(&id_str)
+                    .map_err(|error| storage_error("invalid fact id", error))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if dry_run {
+            return Ok(RetentionPruneResult {
+                count: fact_ids.len(),
+                fact_ids: Vec::new(),
+            });
+        }
+
+        if fact_ids.is_empty() {
+            return Ok(RetentionPruneResult {
+                count: 0,
+                fact_ids: Vec::new(),
+            });
+        }
+
+        let deleted_at = datetime_to_str(Utc::now());
+        let result = sqlx::query(
+            "UPDATE facts SET deleted_at = ? WHERE org_id = ? AND user_id = ? AND deleted_at IS NULL AND updated_at < ?",
+        )
+        .bind(deleted_at)
+        .bind(&tenant.org_id)
+        .bind(&tenant.user_id)
+        .bind(cutoff_str)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to soft delete facts for retention", error))?;
+
+        Ok(RetentionPruneResult {
+            count: result.rows_affected() as usize,
+            fact_ids,
+        })
     }
 }
 

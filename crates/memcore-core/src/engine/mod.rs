@@ -2,6 +2,7 @@ mod types;
 
 use std::sync::Arc;
 
+use chrono::{Duration, Utc};
 use memcore_common::MemcoreResult;
 
 use crate::privacy::redact_messages_for_extraction;
@@ -14,6 +15,7 @@ use crate::import::{
     collect_import_validation, ImportMode, ImportUserDataInput, ImportUserDataOutput,
     ImportValidationSummary, resolve_import_fact_id,
 };
+use crate::retention::{ApplyRetentionInput, ApplyRetentionOutput};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryEventQuery, MemoryEventStore, VectorRecord, VectorStore,
@@ -378,6 +380,59 @@ impl MemoryEngine {
         .await;
 
         Ok(DeleteMemoryOutput { deleted: true })
+    }
+
+    pub async fn apply_retention(
+        &self,
+        input: ApplyRetentionInput,
+    ) -> MemcoreResult<ApplyRetentionOutput> {
+        validate_tenant(&input.tenant)?;
+
+        if !input.policy.enabled {
+            return Ok(ApplyRetentionOutput::zero(input.dry_run));
+        }
+
+        let mut output = ApplyRetentionOutput::zero(input.dry_run);
+
+        if let Some(fact_days) = input.policy.fact_days_active() {
+            let cutoff = Utc::now() - Duration::days(i64::from(fact_days));
+            let result = self
+                .fact_store
+                .delete_facts_older_than(&input.tenant, cutoff, input.dry_run)
+                .await?;
+
+            output.facts_matched = result.count;
+            if input.dry_run {
+                output.facts_deleted = 0;
+            } else {
+                output.facts_deleted = result.count;
+                for fact_id in result.fact_ids {
+                    if let Err(err) = self
+                        .vector_store
+                        .delete_by_fact_id(&input.tenant, fact_id)
+                        .await
+                    {
+                        if !matches!(err, memcore_common::MemcoreError::NotFound(_)) {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(event_days) = input.policy.event_days_active() {
+            if let Some(event_store) = &self.event_store {
+                let cutoff = Utc::now() - Duration::days(i64::from(event_days));
+                let count = event_store
+                    .delete_events_older_than(&input.tenant, cutoff, input.dry_run)
+                    .await?;
+
+                output.events_matched = count;
+                output.events_deleted = if input.dry_run { 0 } else { count };
+            }
+        }
+
+        Ok(output)
     }
 
     pub async fn forget_user(&self, input: ForgetUserInput) -> MemcoreResult<ForgetUserOutput> {

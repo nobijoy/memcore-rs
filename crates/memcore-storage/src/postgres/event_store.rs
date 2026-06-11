@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::{MemoryEvent, TenantContext};
 use sqlx::postgres::PgPool;
@@ -164,5 +165,41 @@ impl MemoryEventStore for PostgresMemoryEventStore {
             .map_err(|error| storage_error("failed to list memory events", error))?;
 
         rows.iter().map(parse_event_row).collect()
+    }
+
+    async fn delete_events_older_than(
+        &self,
+        tenant: &TenantContext,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<usize> {
+        if dry_run {
+            let row = sqlx::query(
+                "SELECT COUNT(*)::bigint AS count FROM memory_events WHERE org_id = $1 AND user_id = $2 AND created_at < $3",
+            )
+            .bind(&tenant.org_id)
+            .bind(&tenant.user_id)
+            .bind(cutoff)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| storage_error("failed to count events for retention", error))?;
+
+            let count: i64 = row
+                .try_get("count")
+                .map_err(|error| storage_error("row count", error))?;
+            return Ok(count as usize);
+        }
+
+        let result = sqlx::query(
+            "DELETE FROM memory_events WHERE org_id = $1 AND user_id = $2 AND created_at < $3",
+        )
+        .bind(&tenant.org_id)
+        .bind(&tenant.user_id)
+        .bind(cutoff)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to delete events for retention", error))?;
+
+        Ok(result.rows_affected() as usize)
     }
 }

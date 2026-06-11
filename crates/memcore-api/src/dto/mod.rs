@@ -3,6 +3,7 @@ pub mod context;
 pub mod export;
 pub mod import;
 pub mod memories;
+pub mod retention;
 pub mod memory_events;
 
 pub use api_keys::{
@@ -21,6 +22,9 @@ pub use export::{
 pub use import::{
     ImportUserDataRequest, ImportUserDataResponse, ImportUserDataSummaryResponse,
     ImportValidationIssueResponse, ImportValidationSummaryResponse,
+};
+pub use retention::{
+    ApplyRetentionRequest, ApplyRetentionResponse, ApplyRetentionSummaryResponse,
 };
 pub use memories::{
     parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse,

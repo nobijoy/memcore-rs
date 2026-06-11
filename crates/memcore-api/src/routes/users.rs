@@ -4,8 +4,8 @@ use memcore_common::MemcoreError;
 use memcore_core::{ApiKeyScope, ExportUserDataInput, ForgetUserInput, TenantContext};
 
 use crate::dto::{
-    ExportUserQuery, ExportUserResponse, ForgetUserResponse, ImportUserDataRequest,
-    ImportUserDataResponse,
+    ApplyRetentionRequest, ApplyRetentionResponse, ExportUserQuery, ExportUserResponse,
+    ForgetUserResponse, ImportUserDataRequest, ImportUserDataResponse,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_any_scope, check_scope, ApiError};
@@ -100,4 +100,33 @@ pub async fn import_user_data(
         .await?;
 
     Ok(Json(ImportUserDataResponse::from(output)))
+}
+
+pub async fn apply_retention(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Path(user_id): Path<String>,
+    Json(body): Json<ApplyRetentionRequest>,
+) -> Result<Json<ApplyRetentionResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite, ApiKeyScope::UserDelete],
+    )?;
+
+    if user_id.trim().is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "user_id cannot be empty".to_string(),
+        )
+        .into());
+    }
+
+    let tenant = TenantContext::new(organization.org_id, user_id)?;
+
+    let output = state
+        .memory_engine
+        .apply_retention(body.into_input(tenant, &state.settings))
+        .await?;
+
+    Ok(Json(ApplyRetentionResponse::from(output)))
 }

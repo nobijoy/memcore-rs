@@ -2,15 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::{Fact, TenantContext};
 use serde_json::Value;
 use uuid::Uuid;
 
 use memcore_core::ports::{
-    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, VectorRecord,
-    VectorSearchQuery, VectorSearchResult, VectorStore,
+    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore,
+    RetentionPruneResult, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
 };
 use memcore_core::{ApiKeyRecord, MemoryEvent};
 
@@ -238,6 +238,42 @@ impl FactStore for MockFactStore {
         deleted.retain(|id| remaining_ids.contains(id));
         Ok(())
     }
+
+    async fn delete_facts_older_than(
+        &self,
+        tenant: &TenantContext,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<RetentionPruneResult> {
+        let matching_ids: Vec<Uuid> = {
+            let facts = self.facts.read().expect("facts lock poisoned");
+            let deleted_set = self.deleted.read().expect("deleted lock poisoned");
+            facts
+                .values()
+                .filter(|fact| fact_matches_tenant(fact, tenant))
+                .filter(|fact| !deleted_set.contains(&fact.id))
+                .filter(|fact| fact.updated_at < cutoff)
+                .map(|fact| fact.id)
+                .collect()
+        };
+
+        if dry_run {
+            return Ok(RetentionPruneResult {
+                count: matching_ids.len(),
+                fact_ids: Vec::new(),
+            });
+        }
+
+        let mut deleted = self.deleted.write().expect("deleted lock poisoned");
+        for fact_id in &matching_ids {
+            deleted.insert(*fact_id);
+        }
+
+        Ok(RetentionPruneResult {
+            count: matching_ids.len(),
+            fact_ids: matching_ids,
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -384,6 +420,31 @@ impl MemoryEventStore for MockMemoryEventStore {
         results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         results.truncate(limit);
         Ok(results)
+    }
+
+    async fn delete_events_older_than(
+        &self,
+        tenant: &TenantContext,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<usize> {
+        let mut events = self.events.write().expect("events lock poisoned");
+        let before_len = events.len();
+
+        if dry_run {
+            let count = events
+                .iter()
+                .filter(|event| event_matches_tenant(event, tenant))
+                .filter(|event| event.created_at < cutoff)
+                .count();
+            return Ok(count);
+        }
+
+        events.retain(|event| {
+            !(event_matches_tenant(event, tenant) && event.created_at < cutoff)
+        });
+
+        Ok(before_len - events.len())
     }
 }
 
@@ -708,6 +769,71 @@ mod tests {
             .await
             .expect("get should succeed");
         assert!(fetched.is_none());
+    }
+
+    #[tokio::test]
+    async fn retention_dry_run_counts_old_facts_without_deleting() {
+        let store = MockFactStore::new();
+        let tenant = tenant("org_a", "user_a");
+        let cutoff = Utc::now() - chrono::Duration::days(30);
+
+        let mut old_fact = sample_fact("org_a", "user_a", "old", MemoryType::Profile);
+        old_fact.updated_at = Utc::now() - chrono::Duration::days(60);
+        store
+            .insert_fact(&tenant, old_fact)
+            .await
+            .expect("insert old fact");
+
+        store
+            .insert_fact(
+                &tenant,
+                sample_fact("org_a", "user_a", "recent", MemoryType::Profile),
+            )
+            .await
+            .expect("insert recent fact");
+
+        let result = store
+            .delete_facts_older_than(&tenant, cutoff, true)
+            .await
+            .expect("dry-run should succeed");
+
+        assert_eq!(result.count, 1);
+        assert!(result.fact_ids.is_empty());
+
+        let listed = store
+            .search_facts(FactSearchQuery::new(tenant, 10))
+            .await
+            .expect("search");
+        assert_eq!(listed.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn retention_apply_soft_deletes_only_matching_tenant() {
+        let store = MockFactStore::new();
+        let tenant_a = tenant("org_a", "user_a");
+        let tenant_b = tenant("org_a", "user_b");
+        let cutoff = Utc::now() - chrono::Duration::days(30);
+
+        let mut old_a = sample_fact("org_a", "user_a", "old a", MemoryType::Profile);
+        old_a.updated_at = Utc::now() - chrono::Duration::days(60);
+        store.insert_fact(&tenant_a, old_a).await.expect("insert");
+
+        let mut old_b = sample_fact("org_a", "user_b", "old b", MemoryType::Profile);
+        old_b.updated_at = Utc::now() - chrono::Duration::days(60);
+        store.insert_fact(&tenant_b, old_b).await.expect("insert");
+
+        let result = store
+            .delete_facts_older_than(&tenant_a, cutoff, false)
+            .await
+            .expect("apply should succeed");
+
+        assert_eq!(result.count, 1);
+
+        let remaining_b = store
+            .search_facts(FactSearchQuery::new(tenant_b, 10))
+            .await
+            .expect("search b");
+        assert_eq!(remaining_b.len(), 1);
     }
 
     #[tokio::test]
