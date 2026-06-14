@@ -205,7 +205,7 @@ async fn export_is_scoped_to_tenant_user() {
             tenant: tenant("org_a", "user_a"),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "user a only".to_string(),
+                content: "user a only memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -217,7 +217,7 @@ async fn export_is_scoped_to_tenant_user() {
             tenant: tenant("org_a", "user_b"),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "user b only".to_string(),
+                content: "user b only memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -234,7 +234,7 @@ async fn export_is_scoped_to_tenant_user() {
         .expect("export user a should succeed");
 
     assert_eq!(export_a.facts.len(), 1);
-    assert_eq!(export_a.facts[0].content, "user a only");
+    assert_eq!(export_a.facts[0].content, "user a only memory");
 
     let export_b = engine
         .export_user_data(ExportUserDataInput {

@@ -223,7 +223,14 @@ async fn admin_audit_returns_events_across_users_in_org() {
 async fn admin_audit_user_id_filter() {
     let app = dev_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, None).await;
-    seed_memory(&app, ORG_A, USER_B, "other user", None).await;
+    seed_memory(
+        &app,
+        ORG_A,
+        USER_B,
+        "Other user memory content for audit test",
+        None,
+    )
+    .await;
 
     let (status, json) = response_parts(
         app,
@@ -342,7 +349,14 @@ async fn admin_audit_does_not_expose_input_text() {
 async fn org_a_cannot_see_org_b_audit_events() {
     let app = dev_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, None).await;
-    seed_memory(&app, ORG_B, USER_B, "org b memory", None).await;
+    seed_memory(
+        &app,
+        ORG_B,
+        USER_B,
+        "Organization B memory content for audit test",
+        None,
+    )
+    .await;
 
     let (status, json) = response_parts(
         app,

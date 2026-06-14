@@ -178,3 +178,44 @@ async fn invalid_role_returns_validation_error() {
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
     assert_eq!(json["error"]["message"], "invalid message role: moderator");
 }
+
+#[tokio::test]
+async fn adding_same_memory_twice_does_not_duplicate_listed_memories() {
+    let app = test_app();
+    let body = r#"{
+      "user_id": "user_dedup_api",
+      "messages": [{ "role": "user", "content": "I am learning Rust." }],
+      "metadata": {}
+    }"#;
+
+    let (first_status, first_json) = response_parts(
+        app.clone(),
+        add_memory_request(body, Some("org_dedup_api")),
+    )
+    .await;
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(first_json["summary"]["added"], 1);
+
+    let (second_status, second_json) = response_parts(
+        app.clone(),
+        add_memory_request(body, Some("org_dedup_api")),
+    )
+    .await;
+    assert_eq!(second_status, StatusCode::OK);
+    assert_eq!(second_json["summary"]["added"], 0);
+    assert_eq!(second_json["summary"]["noop"], 1);
+
+    let list_request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/users/user_dedup_api/memories")
+        .header("X-Organization-ID", "org_dedup_api");
+    let (auth_name, auth_value) = authorization_header();
+    let list_request = list_request
+        .header(auth_name, auth_value)
+        .body(Body::empty())
+        .expect("request");
+
+    let (list_status, list_json) = response_parts(app, list_request).await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(list_json["memories"].as_array().unwrap().len(), 1);
+}

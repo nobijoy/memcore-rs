@@ -104,7 +104,7 @@ async fn import_replace_removes_previous_user_facts() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "old memory".to_string(),
+                content: "old memory fact".to_string(),
             }],
             metadata: json!({}),
         })
@@ -408,7 +408,7 @@ async fn append_mode_regenerates_id_on_collision() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "existing".to_string(),
+                content: "existing memory fact".to_string(),
             }],
             metadata: json!({}),
         })
@@ -503,7 +503,7 @@ async fn dry_run_replace_mode_does_not_delete_existing_facts() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "keep me".to_string(),
+                content: "keep me in memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -541,7 +541,7 @@ async fn dry_run_replace_mode_does_not_delete_existing_facts() {
         .expect("list should succeed");
 
     assert_eq!(listed.memories.len(), 1);
-    assert_eq!(listed.memories[0].content, "keep me");
+    assert_eq!(listed.memories[0].content, "keep me in memory");
 }
 
 #[tokio::test]
@@ -825,7 +825,7 @@ async fn non_dry_run_rejects_invalid_data_before_writes() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "existing".to_string(),
+                content: "existing memory fact".to_string(),
             }],
             metadata: json!({}),
         })

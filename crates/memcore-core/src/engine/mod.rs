@@ -28,13 +28,13 @@ use crate::ports::{
     VectorRecord, VectorStore, validate_event_date_range,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
+use crate::dedup::{detect_duplicate, find_existing_facts_for_dedup, DeduplicationDecision};
+use crate::importance::ImportanceScorer;
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
 };
-use crate::{
-    assemble_context, BuildContextInput, BuildContextOutput, Fact, MemoryEvent, MemorySearchResult,
-    TenantContext,
-};
+use crate::{assemble_context, BuildContextInput, BuildContextOutput, Fact, FactOperation,
+    FactOperationDecision, MemoryEvent, MemorySearchResult, TenantContext};
 use uuid::Uuid;
 
 pub use types::{
@@ -138,12 +138,41 @@ impl MemoryEngine {
         };
 
         for candidate in candidates {
+            validate_candidate(&candidate)?;
+
+            let candidate = ImportanceScorer::adjust(&candidate);
+
             if !passes_importance_threshold(&candidate, self.min_importance) {
                 summary.noop += 1;
                 continue;
             }
 
-            validate_candidate(&candidate)?;
+            let existing_for_dedup = find_existing_facts_for_dedup(
+                self.fact_store.as_ref(),
+                &input.tenant,
+                candidate.memory_type,
+            )
+            .await?;
+
+            if let DeduplicationDecision::Duplicate {
+                existing_fact_id,
+                reason,
+            } = detect_duplicate(&candidate, &existing_for_dedup)
+            {
+                summary.noop += 1;
+                record_event_best_effort(
+                    &self.event_store,
+                    &input.tenant,
+                    build_noop_event(
+                        &input.tenant,
+                        &dedup_noop_decision(existing_fact_id, reason),
+                        &self.audit_provider_name,
+                        &self.audit_model_name,
+                    ),
+                )
+                .await;
+                continue;
+            }
 
             let related_facts =
                 find_related_facts(self.fact_store.as_ref(), &input.tenant, &candidate).await?;
@@ -968,6 +997,15 @@ fn validate_candidate(candidate: &crate::CandidateFact) -> MemcoreResult<()> {
 
 fn passes_importance_threshold(candidate: &crate::CandidateFact, min_importance: f32) -> bool {
     candidate.importance >= min_importance
+}
+
+fn dedup_noop_decision(existing_fact_id: Uuid, reason: String) -> FactOperationDecision {
+    FactOperationDecision {
+        operation: FactOperation::NoOp,
+        target_fact_id: Some(existing_fact_id),
+        reason: Some(reason),
+        confidence: 1.0,
+    }
 }
 
 fn fact_for_import(

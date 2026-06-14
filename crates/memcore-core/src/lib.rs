@@ -1,7 +1,9 @@
 pub mod admin;
 pub mod audit;
 pub mod context;
+pub mod dedup;
 pub mod engine;
+pub mod importance;
 pub mod pagination;
 pub mod export;
 pub mod import;
@@ -11,6 +13,12 @@ pub mod models;
 pub mod ports;
 pub mod privacy;
 
+pub use dedup::{
+    detect_duplicate, find_existing_facts_for_dedup, normalize_content, DeduplicationDecision,
+    EXACT_DUPLICATE_THRESHOLD, HIGH_SIMILARITY_DUPLICATE_THRESHOLD,
+    MODERATE_SIMILARITY_THRESHOLD,
+};
+pub use importance::ImportanceScorer;
 pub use context::{
     assemble_context, BuildContextInput, BuildContextOutput, DEFAULT_CONTEXT_MAX_MEMORIES,
     EMPTY_CONTEXT_MESSAGE, MAX_CONTEXT_MAX_MEMORIES,

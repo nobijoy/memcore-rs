@@ -192,7 +192,7 @@ async fn empty_tenant_org_id_returns_validation_error() {
             },
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "hello".to_string(),
+                content: "hello memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -216,7 +216,7 @@ async fn empty_tenant_user_id_returns_validation_error() {
             },
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "hello".to_string(),
+                content: "hello memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -607,7 +607,7 @@ async fn delete_memory_soft_deletes_fact_and_removes_vector() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "delete me".to_string(),
+                content: "delete this memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -648,7 +648,7 @@ async fn delete_memory_soft_deletes_fact_and_removes_vector() {
     let search = engine
         .search_memory(SearchMemoryInput {
             tenant: tenant.clone(),
-            query: "delete me".to_string(),
+            query: "delete this memory".to_string(),
             limit: 10,
             memory_types: None,
             metadata_filter: None,
@@ -660,7 +660,7 @@ async fn delete_memory_soft_deletes_fact_and_removes_vector() {
     let vectors = vector_store
         .search_vectors(VectorSearchQuery {
             tenant: tenant.clone(),
-            embedding: deterministic_embedding("delete me", 4).expect("embedding should succeed"),
+            embedding: deterministic_embedding("delete this memory", 4).expect("embedding should succeed"),
             limit: 10,
             memory_types: None,
             metadata_filter: None,
@@ -775,7 +775,7 @@ async fn noop_operation_does_not_insert_fact() {
         fact_store.clone(),
         Arc::new(MockVectorStore::new()),
         MockLlmProvider::new()
-            .with_extraction_candidates(vec![high_importance_candidate("skip me")])
+            .with_extraction_candidates(vec![high_importance_candidate("skip this memory")])
             .with_classification_decision(FactOperationDecision {
                 operation: FactOperation::NoOp,
                 target_fact_id: None,
@@ -791,7 +791,7 @@ async fn noop_operation_does_not_insert_fact() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "skip me".to_string(),
+                content: "skip this memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -898,7 +898,7 @@ async fn update_operation_updates_vector_embedding() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "old content".to_string(),
+                content: "old content here".to_string(),
             }],
             metadata: json!({}),
         })
@@ -906,7 +906,7 @@ async fn update_operation_updates_vector_embedding() {
         .expect("initial add should succeed");
 
     let target_id = initial.memories[0].id;
-    let new_content = "new content";
+    let new_content = "new content here";
     let engine = engine_with_mocks(
         fact_store,
         vector_store.clone(),
@@ -969,7 +969,7 @@ async fn delete_operation_soft_deletes_fact_via_lifecycle() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "remove this".to_string(),
+                content: "remove this memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -981,7 +981,7 @@ async fn delete_operation_soft_deletes_fact_via_lifecycle() {
         fact_store.clone(),
         vector_store.clone(),
         MockLlmProvider::new()
-            .with_extraction_candidates(vec![high_importance_candidate("remove this")])
+            .with_extraction_candidates(vec![high_importance_candidate("remove this memory")])
             .with_classification_decision(FactOperationDecision {
                 operation: FactOperation::Delete,
                 target_fact_id: Some(target_id),
@@ -996,7 +996,7 @@ async fn delete_operation_soft_deletes_fact_via_lifecycle() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "remove this".to_string(),
+                content: "remove this memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -1087,7 +1087,7 @@ async fn update_without_target_fact_id_returns_validation_error() {
         Arc::new(MockFactStore::new()),
         Arc::new(MockVectorStore::new()),
         MockLlmProvider::new()
-            .with_extraction_candidates(vec![high_importance_candidate("updated")])
+            .with_extraction_candidates(vec![high_importance_candidate("updated content")])
             .with_classification_decision(FactOperationDecision {
                 operation: FactOperation::Update,
                 target_fact_id: None,
@@ -1102,7 +1102,7 @@ async fn update_without_target_fact_id_returns_validation_error() {
             tenant: tenant("org_a", "user_a"),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "updated".to_string(),
+                content: "updated content".to_string(),
             }],
             metadata: json!({}),
         })
@@ -1119,7 +1119,7 @@ async fn delete_without_target_fact_id_returns_validation_error() {
         Arc::new(MockFactStore::new()),
         Arc::new(MockVectorStore::new()),
         MockLlmProvider::new()
-            .with_extraction_candidates(vec![high_importance_candidate("deleted")])
+            .with_extraction_candidates(vec![high_importance_candidate("deleted content")])
             .with_classification_decision(FactOperationDecision {
                 operation: FactOperation::Delete,
                 target_fact_id: None,
@@ -1134,7 +1134,7 @@ async fn delete_without_target_fact_id_returns_validation_error() {
             tenant: tenant("org_a", "user_a"),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "deleted".to_string(),
+                content: "deleted content".to_string(),
             }],
             metadata: json!({}),
         })
@@ -1162,7 +1162,7 @@ async fn update_target_from_another_tenant_returns_not_found() {
             tenant: tenant_a.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "user a fact".to_string(),
+                content: "user a fact memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -1219,7 +1219,7 @@ async fn delete_target_from_another_tenant_returns_not_found() {
             tenant: tenant_a.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "user a fact".to_string(),
+                content: "user a fact memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -1275,7 +1275,7 @@ async fn lifecycle_operation_summary_counts_are_correct() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "seed fact".to_string(),
+                content: "seed fact memory".to_string(),
             }],
             metadata: json!({}),
         })

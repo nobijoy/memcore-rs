@@ -210,7 +210,7 @@ async fn delete_operation_records_delete_event() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "remove this".to_string(),
+                content: "remove this memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -223,7 +223,7 @@ async fn delete_operation_records_delete_event() {
         Arc::new(MockVectorStore::new()),
         event_store.clone(),
         MockLlmProvider::new()
-            .with_extraction_candidates(vec![high_importance_candidate("remove this")])
+            .with_extraction_candidates(vec![high_importance_candidate("remove this memory")])
             .with_classification_decision(FactOperationDecision {
                 operation: FactOperation::Delete,
                 target_fact_id: Some(target_id),
@@ -237,7 +237,7 @@ async fn delete_operation_records_delete_event() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "remove this".to_string(),
+                content: "remove this memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -254,7 +254,7 @@ async fn delete_operation_records_delete_event() {
         .find(|event| event.operation == MemoryEventOperation::Delete)
         .expect("delete event should exist");
     assert_eq!(delete_event.fact_id, Some(target_id));
-    assert_eq!(delete_event.previous_content.as_deref(), Some("remove this"));
+    assert_eq!(delete_event.previous_content.as_deref(), Some("remove this memory"));
 }
 
 #[tokio::test]
@@ -265,7 +265,7 @@ async fn noop_operation_records_noop_event() {
         Arc::new(MockVectorStore::new()),
         event_store.clone(),
         MockLlmProvider::new()
-            .with_extraction_candidates(vec![high_importance_candidate("skip me")])
+            .with_extraction_candidates(vec![high_importance_candidate("skip this memory")])
             .with_classification_decision(FactOperationDecision {
                 operation: FactOperation::NoOp,
                 target_fact_id: None,
@@ -280,7 +280,7 @@ async fn noop_operation_records_noop_event() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "skip me".to_string(),
+                content: "skip this memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -313,7 +313,7 @@ async fn forget_user_records_forget_user_event() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "temporary".to_string(),
+                content: "temporary memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -358,7 +358,7 @@ async fn event_store_enforces_tenant_isolation_on_list() {
             tenant: tenant_a.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "only user a".to_string(),
+                content: "only user a memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -394,7 +394,7 @@ async fn listing_events_by_fact_id_works() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "target fact".to_string(),
+                content: "target fact memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -429,7 +429,7 @@ async fn listing_events_by_operation_works() {
             tenant: tenant.clone(),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "hello".to_string(),
+                content: "hello memory".to_string(),
             }],
             metadata: json!({}),
         })
@@ -462,7 +462,7 @@ async fn audit_event_failure_does_not_break_main_operation() {
             tenant: tenant("org_a", "user_a"),
             messages: vec![MemoryMessage {
                 role: MessageRole::User,
-                content: "still works".to_string(),
+                content: "still works fine".to_string(),
             }],
             metadata: json!({}),
         })
