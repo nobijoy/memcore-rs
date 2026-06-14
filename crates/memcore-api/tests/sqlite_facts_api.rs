@@ -44,8 +44,8 @@ const ORG_A: &str = "org_sqlite_a";
 const ORG_B: &str = "org_sqlite_b";
 const USER_A: &str = "user_sqlite_a";
 const USER_B: &str = "user_sqlite_b";
-const MEMORY_A: &str = "SQLite memory content A";
-const MEMORY_B: &str = "SQLite memory content B";
+const MEMORY_A: &str = "First sqlite integration memory alpha bravo charlie delta";
+const MEMORY_B: &str = "Second distinct sqlite integration memory foxtrot golf hotel india";
 
 async fn sqlite_app() -> axum::Router {
     let state = AppState::initialize(Settings::sqlite_memory())
@@ -113,13 +113,17 @@ async fn seed_memory(app: &axum::Router, org_id: &str, user_id: &str, content: &
         }}"#
     );
 
-    let (status, _) = response_parts(
+    let (status, json) = response_parts(
         app.clone(),
         post_request("/api/v1/memories", &add_body, org_id),
     )
     .await;
 
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "add failed for {content:?}: {json}");
+    assert_eq!(
+        json["summary"]["added"], 1,
+        "expected add for {content:?}: {json}"
+    );
 }
 
 async fn seed_two_memories(app: &axum::Router, org_id: &str, user_id: &str) {

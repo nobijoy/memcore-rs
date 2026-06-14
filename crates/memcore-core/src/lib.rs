@@ -14,7 +14,9 @@ pub mod ports;
 pub mod privacy;
 
 pub use dedup::{
-    detect_duplicate, find_existing_facts_for_dedup, normalize_content, DeduplicationDecision,
+    detect_duplicate, detect_embedding_duplicate, find_existing_facts_for_dedup,
+    normalize_content, DeduplicationDecision, EmbeddingDeduplicationConfig,
+    DEFAULT_EMBEDDING_DEDUP_SEARCH_LIMIT, DEFAULT_EMBEDDING_DEDUP_SIMILARITY_THRESHOLD,
     EXACT_DUPLICATE_THRESHOLD, HIGH_SIMILARITY_DUPLICATE_THRESHOLD,
     MODERATE_SIMILARITY_THRESHOLD,
 };

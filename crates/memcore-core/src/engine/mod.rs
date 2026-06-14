@@ -28,7 +28,10 @@ use crate::ports::{
     VectorRecord, VectorStore, validate_event_date_range,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
-use crate::dedup::{detect_duplicate, find_existing_facts_for_dedup, DeduplicationDecision};
+use crate::dedup::{
+    detect_duplicate, detect_embedding_duplicate, find_existing_facts_for_dedup,
+    DeduplicationDecision, EmbeddingDeduplicationConfig,
+};
 use crate::importance::ImportanceScorer;
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
@@ -56,6 +59,7 @@ pub struct MemoryEngine {
     audit_model_name: Option<String>,
     min_importance: f32,
     enable_pii_redaction: bool,
+    embedding_dedup_config: EmbeddingDeduplicationConfig,
 }
 
 impl MemoryEngine {
@@ -75,6 +79,7 @@ impl MemoryEngine {
             audit_model_name: None,
             min_importance: types::DEFAULT_MIN_IMPORTANCE,
             enable_pii_redaction: false,
+            embedding_dedup_config: EmbeddingDeduplicationConfig::default(),
         }
     }
 
@@ -100,6 +105,11 @@ impl MemoryEngine {
 
     pub fn with_pii_redaction(mut self, enabled: bool) -> Self {
         self.enable_pii_redaction = enabled;
+        self
+    }
+
+    pub fn with_embedding_dedup_config(mut self, config: EmbeddingDeduplicationConfig) -> Self {
+        self.embedding_dedup_config = config;
         self
     }
 
@@ -174,6 +184,38 @@ impl MemoryEngine {
                 continue;
             }
 
+            let candidate_embedding = self
+                .embedding_provider
+                .embed_text(&candidate.content)
+                .await?;
+
+            if let Some(DeduplicationDecision::Duplicate {
+                existing_fact_id,
+                reason,
+            }) = detect_embedding_duplicate(
+                self.vector_store.as_ref(),
+                &input.tenant,
+                candidate.memory_type,
+                &candidate_embedding,
+                &self.embedding_dedup_config,
+            )
+            .await?
+            {
+                summary.noop += 1;
+                record_event_best_effort(
+                    &self.event_store,
+                    &input.tenant,
+                    build_noop_event(
+                        &input.tenant,
+                        &dedup_noop_decision(existing_fact_id, reason),
+                        &self.audit_provider_name,
+                        &self.audit_model_name,
+                    ),
+                )
+                .await;
+                continue;
+            }
+
             let related_facts =
                 find_related_facts(self.fact_store.as_ref(), &input.tenant, &candidate).await?;
 
@@ -192,6 +234,7 @@ impl MemoryEngine {
                 &candidate,
                 &decision,
                 &input.metadata,
+                Some(candidate_embedding),
             )
             .await?;
 

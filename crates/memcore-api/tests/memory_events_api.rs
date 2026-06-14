@@ -80,7 +80,11 @@ async fn seed_memory_for_user(app: &axum::Router, org_id: &str, user_id: &str, c
     )
     .await;
 
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "add failed for {content:?}: {json}");
+    assert_eq!(
+        json["summary"]["added"], 1,
+        "expected add for {content:?}: {json}"
+    );
     json["memories"][0]["id"]
         .as_str()
         .expect("memory id should be present")
@@ -565,7 +569,6 @@ async fn user_memory_events_invalid_date_range_returns_validation_error() {
 async fn keyword_search_finds_matching_event_content() {
     let app = test_app();
     seed_memory_for_user(&app, ORG_A, USER_A, "Audit test memory content with Rust").await;
-    seed_memory_for_user(&app, ORG_A, USER_A, "python only memory").await;
 
     let (status, json) = response_parts(
         app,

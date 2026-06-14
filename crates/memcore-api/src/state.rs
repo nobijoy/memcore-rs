@@ -25,7 +25,7 @@ use memcore_storage::LanceDbVectorStore;
 use memcore_storage::QdrantVectorStore;
 
 /// Default embedding dimensions for the mock embedding provider.
-const MOCK_EMBEDDING_DIMENSIONS: usize = 4;
+const MOCK_EMBEDDING_DIMENSIONS: usize = 8;
 
 #[derive(Clone)]
 pub struct AppState {

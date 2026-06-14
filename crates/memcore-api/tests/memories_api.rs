@@ -219,3 +219,49 @@ async fn adding_same_memory_twice_does_not_duplicate_listed_memories() {
     assert_eq!(list_status, StatusCode::OK);
     assert_eq!(list_json["memories"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn semantically_similar_memory_is_not_duplicated_on_second_add() {
+    let app = test_app();
+    let first_body = r#"{
+      "user_id": "user_semantic_dedup",
+      "messages": [{ "role": "user", "content": "The user prefers working with Rust programming language for backend services." }],
+      "metadata": {}
+    }"#;
+    let second_body = r#"{
+      "user_id": "user_semantic_dedup",
+      "messages": [{ "role": "user", "content": "The user prefers working with Rust coding language for backend services." }],
+      "metadata": {}
+    }"#;
+
+    let (first_status, first_json) = response_parts(
+        app.clone(),
+        add_memory_request(first_body, Some("org_semantic_dedup")),
+    )
+    .await;
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(first_json["summary"]["added"], 1);
+
+    let (second_status, second_json) = response_parts(
+        app.clone(),
+        add_memory_request(second_body, Some("org_semantic_dedup")),
+    )
+    .await;
+    assert_eq!(second_status, StatusCode::OK);
+    assert_eq!(second_json["summary"]["added"], 0);
+    assert_eq!(second_json["summary"]["noop"], 1);
+
+    let list_request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/users/user_semantic_dedup/memories")
+        .header("X-Organization-ID", "org_semantic_dedup");
+    let (auth_name, auth_value) = authorization_header();
+    let list_request = list_request
+        .header(auth_name, auth_value)
+        .body(Body::empty())
+        .expect("request");
+
+    let (list_status, list_json) = response_parts(app, list_request).await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(list_json["memories"].as_array().unwrap().len(), 1);
+}

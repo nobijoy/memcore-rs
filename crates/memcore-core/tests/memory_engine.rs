@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, FactOperation,
-    FactOperationDecision, FactStore, ForgetUserInput, ListMemoriesInput, MemoryEngine,
-    MemoryMessage, MemoryType, MessageRole, SearchMemoryInput, TenantContext, VectorSearchQuery,
-    VectorStore, EMPTY_CONTEXT_MESSAGE,
+    AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, EmbeddingDeduplicationConfig,
+    FactOperation, FactOperationDecision, FactStore, ForgetUserInput, ListMemoriesInput,
+    MemoryEngine, MemoryMessage, MemoryType, MessageRole, SearchMemoryInput, TenantContext,
+    VectorSearchQuery, VectorStore, EMPTY_CONTEXT_MESSAGE,
 };
 use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -1313,7 +1313,11 @@ async fn lifecycle_operation_summary_counts_are_correct() {
                 },
             ]),
         MockEmbeddingProvider::new(4),
-    );
+    )
+    .with_embedding_dedup_config(EmbeddingDeduplicationConfig {
+        enabled: false,
+        ..Default::default()
+    });
 
     let output = engine
         .add_memory(AddMemoryInput {

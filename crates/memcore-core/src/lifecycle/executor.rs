@@ -53,11 +53,21 @@ pub async fn apply_fact_operation(
     candidate: &CandidateFact,
     decision: &FactOperationDecision,
     input_metadata: &Value,
+    precomputed_embedding: Option<Vec<f32>>,
 ) -> MemcoreResult<LifecycleApplyResult> {
     let operation = normalize_operation(decision)?;
 
     match operation {
-        FactOperation::Add => apply_add(ctx, tenant, candidate, input_metadata).await,
+        FactOperation::Add => {
+            apply_add(
+                ctx,
+                tenant,
+                candidate,
+                input_metadata,
+                precomputed_embedding,
+            )
+            .await
+        }
         FactOperation::Update => {
             let target_id = decision
                 .target_fact_id
@@ -80,10 +90,11 @@ async fn apply_add(
     tenant: &TenantContext,
     candidate: &CandidateFact,
     input_metadata: &Value,
+    precomputed_embedding: Option<Vec<f32>>,
 ) -> MemcoreResult<LifecycleApplyResult> {
     let fact = candidate_to_fact(tenant, candidate, input_metadata)?;
     let inserted = ctx.fact_store.insert_fact(tenant, fact).await?;
-    upsert_fact_vector(ctx, tenant, &inserted).await?;
+    upsert_fact_vector(ctx, tenant, &inserted, precomputed_embedding).await?;
     Ok(LifecycleApplyResult::Added(inserted))
 }
 
@@ -140,8 +151,12 @@ async fn upsert_fact_vector(
     ctx: &LifecycleContext<'_>,
     tenant: &TenantContext,
     fact: &Fact,
+    precomputed_embedding: Option<Vec<f32>>,
 ) -> MemcoreResult<()> {
-    let embedding = ctx.embedding_provider.embed_text(&fact.content).await?;
+    let embedding = match precomputed_embedding {
+        Some(embedding) => embedding,
+        None => ctx.embedding_provider.embed_text(&fact.content).await?,
+    };
     let record = vector_record_from_fact(fact, embedding);
     ctx.vector_store.upsert_vector(tenant, record).await
 }
@@ -155,7 +170,7 @@ async fn replace_fact_vector(
         Ok(()) | Err(MemcoreError::NotFound(_)) => {}
         Err(error) => return Err(error),
     }
-    upsert_fact_vector(ctx, tenant, fact).await
+    upsert_fact_vector(ctx, tenant, fact, None).await
 }
 
 fn vector_record_from_fact(fact: &Fact, embedding: Vec<f32>) -> VectorRecord {

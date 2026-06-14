@@ -35,7 +35,7 @@ pub fn deterministic_embedding(text: &str, dimensions: usize) -> MemcoreResult<V
 
     let mut embedding = vec![0.0_f32; dimensions];
     for (index, byte) in text.as_bytes().iter().enumerate() {
-        let slot = index % dimensions;
+        let slot = (index.wrapping_mul(17) ^ (*byte as usize).wrapping_mul(31)) % dimensions;
         embedding[slot] += f32::from(*byte) / 255.0;
     }
 
@@ -458,6 +458,32 @@ mod tests {
         assert_ne!(
             embedding_signature("same text", 16),
             embedding_signature("different text", 16)
+        );
+    }
+
+    #[test]
+    fn sqlite_and_semantic_pairs_work_with_mock_dimensions() {
+        let dims = 8;
+        let sqlite_a = "First sqlite integration memory alpha bravo charlie delta";
+        let sqlite_b = "Second distinct sqlite integration memory foxtrot golf hotel india";
+        let ea = deterministic_embedding(sqlite_a, dims).expect("a");
+        let eb = deterministic_embedding(sqlite_b, dims).expect("b");
+        let sqlite_sim: f32 = ea.iter().zip(eb.iter()).map(|(x, y)| x * y).sum();
+        assert!(
+            sqlite_sim < 0.92,
+            "sqlite pair should be below threshold, got {sqlite_sim}"
+        );
+
+        let semantic_a =
+            "The user prefers working with Rust programming language for backend services.";
+        let semantic_b =
+            "The user prefers working with Rust coding language for backend services.";
+        let sa = deterministic_embedding(semantic_a, dims).expect("sa");
+        let sb = deterministic_embedding(semantic_b, dims).expect("sb");
+        let semantic_sim: f32 = sa.iter().zip(sb.iter()).map(|(x, y)| x * y).sum();
+        assert!(
+            semantic_sim >= 0.92,
+            "semantic pair should meet threshold, got {semantic_sim}"
         );
     }
 
