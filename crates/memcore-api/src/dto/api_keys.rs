@@ -23,12 +23,22 @@ pub struct CreateApiKeyResponse {
 pub struct ListApiKeysQuery {
     #[serde(default)]
     pub include_revoked: bool,
+    #[serde(default = "default_list_api_keys_limit")]
+    pub limit: usize,
+    pub cursor: Option<String>,
 }
+
+pub fn default_list_api_keys_limit() -> usize {
+    50
+}
+
+pub const MAX_LIST_API_KEYS_LIMIT: usize = 100;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ListApiKeysResponse {
     pub status: &'static str,
     pub api_keys: Vec<ApiKeyItemResponse>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

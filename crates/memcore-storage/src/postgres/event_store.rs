@@ -5,10 +5,7 @@ use memcore_core::{MemoryEvent, TenantContext};
 use sqlx::postgres::PgPool;
 use sqlx::{Postgres, QueryBuilder, Row};
 
-use memcore_core::ports::{
-    MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
-    MAX_MEMORY_EVENT_LIST_LIMIT,
-};
+use memcore_core::ports::{MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery};
 
 use super::conversions::{memory_event_operation_to_str, row_to_memory_event};
 
@@ -22,20 +19,6 @@ fn ensure_event_tenant(event: &MemoryEvent, tenant: &TenantContext) -> MemcoreRe
     } else {
         Err(MemcoreError::Forbidden)
     }
-}
-
-fn normalize_event_list_limit(limit: usize) -> MemcoreResult<usize> {
-    if limit == 0 {
-        return Ok(DEFAULT_MEMORY_EVENT_LIST_LIMIT);
-    }
-
-    if limit > MAX_MEMORY_EVENT_LIST_LIMIT {
-        return Err(MemcoreError::ValidationError(format!(
-            "limit cannot exceed {MAX_MEMORY_EVENT_LIST_LIMIT}"
-        )));
-    }
-
-    Ok(limit)
 }
 
 fn parse_event_row(row: &sqlx::postgres::PgRow) -> MemcoreResult<MemoryEvent> {
@@ -133,8 +116,7 @@ impl MemoryEventStore for PostgresMemoryEventStore {
     }
 
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>> {
-        let limit = normalize_event_list_limit(query.limit)?;
-        let _ = query.cursor;
+        use crate::pagination::{fetch_limit, push_postgres_desc_cursor_uuid};
 
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT id, org_id, user_id, fact_id, operation, input_text, previous_content, new_content, provider_name, model_name, metadata, created_at FROM memory_events WHERE org_id = ",
@@ -163,8 +145,12 @@ impl MemoryEventStore for PostgresMemoryEventStore {
             builder.push_bind(created_before);
         }
 
-        builder.push(" ORDER BY created_at DESC LIMIT ");
-        builder.push_bind(i64::try_from(limit).map_err(|error| {
+        if let Some(cursor) = &query.cursor {
+            push_postgres_desc_cursor_uuid(&mut builder, "created_at", "id", cursor);
+        }
+
+        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
             storage_error("event list limit out of range for postgres", error)
         })?);
 
@@ -181,8 +167,7 @@ impl MemoryEventStore for PostgresMemoryEventStore {
         &self,
         query: OrgMemoryEventQuery,
     ) -> MemcoreResult<Vec<MemoryEvent>> {
-        let limit = normalize_event_list_limit(query.limit)?;
-        let _ = query.cursor;
+        use crate::pagination::{fetch_limit, push_postgres_desc_cursor_uuid};
 
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT id, org_id, user_id, fact_id, operation, input_text, previous_content, new_content, provider_name, model_name, metadata, created_at FROM memory_events WHERE org_id = ",
@@ -214,8 +199,12 @@ impl MemoryEventStore for PostgresMemoryEventStore {
             builder.push_bind(created_before);
         }
 
-        builder.push(" ORDER BY created_at DESC LIMIT ");
-        builder.push_bind(i64::try_from(limit).map_err(|error| {
+        if let Some(cursor) = &query.cursor {
+            push_postgres_desc_cursor_uuid(&mut builder, "created_at", "id", cursor);
+        }
+
+        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
             storage_error("org event list limit out of range for postgres", error)
         })?);
 

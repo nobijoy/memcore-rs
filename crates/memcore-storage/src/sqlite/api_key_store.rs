@@ -3,7 +3,7 @@ use chrono::Utc;
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::{ApiKeyRecord, ApiKeyScope};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row, Sqlite};
 use uuid::Uuid;
 
 use memcore_core::ports::ApiKeyStore;
@@ -202,25 +202,32 @@ impl ApiKeyStore for SqliteApiKeyStore {
 
     async fn list_api_keys(
         &self,
-        org_id: &str,
-        include_revoked: bool,
+        query: memcore_core::ports::ApiKeyListQuery,
     ) -> MemcoreResult<Vec<ApiKeyRecord>> {
-        let rows = if include_revoked {
-            sqlx::query(
-                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = ? ORDER BY created_at DESC",
-            )
-            .bind(org_id)
-            .fetch_all(&self.pool)
-            .await
-        } else {
-            sqlx::query(
-                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = ? AND revoked_at IS NULL ORDER BY created_at DESC",
-            )
-            .bind(org_id)
-            .fetch_all(&self.pool)
-            .await
+        use crate::pagination::{fetch_limit, push_sqlite_desc_cursor};
+
+        let fetch = i64::try_from(fetch_limit(query.limit)).map_err(|error| {
+            storage_error("api key list limit out of range for sqlite", error)
+        })?;
+
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = ",
+        );
+        builder.push_bind(query.org_id.clone());
+        if !query.include_revoked {
+            builder.push(" AND revoked_at IS NULL");
         }
-        .map_err(|error| storage_error("failed to list api keys", error))?;
+        if let Some(cursor) = &query.cursor {
+            push_sqlite_desc_cursor(&mut builder, "created_at", "id", cursor);
+        }
+        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+        builder.push_bind(fetch);
+
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| storage_error("failed to list api keys", error))?;
 
         rows.iter().map(parse_row).collect()
     }
@@ -271,20 +278,35 @@ mod tests {
         store.insert_api_key(other_org).await.expect("insert");
 
         let active_only = store
-            .list_api_keys("org_a", false)
+            .list_api_keys(memcore_core::ports::ApiKeyListQuery {
+                org_id: "org_a".to_string(),
+                include_revoked: false,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(active_only.len(), 1);
         assert_eq!(active_only[0].name, "active");
 
         let with_revoked = store
-            .list_api_keys("org_a", true)
+            .list_api_keys(memcore_core::ports::ApiKeyListQuery {
+                org_id: "org_a".to_string(),
+                include_revoked: true,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(with_revoked.len(), 2);
 
         let org_b = store
-            .list_api_keys("org_b", false)
+            .list_api_keys(memcore_core::ports::ApiKeyListQuery {
+                org_id: "org_b".to_string(),
+                include_revoked: false,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(org_b.len(), 1);

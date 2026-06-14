@@ -16,7 +16,7 @@ pub use admin::{
 pub use api_keys::{
     parse_api_key_scope_label, parse_create_api_key_request, ApiKeyItemResponse,
     ApiKeyScopeResponse, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysQuery,
-    ListApiKeysResponse, RevokeApiKeyResponse,
+    ListApiKeysResponse, RevokeApiKeyResponse, MAX_LIST_API_KEYS_LIMIT,
 };
 pub use context::{
     validate_build_context_request, BuildContextRequest, BuildContextResponse,

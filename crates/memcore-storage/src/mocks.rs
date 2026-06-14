@@ -8,9 +8,11 @@ use memcore_core::{Fact, TenantContext};
 use serde_json::Value;
 use uuid::Uuid;
 
+use memcore_core::pagination::{is_after_cursor_in_desc_order, page_fetch_limit};
 use memcore_core::ports::{
-    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery,
-    OrgUserSummary, RetentionPruneResult, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
+    ApiKeyListQuery, ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore,
+    OrgMemoryEventQuery, OrgUserListQuery, OrgUserSummary, RetentionPruneResult, VectorRecord,
+    VectorSearchQuery, VectorSearchResult, VectorStore,
 };
 use memcore_core::{ApiKeyRecord, MemoryEvent};
 
@@ -199,11 +201,24 @@ impl FactStore for MockFactStore {
                     fact.content.to_ascii_lowercase().contains(&needle)
                 })
             })
+            .filter(|fact| {
+                query.cursor.as_ref().is_none_or(|cursor| {
+                    is_after_cursor_in_desc_order(
+                        fact.updated_at,
+                        &fact.id.to_string(),
+                        cursor,
+                    )
+                })
+            })
             .cloned()
             .collect();
 
-        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        results.truncate(query.limit);
+        results.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        results.truncate(page_fetch_limit(query.limit));
         Ok(results)
     }
 
@@ -299,17 +314,14 @@ impl FactStore for MockFactStore {
 
     async fn list_users_by_org(
         &self,
-        org_id: &str,
-        limit: usize,
-        cursor: Option<String>,
+        query: OrgUserListQuery,
     ) -> MemcoreResult<Vec<OrgUserSummary>> {
-        let _ = cursor;
         let facts = self.facts.read().expect("facts lock poisoned");
         let deleted_set = self.deleted.read().expect("deleted lock poisoned");
 
         let mut aggregates: HashMap<String, (usize, Option<DateTime<Utc>>)> = HashMap::new();
         for fact in facts.values() {
-            if fact.org_id != org_id || deleted_set.contains(&fact.id) {
+            if fact.org_id != query.org_id || deleted_set.contains(&fact.id) {
                 continue;
             }
             let entry = aggregates
@@ -329,10 +341,22 @@ impl FactStore for MockFactStore {
                 memory_count,
                 last_memory_at,
             })
+            .filter(|user| {
+                query.cursor.as_ref().is_none_or(|cursor| {
+                    let sort_value = user.last_memory_at.unwrap_or(DateTime::<Utc>::MIN_UTC);
+                    is_after_cursor_in_desc_order(sort_value, &user.user_id, cursor)
+                })
+            })
             .collect();
 
-        users.sort_by(|a, b| a.user_id.cmp(&b.user_id));
-        users.truncate(limit);
+        users.sort_by(|a, b| {
+            let a_sort = a.last_memory_at.unwrap_or(DateTime::<Utc>::MIN_UTC);
+            let b_sort = b.last_memory_at.unwrap_or(DateTime::<Utc>::MIN_UTC);
+            b_sort
+                .cmp(&a_sort)
+                .then_with(|| b.user_id.cmp(&a.user_id))
+        });
+        users.truncate(page_fetch_limit(query.limit));
         Ok(users)
     }
 }
@@ -459,7 +483,7 @@ impl MemoryEventStore for MockMemoryEventStore {
     }
 
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>> {
-        let limit = normalize_event_list_limit(query.limit)?;
+        let _ = normalize_event_list_limit(query.limit)?;
         let events = self.events.read().expect("events lock poisoned");
 
         let mut results: Vec<MemoryEvent> = events
@@ -485,11 +509,24 @@ impl MemoryEventStore for MockMemoryEventStore {
                     .created_before
                     .is_none_or(|created_before| event.created_at < created_before)
             })
+            .filter(|event| {
+                query.cursor.as_ref().is_none_or(|cursor| {
+                    is_after_cursor_in_desc_order(
+                        event.created_at,
+                        &event.id.to_string(),
+                        cursor,
+                    )
+                })
+            })
             .cloned()
             .collect();
 
-        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        results.truncate(limit);
+        results.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        results.truncate(page_fetch_limit(query.limit));
         Ok(results)
     }
 
@@ -498,7 +535,6 @@ impl MemoryEventStore for MockMemoryEventStore {
         query: OrgMemoryEventQuery,
     ) -> MemcoreResult<Vec<MemoryEvent>> {
         let limit = normalize_event_list_limit(query.limit)?;
-        let _ = query.cursor;
         let events = self.events.read().expect("events lock poisoned");
 
         let mut results: Vec<MemoryEvent> = events
@@ -530,11 +566,24 @@ impl MemoryEventStore for MockMemoryEventStore {
                     .created_before
                     .is_none_or(|created_before| event.created_at < created_before)
             })
+            .filter(|event| {
+                query.cursor.as_ref().is_none_or(|cursor| {
+                    is_after_cursor_in_desc_order(
+                        event.created_at,
+                        &event.id.to_string(),
+                        cursor,
+                    )
+                })
+            })
             .cloned()
             .collect();
 
-        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        results.truncate(limit);
+        results.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        results.truncate(page_fetch_limit(limit));
         Ok(results)
     }
 
@@ -613,17 +662,30 @@ impl ApiKeyStore for MockApiKeyStore {
 
     async fn list_api_keys(
         &self,
-        org_id: &str,
-        include_revoked: bool,
+        query: ApiKeyListQuery,
     ) -> MemcoreResult<Vec<ApiKeyRecord>> {
         let keys = self.keys.read().expect("api keys lock poisoned");
         let mut results: Vec<ApiKeyRecord> = keys
             .iter()
-            .filter(|record| record.org_id == org_id)
-            .filter(|record| include_revoked || record.is_active())
+            .filter(|record| record.org_id == query.org_id)
+            .filter(|record| query.include_revoked || record.is_active())
+            .filter(|record| {
+                query.cursor.as_ref().is_none_or(|cursor| {
+                    is_after_cursor_in_desc_order(
+                        record.created_at,
+                        &record.id.to_string(),
+                        cursor,
+                    )
+                })
+            })
             .cloned()
             .collect();
-        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        results.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        results.truncate(page_fetch_limit(query.limit));
         Ok(results)
     }
 }
@@ -637,7 +699,7 @@ mod api_key_store_tests {
 
     use super::MockApiKeyStore;
     use crate::traits::ApiKeyStore;
-    use memcore_core::ApiKeyRecord;
+    use memcore_core::{ApiKeyListQuery, ApiKeyRecord};
 
     #[tokio::test]
     async fn mock_list_api_keys_by_org() {
@@ -675,20 +737,35 @@ mod api_key_store_tests {
         store.insert_api_key(other_org).await.expect("insert");
 
         let active_only = store
-            .list_api_keys("org_a", false)
+            .list_api_keys(ApiKeyListQuery {
+                org_id: "org_a".to_string(),
+                include_revoked: false,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(active_only.len(), 1);
         assert_eq!(active_only[0].name, "active");
 
         let with_revoked = store
-            .list_api_keys("org_a", true)
+            .list_api_keys(ApiKeyListQuery {
+                org_id: "org_a".to_string(),
+                include_revoked: true,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(with_revoked.len(), 2);
 
         let org_b = store
-            .list_api_keys("org_b", false)
+            .list_api_keys(ApiKeyListQuery {
+                org_id: "org_b".to_string(),
+                include_revoked: false,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(org_b.len(), 1);
@@ -734,7 +811,7 @@ mod api_key_store_tests {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use memcore_core::{MemorySource, MemoryType};
+    use memcore_core::{MemorySource, MemoryType, OrgUserListQuery};
     use serde_json::json;
     use uuid::Uuid;
 
@@ -1253,10 +1330,15 @@ mod tests {
         );
 
         let users = store
-            .list_users_by_org("org_mock_admin", 1, None)
+            .list_users_by_org(OrgUserListQuery {
+                org_id: "org_mock_admin".to_string(),
+                limit: 1,
+                cursor: None,
+            })
             .await
             .expect("list users");
-        assert_eq!(users.len(), 1);
+        // Store over-fetches by one for cursor pagination; engine trims to `limit`.
+        assert_eq!(users.len(), 2);
     }
 
     #[tokio::test]

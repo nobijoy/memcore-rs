@@ -2,6 +2,7 @@ pub mod admin;
 pub mod audit;
 pub mod context;
 pub mod engine;
+pub mod pagination;
 pub mod export;
 pub mod import;
 pub mod retention;
@@ -43,10 +44,15 @@ pub use models::{
     MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,
 };
 pub use privacy::PiiRedactor;
+pub use pagination::{
+    build_page, decode_cursor, encode_cursor, is_after_cursor_in_desc_order, page_fetch_limit,
+    parse_optional_cursor, Page, PageCursor,
+};
 pub use ports::{
-    ApiKeyStore, EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery,
+    ApiKeyListQuery, ApiKeyStore, EmbeddingProvider, FactClassificationInput, FactExtractionInput,
+    FactSearchQuery,
     FactStore, LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
-    OrgUserSummary, OrgMemoryEventQuery, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
+    OrgUserListQuery, OrgUserSummary, OrgMemoryEventQuery, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
     VectorStore, validate_event_date_range,
     DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };

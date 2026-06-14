@@ -21,10 +21,11 @@ use crate::admin::{
     SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
     DEFAULT_LIST_ORG_USERS_LIMIT, MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
 };
+use crate::pagination::{build_page, parse_optional_cursor, PageCursor};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, VectorRecord, VectorStore,
-    validate_event_date_range,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgUserListQuery,
+    VectorRecord, VectorStore, validate_event_date_range,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
 use crate::lifecycle::{
@@ -322,6 +323,7 @@ impl MemoryEngine {
     ) -> MemcoreResult<ListMemoriesOutput> {
         validate_tenant(&input.tenant)?;
         let limit = normalize_list_limit(input.limit)?;
+        let cursor = parse_optional_cursor(input.cursor)?;
 
         let memory_types = input
             .memory_type
@@ -334,14 +336,19 @@ impl MemoryEngine {
                 memory_types,
                 query_text: None,
                 limit,
-                cursor: input.cursor,
+                cursor,
                 include_deleted: input.include_deleted,
             })
             .await?;
 
+        let page = build_page(memories, limit, |fact| PageCursor {
+            last_id: fact.id.to_string(),
+            last_sort_value: fact.updated_at,
+        })?;
+
         Ok(ListMemoriesOutput {
-            memories,
-            next_cursor: None,
+            memories: page.items,
+            next_cursor: page.next_cursor,
         })
     }
 
@@ -468,16 +475,25 @@ impl MemoryEngine {
     ) -> MemcoreResult<ListOrgUsersOutput> {
         validate_org_id(&input.org_id)?;
         let limit = normalize_org_users_limit(input.limit)?;
-        let _ = input.cursor;
+        let cursor = parse_optional_cursor(input.cursor)?;
 
         let users = self
             .fact_store
-            .list_users_by_org(&input.org_id, limit, None)
+            .list_users_by_org(OrgUserListQuery {
+                org_id: input.org_id,
+                limit,
+                cursor,
+            })
             .await?;
 
+        let page = build_page(users, limit, |user| PageCursor {
+            last_id: user.user_id.clone(),
+            last_sort_value: user.last_memory_at.unwrap_or_else(Utc::now),
+        })?;
+
         Ok(ListOrgUsersOutput {
-            users,
-            next_cursor: None,
+            users: page.items,
+            next_cursor: page.next_cursor,
         })
     }
 
@@ -487,7 +503,7 @@ impl MemoryEngine {
     ) -> MemcoreResult<SearchOrgMemoryEventsOutput> {
         validate_org_id(&input.org_id)?;
         let limit = normalize_org_memory_events_limit(input.limit)?;
-        let _ = input.cursor;
+        let cursor = parse_optional_cursor(input.cursor)?;
 
         let Some(event_store) = &self.event_store else {
             return Ok(SearchOrgMemoryEventsOutput {
@@ -504,13 +520,18 @@ impl MemoryEngine {
         query.operation = input.operation;
         query.created_after = input.created_after;
         query.created_before = input.created_before;
-        query.cursor = input.cursor;
+        query.cursor = cursor;
 
         let events = event_store.list_events_by_org(query).await?;
 
+        let page = build_page(events, limit, |event| PageCursor {
+            last_id: event.id.to_string(),
+            last_sort_value: event.created_at,
+        })?;
+
         Ok(SearchOrgMemoryEventsOutput {
-            events,
-            next_cursor: None,
+            events: page.items,
+            next_cursor: page.next_cursor,
         })
     }
 
@@ -706,6 +727,7 @@ impl MemoryEngine {
     ) -> MemcoreResult<ListMemoryEventsOutput> {
         validate_tenant(&input.tenant)?;
         let limit = normalize_memory_event_list_limit(input.limit)?;
+        let cursor = parse_optional_cursor(input.cursor)?;
 
         let Some(event_store) = &self.event_store else {
             return Ok(ListMemoryEventsOutput {
@@ -721,13 +743,18 @@ impl MemoryEngine {
         query.operation = input.operation;
         query.created_after = input.created_after;
         query.created_before = input.created_before;
-        query.cursor = input.cursor;
+        query.cursor = cursor;
 
         let events = event_store.list_events(query).await?;
 
+        let page = build_page(events, limit, |event| PageCursor {
+            last_id: event.id.to_string(),
+            last_sort_value: event.created_at,
+        })?;
+
         Ok(ListMemoryEventsOutput {
-            events,
-            next_cursor: None,
+            events: page.items,
+            next_cursor: page.next_cursor,
         })
     }
 }

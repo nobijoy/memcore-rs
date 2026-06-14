@@ -6,6 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{Fact, MemoryType, TenantContext};
+use crate::pagination::PageCursor;
 
 /// Result of a fact retention prune operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +31,7 @@ pub struct FactSearchQuery {
     pub memory_types: Option<Vec<MemoryType>>,
     pub query_text: Option<String>,
     pub limit: usize,
-    pub cursor: Option<String>,
+    pub cursor: Option<PageCursor>,
     pub include_deleted: bool,
 }
 
@@ -77,6 +78,13 @@ pub struct VectorSearchResult {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrgUserListQuery {
+    pub org_id: String,
+    pub limit: usize,
+    pub cursor: Option<PageCursor>,
+}
+
 #[async_trait]
 pub trait FactStore: Send + Sync {
     async fn insert_fact(&self, tenant: &TenantContext, fact: Fact) -> MemcoreResult<Fact>;
@@ -114,12 +122,10 @@ pub trait FactStore: Send + Sync {
     /// Counts distinct users with at least one active fact in the organization.
     async fn count_users_by_org(&self, org_id: &str) -> MemcoreResult<usize>;
 
-    /// Lists users with memory aggregates for an organization. Cursor pagination is accepted but not implemented yet.
+    /// Lists users with memory aggregates for an organization.
     async fn list_users_by_org(
         &self,
-        org_id: &str,
-        limit: usize,
-        cursor: Option<String>,
+        query: OrgUserListQuery,
     ) -> MemcoreResult<Vec<OrgUserSummary>>;
 }
 

@@ -3,7 +3,7 @@ use chrono::Utc;
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::{ApiKeyRecord, ApiKeyScope};
 use sqlx::postgres::PgPool;
-use sqlx::Row;
+use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use memcore_core::ports::ApiKeyStore;
@@ -150,25 +150,33 @@ impl ApiKeyStore for PostgresApiKeyStore {
 
     async fn list_api_keys(
         &self,
-        org_id: &str,
-        include_revoked: bool,
+        query: memcore_core::ports::ApiKeyListQuery,
     ) -> MemcoreResult<Vec<ApiKeyRecord>> {
-        let rows = if include_revoked {
-            sqlx::query(
-                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC",
-            )
-            .bind(org_id)
-            .fetch_all(&self.pool)
-            .await
-        } else {
-            sqlx::query(
-                "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC",
-            )
-            .bind(org_id)
-            .fetch_all(&self.pool)
-            .await
+        use crate::pagination::{fetch_limit, push_postgres_desc_cursor_uuid};
+        use sqlx::QueryBuilder;
+
+        let fetch = i64::try_from(fetch_limit(query.limit)).map_err(|error| {
+            storage_error("api key list limit out of range for postgres", error)
+        })?;
+
+        let mut builder = QueryBuilder::<Postgres>::new(
+            "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = ",
+        );
+        builder.push_bind(query.org_id.clone());
+        if !query.include_revoked {
+            builder.push(" AND revoked_at IS NULL");
         }
-        .map_err(|error| storage_error("failed to list api keys", error))?;
+        if let Some(cursor) = &query.cursor {
+            push_postgres_desc_cursor_uuid(&mut builder, "created_at", "id", cursor);
+        }
+        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+        builder.push_bind(fetch);
+
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| storage_error("failed to list api keys", error))?;
 
         rows.iter().map(parse_row).collect()
     }

@@ -300,7 +300,7 @@ async fn limit_above_max_returns_validation_error() {
 }
 
 #[tokio::test]
-async fn cursor_query_param_is_accepted() {
+async fn invalid_cursor_returns_validation_error() {
     let app = test_app();
     seed_memory_for_user(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
 
@@ -314,8 +314,8 @@ async fn cursor_query_param_is_accepted() {
     )
     .await;
 
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["status"], "success");
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "invalid cursor");
 }
 
 #[tokio::test]

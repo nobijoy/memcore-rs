@@ -217,7 +217,8 @@ impl FactStore for PostgresFactStore {
     }
 
     async fn search_facts(&self, query: FactSearchQuery) -> MemcoreResult<Vec<Fact>> {
-        // Known issue: `FactSearchQuery.cursor` is intentionally ignored in this phase.
+        use crate::pagination::{fetch_limit, push_postgres_desc_cursor_uuid};
+
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT id, org_id, user_id, memory_type, content, summary, source, confidence, importance, valid_at, invalid_at, recorded_at, updated_at, metadata FROM facts WHERE org_id = ",
         );
@@ -246,8 +247,14 @@ impl FactStore for PostgresFactStore {
             builder.push_bind(pattern);
         }
 
-        builder.push(" ORDER BY updated_at DESC LIMIT ");
-        builder.push_bind(query.limit as i64);
+        if let Some(cursor) = &query.cursor {
+            push_postgres_desc_cursor_uuid(&mut builder, "updated_at", "id", cursor);
+        }
+
+        builder.push(" ORDER BY updated_at DESC, id DESC LIMIT ");
+        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
+            storage_error("fact search limit out of range for postgres", error)
+        })?);
 
         let rows = builder
             .build()
@@ -381,29 +388,51 @@ impl FactStore for PostgresFactStore {
 
     async fn list_users_by_org(
         &self,
-        org_id: &str,
-        limit: usize,
-        cursor: Option<String>,
+        query: memcore_core::ports::OrgUserListQuery,
     ) -> MemcoreResult<Vec<memcore_core::ports::OrgUserSummary>> {
         use memcore_core::ports::OrgUserSummary;
 
-        let _ = cursor;
-        let rows = sqlx::query(
-            r#"
-            SELECT user_id, COUNT(*)::bigint AS memory_count, MAX(updated_at) AS last_memory_at
-            FROM facts
-            WHERE org_id = $1 AND deleted_at IS NULL
-            GROUP BY user_id
-            ORDER BY user_id ASC
-            LIMIT $2
-            "#,
-        )
-        .bind(org_id)
-        .bind(i64::try_from(limit).map_err(|error| {
+        use crate::pagination::fetch_limit;
+
+        let fetch = i64::try_from(fetch_limit(query.limit)).map_err(|error| {
             storage_error("org users list limit out of range for postgres", error)
-        })?)
-        .fetch_all(&self.pool)
-        .await
+        })?;
+
+        let rows = if let Some(cursor) = &query.cursor {
+            sqlx::query(
+                r#"
+                SELECT user_id, COUNT(*)::bigint AS memory_count, MAX(updated_at) AS last_memory_at
+                FROM facts
+                WHERE org_id = $1 AND deleted_at IS NULL
+                GROUP BY user_id
+                HAVING (MAX(updated_at) < $2 OR (MAX(updated_at) = $2 AND user_id < $3))
+                ORDER BY MAX(updated_at) DESC, user_id DESC
+                LIMIT $4
+                "#,
+            )
+            .bind(&query.org_id)
+            .bind(cursor.last_sort_value)
+            .bind(cursor.last_sort_value)
+            .bind(&cursor.last_id)
+            .bind(fetch)
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query(
+                r#"
+                SELECT user_id, COUNT(*)::bigint AS memory_count, MAX(updated_at) AS last_memory_at
+                FROM facts
+                WHERE org_id = $1 AND deleted_at IS NULL
+                GROUP BY user_id
+                ORDER BY MAX(updated_at) DESC, user_id DESC
+                LIMIT $2
+                "#,
+            )
+            .bind(&query.org_id)
+            .bind(fetch)
+            .fetch_all(&self.pool)
+            .await
+        }
         .map_err(|error| storage_error("failed to list users by org", error))?;
 
         rows.iter()

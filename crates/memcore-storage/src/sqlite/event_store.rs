@@ -5,10 +5,7 @@ use memcore_core::{MemoryEvent, TenantContext};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::{QueryBuilder, Row, Sqlite};
 
-use memcore_core::ports::{
-    MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
-    MAX_MEMORY_EVENT_LIST_LIMIT,
-};
+use memcore_core::ports::{MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery};
 use crate::sqlite::conversions::{
     datetime_to_str, memory_event_operation_to_str, metadata_to_str, optional_uuid_to_str,
     row_to_memory_event,
@@ -32,20 +29,6 @@ fn ensure_event_tenant(event: &MemoryEvent, tenant: &TenantContext) -> MemcoreRe
     } else {
         Err(MemcoreError::Forbidden)
     }
-}
-
-fn normalize_event_list_limit(limit: usize) -> MemcoreResult<usize> {
-    if limit == 0 {
-        return Ok(DEFAULT_MEMORY_EVENT_LIST_LIMIT);
-    }
-
-    if limit > MAX_MEMORY_EVENT_LIST_LIMIT {
-        return Err(MemcoreError::ValidationError(format!(
-            "limit cannot exceed {MAX_MEMORY_EVENT_LIST_LIMIT}"
-        )));
-    }
-
-    Ok(limit)
 }
 
 fn parse_event_row(row: &sqlx::sqlite::SqliteRow) -> MemcoreResult<MemoryEvent> {
@@ -151,8 +134,7 @@ impl MemoryEventStore for SqliteMemoryEventStore {
     }
 
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>> {
-        let limit = normalize_event_list_limit(query.limit)?;
-        let _ = query.cursor;
+        use crate::pagination::{fetch_limit, push_sqlite_desc_cursor};
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             "SELECT id, org_id, user_id, fact_id, operation, input_text, previous_content, new_content, provider_name, model_name, metadata, created_at FROM memory_events WHERE org_id = ",
@@ -181,8 +163,12 @@ impl MemoryEventStore for SqliteMemoryEventStore {
             builder.push_bind(datetime_to_str(created_before));
         }
 
-        builder.push(" ORDER BY created_at DESC LIMIT ");
-        builder.push_bind(i64::try_from(limit).map_err(|error| {
+        if let Some(cursor) = &query.cursor {
+            push_sqlite_desc_cursor(&mut builder, "created_at", "id", cursor);
+        }
+
+        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
             storage_error("event list limit out of range for sqlite", error)
         })?);
 
@@ -199,8 +185,7 @@ impl MemoryEventStore for SqliteMemoryEventStore {
         &self,
         query: OrgMemoryEventQuery,
     ) -> MemcoreResult<Vec<MemoryEvent>> {
-        let limit = normalize_event_list_limit(query.limit)?;
-        let _ = query.cursor;
+        use crate::pagination::{fetch_limit, push_sqlite_desc_cursor};
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             "SELECT id, org_id, user_id, fact_id, operation, input_text, previous_content, new_content, provider_name, model_name, metadata, created_at FROM memory_events WHERE org_id = ",
@@ -232,8 +217,12 @@ impl MemoryEventStore for SqliteMemoryEventStore {
             builder.push_bind(datetime_to_str(created_before));
         }
 
-        builder.push(" ORDER BY created_at DESC LIMIT ");
-        builder.push_bind(i64::try_from(limit).map_err(|error| {
+        if let Some(cursor) = &query.cursor {
+            push_sqlite_desc_cursor(&mut builder, "created_at", "id", cursor);
+        }
+
+        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
             storage_error("org event list limit out of range for sqlite", error)
         })?);
 
@@ -549,7 +538,8 @@ mod tests {
             .list_events(MemoryEventQuery::new(tenant, 2))
             .await
             .expect("list should succeed");
-        assert_eq!(listed.len(), 2);
+        // Store over-fetches by one for cursor pagination; engine trims to `limit`.
+        assert_eq!(listed.len(), 3);
     }
 
     #[tokio::test]

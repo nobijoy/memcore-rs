@@ -64,19 +64,34 @@ async fn postgres_list_api_keys_by_org() {
         store.insert_api_key(other_org).await.expect("insert");
 
         let active_only = store
-            .list_api_keys("org_pg_list_a", false)
+            .list_api_keys(memcore_core::ports::ApiKeyListQuery {
+                org_id: "org_pg_list_a".to_string(),
+                include_revoked: false,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(active_only.len(), 1);
 
         let with_revoked = store
-            .list_api_keys("org_pg_list_a", true)
+            .list_api_keys(memcore_core::ports::ApiKeyListQuery {
+                org_id: "org_pg_list_a".to_string(),
+                include_revoked: true,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(with_revoked.len(), 2);
 
         let org_b = store
-            .list_api_keys("org_pg_list_b", false)
+            .list_api_keys(memcore_core::ports::ApiKeyListQuery {
+                org_id: "org_pg_list_b".to_string(),
+                include_revoked: false,
+                limit: 100,
+                cursor: None,
+            })
             .await
             .expect("list");
         assert_eq!(org_b.len(), 1);

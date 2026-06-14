@@ -463,22 +463,22 @@ async fn admin_audit_limit_defaults_and_rejects_above_max() {
 }
 
 #[tokio::test]
-async fn admin_audit_cursor_query_param_is_accepted() {
+async fn admin_audit_invalid_cursor_returns_validation_error() {
     let app = dev_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, None).await;
 
     let (status, json) = response_parts(
         app,
         get_request(
-            &admin_audit_uri("cursor=ignored"),
+            &admin_audit_uri("cursor=opaque-token"),
             Some(ORG_A),
             Some(DEV_API_KEY),
         ),
     )
     .await;
 
-    assert_eq!(status, StatusCode::OK);
-    assert!(json["next_cursor"].is_null());
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "invalid cursor");
 }
 
 #[tokio::test]

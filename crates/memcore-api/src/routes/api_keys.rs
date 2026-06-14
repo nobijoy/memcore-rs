@@ -3,12 +3,14 @@ use axum::extract::{Extension, Path, Query, State};
 use chrono::Utc;
 use memcore_common::MemcoreError;
 use memcore_config::AuthMode;
-use memcore_core::{ApiKeyRecord, ApiKeyScope};
+use memcore_core::{
+    build_page, parse_optional_cursor, ApiKeyListQuery, ApiKeyRecord, ApiKeyScope, PageCursor,
+};
 use uuid::Uuid;
 
 use crate::dto::{
     parse_create_api_key_request, ApiKeyItemResponse, CreateApiKeyRequest, CreateApiKeyResponse,
-    ListApiKeysQuery, ListApiKeysResponse, RevokeApiKeyResponse,
+    ListApiKeysQuery, ListApiKeysResponse, RevokeApiKeyResponse, MAX_LIST_API_KEYS_LIMIT,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_any_scope, ApiError};
@@ -63,14 +65,41 @@ pub async fn list_api_keys(
         &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
     )?;
 
+    if query.limit == 0 {
+        return Err(MemcoreError::ValidationError(
+            "limit must be greater than 0".to_string(),
+        )
+        .into());
+    }
+
+    if query.limit > MAX_LIST_API_KEYS_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {MAX_LIST_API_KEYS_LIMIT}"
+        ))
+        .into());
+    }
+
+    let cursor = parse_optional_cursor(query.cursor)?;
+
     let records = state
         .api_key_store
-        .list_api_keys(&organization.org_id, query.include_revoked)
+        .list_api_keys(ApiKeyListQuery {
+            org_id: organization.org_id,
+            include_revoked: query.include_revoked,
+            limit: query.limit,
+            cursor,
+        })
         .await?;
+
+    let page = build_page(records, query.limit, |record| PageCursor {
+        last_id: record.id.to_string(),
+        last_sort_value: record.created_at,
+    })?;
 
     Ok(Json(ListApiKeysResponse {
         status: "success",
-        api_keys: records.iter().map(ApiKeyItemResponse::from).collect(),
+        api_keys: page.items.iter().map(ApiKeyItemResponse::from).collect(),
+        next_cursor: page.next_cursor,
     }))
 }
 

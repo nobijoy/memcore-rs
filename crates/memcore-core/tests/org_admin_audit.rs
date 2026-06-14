@@ -274,7 +274,7 @@ async fn org_audit_search_respects_limit() {
         .expect("search");
 
     assert_eq!(output.events.len(), 2);
-    assert!(output.next_cursor.is_none());
+    assert!(output.next_cursor.is_some());
 }
 
 #[tokio::test]

@@ -3,6 +3,7 @@ pub mod lancedb;
 #[cfg(feature = "qdrant")]
 pub mod qdrant;
 pub mod mocks;
+pub mod pagination;
 pub mod queries;
 #[cfg(feature = "postgres")]
 pub mod postgres;

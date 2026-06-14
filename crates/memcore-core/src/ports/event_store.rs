@@ -4,6 +4,7 @@ use memcore_common::MemcoreResult;
 use uuid::Uuid;
 
 use crate::{MemoryEvent, MemoryEventOperation, TenantContext};
+use crate::pagination::PageCursor;
 
 /// Default limit for listing memory audit events.
 pub const DEFAULT_MEMORY_EVENT_LIST_LIMIT: usize = 50;
@@ -19,7 +20,7 @@ pub struct MemoryEventQuery {
     pub created_after: Option<DateTime<Utc>>,
     pub created_before: Option<DateTime<Utc>>,
     pub limit: usize,
-    pub cursor: Option<String>,
+    pub cursor: Option<PageCursor>,
 }
 
 impl MemoryEventQuery {
@@ -63,7 +64,7 @@ pub struct OrgMemoryEventQuery {
     pub created_after: Option<DateTime<Utc>>,
     pub created_before: Option<DateTime<Utc>>,
     pub limit: usize,
-    pub cursor: Option<String>,
+    pub cursor: Option<PageCursor>,
 }
 
 impl OrgMemoryEventQuery {
@@ -92,7 +93,6 @@ pub trait MemoryEventStore: Send + Sync {
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>>;
 
     /// Lists memory audit events for an organization with optional filters.
-    /// Cursor pagination is accepted but not implemented yet.
     async fn list_events_by_org(
         &self,
         query: OrgMemoryEventQuery,
