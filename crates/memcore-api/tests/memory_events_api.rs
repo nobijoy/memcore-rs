@@ -560,3 +560,62 @@ async fn user_memory_events_invalid_date_range_returns_validation_error() {
         "created_after must be earlier than created_before"
     );
 }
+
+#[tokio::test]
+async fn keyword_search_finds_matching_event_content() {
+    let app = test_app();
+    seed_memory_for_user(&app, ORG_A, USER_A, "Audit test memory content with Rust").await;
+    seed_memory_for_user(&app, ORG_A, USER_A, "python only memory").await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(USER_A, "q=rust"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+    for event in json["events"].as_array().unwrap() {
+        assert!(event.get("input_text").is_none());
+    }
+}
+
+#[tokio::test]
+async fn empty_q_behaves_like_no_search() {
+    let app = test_app();
+    seed_memory_for_user(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(USER_A, "q=%20"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn long_q_returns_validation_error() {
+    let long = "a".repeat(201);
+    let (status, json) = response_parts(
+        test_app(),
+        get_request(
+            &memory_events_uri(USER_A, &format!("q={long}")),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "q must be 200 characters or less");
+}

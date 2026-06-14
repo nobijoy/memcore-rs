@@ -595,3 +595,62 @@ async fn admin_audit_invalid_date_range_returns_validation_error() {
         "created_after must be earlier than created_before"
     );
 }
+
+#[tokio::test]
+async fn admin_audit_keyword_search_finds_matching_events() {
+    let app = dev_app();
+    seed_memory(&app, ORG_A, USER_A, "Rust audit keyword content", Some(DEV_API_KEY)).await;
+    seed_memory(&app, ORG_A, USER_B, "python only content", Some(DEV_API_KEY)).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri("q=rust"),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+    for event in json["events"].as_array().unwrap() {
+        assert!(event.get("input_text").is_none());
+    }
+}
+
+#[tokio::test]
+async fn admin_audit_empty_q_behaves_like_no_search() {
+    let app = dev_app();
+    seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, Some(DEV_API_KEY)).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri("q=%20%20"),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn admin_audit_long_q_returns_validation_error() {
+    let long = "a".repeat(201);
+    let (status, json) = response_parts(
+        dev_app(),
+        get_request(
+            &admin_audit_uri(&format!("q={long}")),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "q must be 200 characters or less");
+}

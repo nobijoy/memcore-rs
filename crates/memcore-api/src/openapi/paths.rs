@@ -119,6 +119,7 @@ pub fn build_context() {}
     params(
         ("user_id" = String, Path, description = "User identifier"),
         ("memory_type" = Option<String>, Query, description = "Filter by memory type (PascalCase label)"),
+        ("q" = Option<String>, Query, description = "Case-insensitive keyword search over content and summary (max 200 chars)"),
         ("limit" = Option<usize>, Query, description = "Maximum results to return"),
         ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but ignored)"),
         ("include_deleted" = Option<bool>, Query, description = "Include soft-deleted memories"),
@@ -258,6 +259,7 @@ pub fn forget_user() {}
         ("fact_id" = Option<String>, Query, description = "Filter by fact UUID"),
         ("created_after" = Option<String>, Query, description = "Inclusive RFC3339 lower bound on created_at"),
         ("created_before" = Option<String>, Query, description = "Exclusive RFC3339 upper bound on created_at"),
+        ("q" = Option<String>, Query, description = "Case-insensitive keyword search over event fields (max 200 chars; does not search input_text)"),
         ("limit" = Option<usize>, Query, description = "Maximum results to return"),
         ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but ignored)"),
         ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
@@ -389,6 +391,7 @@ pub fn list_org_users() {}
         ("operation" = Option<String>, Query, description = "Filter by operation (Add, Update, Delete, NoOp, ForgetUser)"),
         ("created_after" = Option<String>, Query, description = "Inclusive RFC3339 lower bound on created_at"),
         ("created_before" = Option<String>, Query, description = "Exclusive RFC3339 upper bound on created_at"),
+        ("q" = Option<String>, Query, description = "Case-insensitive keyword search over event fields and user_id (max 200 chars; does not search input_text)"),
         ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
         ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but not implemented yet)"),
         ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),

@@ -2,6 +2,7 @@
 pub mod lancedb;
 #[cfg(feature = "qdrant")]
 pub mod qdrant;
+pub mod keyword_search;
 pub mod mocks;
 pub mod pagination;
 pub mod queries;

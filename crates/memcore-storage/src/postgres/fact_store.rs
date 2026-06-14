@@ -217,6 +217,7 @@ impl FactStore for PostgresFactStore {
     }
 
     async fn search_facts(&self, query: FactSearchQuery) -> MemcoreResult<Vec<Fact>> {
+        use crate::keyword_search::push_postgres_fact_keyword_filter;
         use crate::pagination::{fetch_limit, push_postgres_desc_cursor_uuid};
 
         let mut builder = QueryBuilder::<Postgres>::new(
@@ -242,9 +243,7 @@ impl FactStore for PostgresFactStore {
         }
 
         if let Some(query_text) = &query.query_text {
-            let pattern = format!("%{}%", query_text.to_ascii_lowercase());
-            builder.push(" AND LOWER(content) LIKE ");
-            builder.push_bind(pattern);
+            push_postgres_fact_keyword_filter(&mut builder, query_text);
         }
 
         if let Some(cursor) = &query.cursor {

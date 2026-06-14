@@ -14,6 +14,8 @@ use memcore_core::ports::{
     OrgMemoryEventQuery, OrgUserListQuery, OrgUserSummary, RetentionPruneResult, VectorRecord,
     VectorSearchQuery, VectorSearchResult, VectorStore,
 };
+use crate::keyword_search::event_matches_keyword;
+
 use memcore_core::{ApiKeyRecord, MemoryEvent};
 
 fn event_matches_tenant(event: &MemoryEvent, tenant: &TenantContext) -> bool {
@@ -199,6 +201,10 @@ impl FactStore for MockFactStore {
                 query.query_text.as_ref().is_none_or(|text| {
                     let needle = text.to_ascii_lowercase();
                     fact.content.to_ascii_lowercase().contains(&needle)
+                        || fact
+                            .summary
+                            .as_ref()
+                            .is_some_and(|summary| summary.to_ascii_lowercase().contains(&needle))
                 })
             })
             .filter(|fact| {
@@ -510,6 +516,11 @@ impl MemoryEventStore for MockMemoryEventStore {
                     .is_none_or(|created_before| event.created_at < created_before)
             })
             .filter(|event| {
+                query.query_text.as_ref().is_none_or(|text| {
+                    event_matches_keyword(event, text, false)
+                })
+            })
+            .filter(|event| {
                 query.cursor.as_ref().is_none_or(|cursor| {
                     is_after_cursor_in_desc_order(
                         event.created_at,
@@ -565,6 +576,11 @@ impl MemoryEventStore for MockMemoryEventStore {
                 query
                     .created_before
                     .is_none_or(|created_before| event.created_at < created_before)
+            })
+            .filter(|event| {
+                query.query_text.as_ref().is_none_or(|text| {
+                    event_matches_keyword(event, text, true)
+                })
             })
             .filter(|event| {
                 query.cursor.as_ref().is_none_or(|cursor| {
@@ -945,6 +961,91 @@ mod tests {
             .expect("search should succeed");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].org_id, "org_a");
+    }
+
+    #[tokio::test]
+    async fn search_facts_by_keyword_is_case_insensitive() {
+        let store = MockFactStore::new();
+        let tenant = tenant("org_a", "user_a");
+        store
+            .insert_fact(
+                &tenant,
+                sample_fact("org_a", "user_a", "RUST backend", MemoryType::Skill),
+            )
+            .await
+            .expect("insert");
+
+        let results = store
+            .search_facts(FactSearchQuery {
+                tenant,
+                memory_types: None,
+                query_text: Some("rust".to_string()),
+                limit: 10,
+                cursor: None,
+                include_deleted: false,
+            })
+            .await
+            .expect("search");
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_facts_by_keyword_matches_summary() {
+        let store = MockFactStore::new();
+        let tenant = tenant("org_a", "user_a");
+        let mut fact = sample_fact("org_a", "user_a", "body text", MemoryType::Profile);
+        fact.summary = Some("rust summary".to_string());
+        store.insert_fact(&tenant, fact).await.expect("insert");
+
+        let results = store
+            .search_facts(FactSearchQuery {
+                tenant,
+                memory_types: None,
+                query_text: Some("summary".to_string()),
+                limit: 10,
+                cursor: None,
+                include_deleted: false,
+            })
+            .await
+            .expect("search");
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_facts_keyword_respects_memory_type_filter() {
+        let store = MockFactStore::new();
+        let tenant = tenant("org_a", "user_a");
+        store
+            .insert_fact(
+                &tenant,
+                sample_fact("org_a", "user_a", "rust skill", MemoryType::Skill),
+            )
+            .await
+            .expect("insert");
+        store
+            .insert_fact(
+                &tenant,
+                sample_fact("org_a", "user_a", "rust profile", MemoryType::Profile),
+            )
+            .await
+            .expect("insert");
+
+        let results = store
+            .search_facts(FactSearchQuery {
+                tenant,
+                memory_types: Some(vec![MemoryType::Profile]),
+                query_text: Some("rust".to_string()),
+                limit: 10,
+                cursor: None,
+                include_deleted: false,
+            })
+            .await
+            .expect("search");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].memory_type, MemoryType::Profile);
     }
 
     #[tokio::test]

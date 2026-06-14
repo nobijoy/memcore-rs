@@ -7,7 +7,8 @@ use uuid::Uuid;
 use crate::dto::{
     parse_event_date_filters, parse_memory_event_operation_label, ListOrgUsersQuery,
     ListOrgUsersResponse, OrgSummaryResponse, SearchOrgMemoryEventsQuery,
-    SearchOrgMemoryEventsResponse, org_summary_input, validate_list_org_users_limit,
+    SearchOrgMemoryEventsResponse, org_summary_input, parse_keyword_query,
+    validate_list_org_users_limit,
     validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
@@ -87,6 +88,7 @@ pub async fn search_org_memory_events(
         query.created_after.as_ref(),
         query.created_before.as_ref(),
     )?;
+    let query_text = parse_keyword_query(query.q)?;
 
     let input = SearchOrgMemoryEventsInput {
         org_id: organization.org_id,
@@ -95,6 +97,7 @@ pub async fn search_org_memory_events(
         operation,
         created_after,
         created_before,
+        query_text,
         limit: query.limit,
         cursor: query.cursor,
     };

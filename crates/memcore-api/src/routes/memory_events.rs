@@ -5,8 +5,8 @@ use memcore_core::{ApiKeyScope, ListMemoryEventsInput, MAX_LIST_MEMORY_EVENTS_LI
 use uuid::Uuid;
 
 use crate::dto::{
-    parse_event_date_filters, parse_memory_event_operation_label, ListMemoryEventsQuery,
-    ListMemoryEventsResponse,
+    parse_event_date_filters, parse_keyword_query, parse_memory_event_operation_label,
+    ListMemoryEventsQuery, ListMemoryEventsResponse,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_scope, ApiError};
@@ -39,6 +39,7 @@ pub async fn list_user_memory_events(
         query.created_after.as_ref(),
         query.created_before.as_ref(),
     )?;
+    let query_text = parse_keyword_query(query.q)?;
 
     if query.limit == 0 {
         return Err(MemcoreError::ValidationError(
@@ -64,6 +65,7 @@ pub async fn list_user_memory_events(
             operation,
             created_after,
             created_before,
+            query_text,
             limit: query.limit,
             cursor: query.cursor,
         })

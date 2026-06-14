@@ -283,3 +283,65 @@ async fn org_a_cannot_list_org_b_memories() {
     assert_eq!(status, StatusCode::OK);
     assert!(json["memories"].as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn keyword_search_finds_matching_content() {
+    let app = test_app();
+    seed_memory_for_user(&app, ORG_A, USER_A, "learning Rust async patterns").await;
+    seed_memory_for_user(&app, ORG_A, USER_A, "python data science").await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &format!("/api/v1/users/{USER_A}/memories?q=rust"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["memories"].as_array().unwrap().len(), 1);
+    assert!(json["memories"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_ascii_lowercase()
+        .contains("rust"));
+}
+
+#[tokio::test]
+async fn empty_q_behaves_like_no_search() {
+    let app = test_app();
+    seed_memory_for_user(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &format!("/api/v1/users/{USER_A}/memories?q=%20%20"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["memories"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn long_q_returns_validation_error() {
+    let long = "a".repeat(201);
+    let (status, json) = response_parts(
+        test_app(),
+        get_request(
+            &format!("/api/v1/users/{USER_A}/memories?q={long}"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(json["error"]["message"], "q must be 200 characters or less");
+}

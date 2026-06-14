@@ -334,7 +334,7 @@ impl MemoryEngine {
             .search_facts(FactSearchQuery {
                 tenant: input.tenant,
                 memory_types,
-                query_text: None,
+                query_text: input.query_text,
                 limit,
                 cursor,
                 include_deleted: input.include_deleted,
@@ -520,6 +520,7 @@ impl MemoryEngine {
         query.operation = input.operation;
         query.created_after = input.created_after;
         query.created_before = input.created_before;
+        query.query_text = input.query_text;
         query.cursor = cursor;
 
         let events = event_store.list_events_by_org(query).await?;
@@ -743,6 +744,7 @@ impl MemoryEngine {
         query.operation = input.operation;
         query.created_after = input.created_after;
         query.created_before = input.created_before;
+        query.query_text = input.query_text;
         query.cursor = cursor;
 
         let events = event_store.list_events(query).await?;

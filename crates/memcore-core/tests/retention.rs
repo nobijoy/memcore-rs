@@ -141,6 +141,7 @@ async fn dry_run_counts_old_facts_without_deleting() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -176,6 +177,7 @@ async fn apply_soft_deletes_old_facts() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -222,6 +224,7 @@ async fn dry_run_counts_old_events_without_deleting() {
             fact_id: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 20,
             cursor: None,
         })
@@ -266,6 +269,7 @@ async fn apply_deletes_old_events() {
             fact_id: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 20,
             cursor: None,
         })
@@ -296,6 +300,7 @@ async fn retention_does_not_affect_other_user() {
         .list_memories(ListMemoriesInput {
             tenant: tenant("org_a", "user_b"),
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -327,6 +332,7 @@ async fn retention_does_not_affect_other_org() {
         .list_memories(ListMemoriesInput {
             tenant: tenant("org_b", "user_a"),
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,

@@ -187,6 +187,7 @@ impl From<&MemorySearchResult> for SearchMemoryResultResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListMemoriesQuery {
     pub memory_type: Option<String>,
+    pub q: Option<String>,
     #[serde(default = "default_list_memories_limit")]
     pub limit: usize,
     pub cursor: Option<String>,

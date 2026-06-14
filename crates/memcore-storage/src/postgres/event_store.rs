@@ -116,6 +116,7 @@ impl MemoryEventStore for PostgresMemoryEventStore {
     }
 
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>> {
+        use crate::keyword_search::push_postgres_event_keyword_filter;
         use crate::pagination::{fetch_limit, push_postgres_desc_cursor_uuid};
 
         let mut builder = QueryBuilder::<Postgres>::new(
@@ -145,6 +146,10 @@ impl MemoryEventStore for PostgresMemoryEventStore {
             builder.push_bind(created_before);
         }
 
+        if let Some(query_text) = &query.query_text {
+            push_postgres_event_keyword_filter(&mut builder, query_text, false);
+        }
+
         if let Some(cursor) = &query.cursor {
             push_postgres_desc_cursor_uuid(&mut builder, "created_at", "id", cursor);
         }
@@ -167,6 +172,7 @@ impl MemoryEventStore for PostgresMemoryEventStore {
         &self,
         query: OrgMemoryEventQuery,
     ) -> MemcoreResult<Vec<MemoryEvent>> {
+        use crate::keyword_search::push_postgres_event_keyword_filter;
         use crate::pagination::{fetch_limit, push_postgres_desc_cursor_uuid};
 
         let mut builder = QueryBuilder::<Postgres>::new(
@@ -197,6 +203,10 @@ impl MemoryEventStore for PostgresMemoryEventStore {
         if let Some(created_before) = query.created_before {
             builder.push(" AND created_at < ");
             builder.push_bind(created_before);
+        }
+
+        if let Some(query_text) = &query.query_text {
+            push_postgres_event_keyword_filter(&mut builder, query_text, true);
         }
 
         if let Some(cursor) = &query.cursor {

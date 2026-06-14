@@ -19,6 +19,7 @@ pub struct MemoryEventQuery {
     pub operation: Option<MemoryEventOperation>,
     pub created_after: Option<DateTime<Utc>>,
     pub created_before: Option<DateTime<Utc>>,
+    pub query_text: Option<String>,
     pub limit: usize,
     pub cursor: Option<PageCursor>,
 }
@@ -31,6 +32,7 @@ impl MemoryEventQuery {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit,
             cursor: None,
         }
@@ -63,6 +65,7 @@ pub struct OrgMemoryEventQuery {
     pub operation: Option<MemoryEventOperation>,
     pub created_after: Option<DateTime<Utc>>,
     pub created_before: Option<DateTime<Utc>>,
+    pub query_text: Option<String>,
     pub limit: usize,
     pub cursor: Option<PageCursor>,
 }
@@ -76,6 +79,7 @@ impl OrgMemoryEventQuery {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit,
             cursor: None,
         }

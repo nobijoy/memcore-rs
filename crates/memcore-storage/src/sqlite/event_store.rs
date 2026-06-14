@@ -134,6 +134,7 @@ impl MemoryEventStore for SqliteMemoryEventStore {
     }
 
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>> {
+        use crate::keyword_search::push_sqlite_event_keyword_filter;
         use crate::pagination::{fetch_limit, push_sqlite_desc_cursor};
 
         let mut builder = QueryBuilder::<Sqlite>::new(
@@ -163,6 +164,10 @@ impl MemoryEventStore for SqliteMemoryEventStore {
             builder.push_bind(datetime_to_str(created_before));
         }
 
+        if let Some(query_text) = &query.query_text {
+            push_sqlite_event_keyword_filter(&mut builder, query_text, false);
+        }
+
         if let Some(cursor) = &query.cursor {
             push_sqlite_desc_cursor(&mut builder, "created_at", "id", cursor);
         }
@@ -185,6 +190,7 @@ impl MemoryEventStore for SqliteMemoryEventStore {
         &self,
         query: OrgMemoryEventQuery,
     ) -> MemcoreResult<Vec<MemoryEvent>> {
+        use crate::keyword_search::push_sqlite_event_keyword_filter;
         use crate::pagination::{fetch_limit, push_sqlite_desc_cursor};
 
         let mut builder = QueryBuilder::<Sqlite>::new(
@@ -215,6 +221,10 @@ impl MemoryEventStore for SqliteMemoryEventStore {
         if let Some(created_before) = query.created_before {
             builder.push(" AND created_at < ");
             builder.push_bind(datetime_to_str(created_before));
+        }
+
+        if let Some(query_text) = &query.query_text {
+            push_sqlite_event_keyword_filter(&mut builder, query_text, true);
         }
 
         if let Some(cursor) = &query.cursor {
@@ -299,7 +309,7 @@ mod tests {
 
     use super::SqliteMemoryEventStore;
     use crate::traits::MemoryEventStore;
-    use memcore_core::ports::MemoryEventQuery;
+    use memcore_core::ports::{MemoryEventQuery, OrgMemoryEventQuery};
 
     async fn test_store() -> SqliteMemoryEventStore {
         SqliteMemoryEventStore::connect("sqlite::memory:?cache=shared")
@@ -712,6 +722,7 @@ mod tests {
                 operation: None,
                 created_after: None,
                 created_before: None,
+                query_text: None,
                 limit: 10,
                 cursor: None,
             })
@@ -803,6 +814,7 @@ mod tests {
                 operation: None,
                 created_after: Some(Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()),
                 created_before: Some(Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap()),
+                query_text: None,
                 limit: 10,
                 cursor: None,
             })
@@ -830,5 +842,59 @@ mod tests {
         let listed = store.list_events(query).await.expect("list");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].user_id, "user_a");
+    }
+
+    #[tokio::test]
+    async fn list_events_keyword_search_matches_new_content() {
+        let store = test_store().await;
+        let tenant = tenant("org_kw", "user_a");
+        let mut rust_event = sample_event(
+            "org_kw",
+            "user_a",
+            None,
+            MemoryEventOperation::Add,
+            json!({}),
+        );
+        rust_event.new_content = Some("rust async runtime".to_string());
+        store
+            .record_event(&tenant, rust_event)
+            .await
+            .expect("record");
+
+        let mut other = sample_event(
+            "org_kw",
+            "user_a",
+            None,
+            MemoryEventOperation::Add,
+            json!({}),
+        );
+        other.new_content = Some("python only".to_string());
+        store.record_event(&tenant, other).await.expect("record");
+
+        let mut query = MemoryEventQuery::new(tenant, 10);
+        query.query_text = Some("rust".to_string());
+        let listed = store.list_events(query).await.expect("list");
+        assert_eq!(listed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_events_by_org_keyword_search_includes_user_id() {
+        let store = test_store().await;
+        let tenant_a = tenant("org_kw_admin", "user_alpha");
+        let tenant_b = tenant("org_kw_admin", "user_beta");
+        store
+            .record_event(&tenant_a, sample_event("org_kw_admin", "user_alpha", None, MemoryEventOperation::Add, json!({})))
+            .await
+            .expect("record");
+        store
+            .record_event(&tenant_b, sample_event("org_kw_admin", "user_beta", None, MemoryEventOperation::Add, json!({})))
+            .await
+            .expect("record");
+
+        let mut query = OrgMemoryEventQuery::new("org_kw_admin".to_string(), 10);
+        query.query_text = Some("alpha".to_string());
+        let listed = store.list_events_by_org(query).await.expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].user_id, "user_alpha");
     }
 }

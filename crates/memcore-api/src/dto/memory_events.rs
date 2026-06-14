@@ -18,6 +18,7 @@ pub struct ListMemoryEventsQuery {
     pub fact_id: Option<String>,
     pub created_after: Option<String>,
     pub created_before: Option<String>,
+    pub q: Option<String>,
     #[serde(default = "default_list_memory_events_limit")]
     pub limit: usize,
     pub cursor: Option<String>,

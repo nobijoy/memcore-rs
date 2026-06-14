@@ -76,6 +76,7 @@ async fn list_memories_first_page_returns_next_cursor_when_more_exist() {
         .list_memories(ListMemoriesInput {
             tenant: tenant.clone(),
             memory_type: None,
+            query_text: None,
             limit: 2,
             cursor: None,
             include_deleted: false,
@@ -90,6 +91,7 @@ async fn list_memories_first_page_returns_next_cursor_when_more_exist() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 2,
             cursor: first.next_cursor,
             include_deleted: false,
@@ -108,6 +110,7 @@ async fn list_memories_invalid_cursor_returns_validation_error() {
         .list_memories(ListMemoriesInput {
             tenant: tenant("org_x", "user_x"),
             memory_type: None,
+            query_text: None,
             limit: 10,
             cursor: Some("bad-cursor".to_string()),
             include_deleted: false,
@@ -133,6 +136,7 @@ async fn list_memories_pagination_preserves_tenant_isolation() {
         .list_memories(ListMemoriesInput {
             tenant: tenant_a,
             memory_type: None,
+            query_text: None,
             limit: 10,
             cursor: None,
             include_deleted: false,
@@ -217,6 +221,7 @@ async fn list_memory_events_paginates_with_operation_filter() {
             operation: Some(MemoryEventOperation::Add),
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 2,
             cursor: None,
         })
@@ -234,6 +239,7 @@ async fn list_memory_events_paginates_with_operation_filter() {
             operation: Some(MemoryEventOperation::Add),
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 2,
             cursor: first.next_cursor,
         })

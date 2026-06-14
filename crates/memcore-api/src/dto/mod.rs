@@ -3,6 +3,7 @@ pub mod api_keys;
 pub mod context;
 pub mod export;
 pub mod import;
+pub mod keyword_search;
 pub mod memories;
 pub mod retention;
 pub mod memory_events;
@@ -22,6 +23,7 @@ pub use context::{
     validate_build_context_request, BuildContextRequest, BuildContextResponse,
     ContextMemoryResponse,
 };
+pub use keyword_search::parse_keyword_query;
 pub use export::{
     ExportFactItemResponse, ExportMemorySourceResponse, ExportUserQuery, ExportUserResponse,
     UserMemoryExportResponse,

@@ -563,6 +563,7 @@ async fn list_memories_returns_tenant_scoped_facts() {
         .list_memories(ListMemoriesInput {
             tenant: tenant_a,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -578,6 +579,7 @@ async fn list_memories_returns_tenant_scoped_facts() {
         .list_memories(ListMemoriesInput {
             tenant: tenant_b,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -634,6 +636,7 @@ async fn delete_memory_soft_deletes_fact_and_removes_vector() {
         .list_memories(ListMemoriesInput {
             tenant: tenant.clone(),
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -737,6 +740,7 @@ async fn forget_user_removes_facts_and_vectors_for_tenant_only() {
         .list_memories(ListMemoriesInput {
             tenant: tenant_a,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -749,6 +753,7 @@ async fn forget_user_removes_facts_and_vectors_for_tenant_only() {
         .list_memories(ListMemoriesInput {
             tenant: tenant_b,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -801,6 +806,7 @@ async fn noop_operation_does_not_insert_fact() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,

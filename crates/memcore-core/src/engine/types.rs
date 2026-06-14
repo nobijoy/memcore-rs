@@ -74,6 +74,7 @@ pub struct SearchMemoryOutput {
 pub struct ListMemoriesInput {
     pub tenant: TenantContext,
     pub memory_type: Option<crate::MemoryType>,
+    pub query_text: Option<String>,
     pub limit: usize,
     pub cursor: Option<String>,
     pub include_deleted: bool,
@@ -126,6 +127,7 @@ pub struct ListMemoryEventsInput {
     pub operation: Option<crate::MemoryEventOperation>,
     pub created_after: Option<chrono::DateTime<chrono::Utc>>,
     pub created_before: Option<chrono::DateTime<chrono::Utc>>,
+    pub query_text: Option<String>,
     pub limit: usize,
     pub cursor: Option<String>,
 }

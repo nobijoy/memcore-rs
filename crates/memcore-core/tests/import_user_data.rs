@@ -132,6 +132,7 @@ async fn import_replace_removes_previous_user_facts() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -481,6 +482,7 @@ async fn dry_run_does_not_insert_facts() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -530,6 +532,7 @@ async fn dry_run_replace_mode_does_not_delete_existing_facts() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,
@@ -579,6 +582,7 @@ async fn dry_run_does_not_create_vectors() {
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type: None,
+            query_text: None,
             limit: 20,
             cursor: None,
             include_deleted: false,

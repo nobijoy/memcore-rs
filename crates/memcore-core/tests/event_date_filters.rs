@@ -64,6 +64,7 @@ async fn user_event_query_filters_by_created_after() {
             operation: None,
             created_after: Some(Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()),
             created_before: None,
+            query_text: None,
             limit: 10,
             cursor: None,
         })
@@ -90,6 +91,7 @@ async fn user_event_query_filters_by_created_before() {
             operation: None,
             created_after: None,
             created_before: Some(Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()),
+            query_text: None,
             limit: 10,
             cursor: None,
         })
@@ -120,6 +122,7 @@ async fn org_event_query_filters_by_date_range() {
             operation: None,
             created_after: Some(Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()),
             created_before: Some(Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap()),
+            query_text: None,
             limit: 10,
             cursor: None,
         })
@@ -163,6 +166,7 @@ async fn date_filtered_results_are_ordered_descending() {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 10,
             cursor: None,
         })
@@ -196,6 +200,7 @@ async fn date_filter_respects_limit() {
             operation: None,
             created_after: Some(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
             created_before: None,
+            query_text: None,
             limit: 2,
             cursor: None,
         })
@@ -215,6 +220,7 @@ async fn invalid_date_range_returns_validation_error() {
             operation: None,
             created_after: Some(Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap()),
             created_before: Some(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
+            query_text: None,
             limit: 10,
             cursor: None,
         })

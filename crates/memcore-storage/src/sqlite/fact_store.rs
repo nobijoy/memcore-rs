@@ -241,6 +241,7 @@ impl FactStore for SqliteFactStore {
     }
 
     async fn search_facts(&self, query: FactSearchQuery) -> MemcoreResult<Vec<Fact>> {
+        use crate::keyword_search::push_sqlite_fact_keyword_filter;
         use crate::pagination::{fetch_limit, push_sqlite_desc_cursor};
 
         let mut builder = QueryBuilder::<Sqlite>::new(
@@ -266,9 +267,7 @@ impl FactStore for SqliteFactStore {
         }
 
         if let Some(query_text) = &query.query_text {
-            let pattern = format!("%{}%", query_text.to_ascii_lowercase());
-            builder.push(" AND LOWER(content) LIKE ");
-            builder.push_bind(pattern);
+            push_sqlite_fact_keyword_filter(&mut builder, query_text);
         }
 
         if let Some(cursor) = &query.cursor {
@@ -656,6 +655,41 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].org_id, "org_a");
+    }
+
+    #[tokio::test]
+    async fn search_facts_by_keyword_is_case_insensitive() {
+        let store = test_store().await;
+        let tenant = tenant("org_a", "user_a");
+        store
+            .insert_fact(
+                &tenant,
+                sample_fact(
+                    "org_a",
+                    "user_a",
+                    "RUST programming",
+                    MemoryType::Skill,
+                    json!({}),
+                    None,
+                    None,
+                ),
+            )
+            .await
+            .expect("insert");
+
+        let results = store
+            .search_facts(FactSearchQuery {
+                tenant,
+                memory_types: None,
+                query_text: Some("rust".to_string()),
+                limit: 10,
+                cursor: None,
+                include_deleted: false,
+            })
+            .await
+            .expect("search");
+
+        assert_eq!(results.len(), 1);
     }
 
     #[tokio::test]

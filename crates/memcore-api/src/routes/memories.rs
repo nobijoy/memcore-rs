@@ -8,9 +8,9 @@ use memcore_core::{
 use uuid::Uuid;
 
 use crate::dto::{
-    parse_memory_type_label, AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse,
-    ListMemoriesQuery, ListMemoriesResponse, MemoryMessageRequest, SearchMemoryRequest,
-    SearchMemoryResponse,
+    parse_keyword_query, parse_memory_type_label, AddMemoryRequest, AddMemoryResponse,
+    DeleteMemoryResponse, ListMemoriesQuery, ListMemoriesResponse, MemoryMessageRequest,
+    SearchMemoryRequest, SearchMemoryResponse,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_scope, ApiError};
@@ -98,6 +98,8 @@ pub async fn list_user_memories(
         .into());
     }
 
+    let query_text = parse_keyword_query(query.q)?;
+
     let tenant = TenantContext::new(organization.org_id, user_id)?;
 
     let output = state
@@ -105,6 +107,7 @@ pub async fn list_user_memories(
         .list_memories(ListMemoriesInput {
             tenant,
             memory_type,
+            query_text,
             limit: query.limit,
             cursor: query.cursor,
             include_deleted: query.include_deleted,

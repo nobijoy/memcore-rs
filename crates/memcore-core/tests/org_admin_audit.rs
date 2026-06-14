@@ -78,6 +78,7 @@ async fn org_audit_search_returns_events_for_current_org() {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 50,
             cursor: None,
         })
@@ -116,6 +117,7 @@ async fn org_audit_search_excludes_other_org() {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 50,
             cursor: None,
         })
@@ -155,6 +157,7 @@ async fn org_audit_search_user_id_filter_works() {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 50,
             cursor: None,
         })
@@ -195,6 +198,7 @@ async fn org_audit_search_fact_id_filter_works() {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 50,
             cursor: None,
         })
@@ -234,6 +238,7 @@ async fn org_audit_search_operation_filter_works() {
             operation: Some(MemoryEventOperation::Delete),
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 50,
             cursor: None,
         })
@@ -267,6 +272,7 @@ async fn org_audit_search_respects_limit() {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: 2,
             cursor: None,
         })
@@ -288,6 +294,7 @@ async fn org_audit_search_rejects_limit_above_max() {
             operation: None,
             created_after: None,
             created_before: None,
+            query_text: None,
             limit: memcore_core::MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT + 1,
             cursor: None,
         })
