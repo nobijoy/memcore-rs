@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use memcore_core::{
-    BuildContextInput, Fact, FactStore, MemoryEngine, MemorySearchResult, MemorySource,
-    MemoryType, RankingConfig, SearchMemoryInput, TenantContext, VectorRecord, VectorStore,
+    Fact, FactStore, MemoryEngine, MemorySearchResult, MemorySource, MemoryType, RankingConfig,
+    SearchMemoryInput, TenantContext, VectorRecord, VectorStore,
 };
 use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -109,7 +109,7 @@ async fn insert_scored_fact(
 }
 
 #[tokio::test]
-async fn search_results_are_sorted_by_final_score_descending() {
+async fn search_results_are_sorted_by_score_descending() {
     let fact_store = Arc::new(MockFactStore::new());
     let vector_store = Arc::new(MockVectorStore::new());
     let query_embedding = deterministic_embedding("ranking search query alpha", 8).expect("embed");
@@ -171,204 +171,6 @@ async fn search_results_are_sorted_by_final_score_descending() {
     }
 }
 
-#[tokio::test]
-async fn high_importance_can_outrank_slightly_higher_semantic_score() {
-    let fact_store = Arc::new(MockFactStore::new());
-    let vector_store = Arc::new(MockVectorStore::new());
-    let query_embedding = deterministic_embedding("importance outrank query", 8).expect("embed");
-
-    let high_importance = insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "high importance memory alpha bravo",
-        0.95,
-        0.8,
-        Utc::now(),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.82),
-    )
-    .await;
-    insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "lower importance memory charlie delta",
-        0.5,
-        0.8,
-        Utc::now(),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.88),
-    )
-    .await;
-
-    let output = engine_with(fact_store, vector_store)
-        .search_memory(SearchMemoryInput {
-            tenant: tenant("org_rank", "user_a"),
-            query: "importance outrank query".to_string(),
-            limit: 10,
-            memory_types: None,
-            metadata_filter: None,
-        })
-        .await
-        .expect("search");
-
-    assert_eq!(output.results.len(), 2);
-    assert_eq!(output.results[0].fact_id, high_importance.id);
-}
-
-#[tokio::test]
-async fn low_confidence_result_is_ranked_lower() {
-    let fact_store = Arc::new(MockFactStore::new());
-    let vector_store = Arc::new(MockVectorStore::new());
-    let query_embedding = deterministic_embedding("confidence ranking query", 8).expect("embed");
-
-    insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "low confidence memory alpha bravo",
-        0.8,
-        0.3,
-        Utc::now(),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.85),
-    )
-    .await;
-    let high_confidence = insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "high confidence memory charlie delta",
-        0.8,
-        0.95,
-        Utc::now(),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.85),
-    )
-    .await;
-
-    let output = engine_with(fact_store, vector_store)
-        .search_memory(SearchMemoryInput {
-            tenant: tenant("org_rank", "user_a"),
-            query: "confidence ranking query".to_string(),
-            limit: 10,
-            memory_types: None,
-            metadata_filter: None,
-        })
-        .await
-        .expect("search");
-
-    assert_eq!(output.results[0].fact_id, high_confidence.id);
-}
-
-#[tokio::test]
-async fn older_fact_gets_lower_rank_than_recent_fact_with_same_signals() {
-    let fact_store = Arc::new(MockFactStore::new());
-    let vector_store = Arc::new(MockVectorStore::new());
-    let query_embedding = deterministic_embedding("freshness ranking query", 8).expect("embed");
-    let now = Utc::now();
-
-    insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "old memory alpha bravo charlie",
-        0.8,
-        0.8,
-        now - Duration::days(400),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.9),
-    )
-    .await;
-    let recent = insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "recent memory delta echo foxtrot",
-        0.8,
-        0.8,
-        now - Duration::days(2),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.9),
-    )
-    .await;
-
-    let output = engine_with(fact_store, vector_store)
-        .search_memory(SearchMemoryInput {
-            tenant: tenant("org_rank", "user_a"),
-            query: "freshness ranking query".to_string(),
-            limit: 10,
-            memory_types: None,
-            metadata_filter: None,
-        })
-        .await
-        .expect("search");
-
-    assert_eq!(output.results[0].fact_id, recent.id);
-}
-
-#[tokio::test]
-async fn context_uses_ranked_search_ordering() {
-    let fact_store = Arc::new(MockFactStore::new());
-    let vector_store = Arc::new(MockVectorStore::new());
-    let query_embedding = deterministic_embedding("context ranking query", 8).expect("embed");
-
-    insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "LOWER_RANKED_MEMORY_CONTENT",
-        0.5,
-        0.8,
-        Utc::now(),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.88),
-    )
-    .await;
-    insert_scored_fact(
-        &fact_store,
-        &vector_store,
-        "org_rank",
-        "user_a",
-        "HIGHER_RANKED_MEMORY_CONTENT",
-        0.95,
-        0.8,
-        Utc::now(),
-        MemoryType::Skill,
-        embedding_with_cosine_similarity(&query_embedding, 0.82),
-    )
-    .await;
-
-    let output = engine_with(fact_store, vector_store)
-        .build_context(BuildContextInput {
-            tenant: tenant("org_rank", "user_a"),
-            query: "context ranking query".to_string(),
-            max_memories: 10,
-            memory_types: None,
-            include_metadata: false,
-        })
-        .await
-        .expect("build context");
-
-    let higher_pos = output
-        .context
-        .find("HIGHER_RANKED_MEMORY_CONTENT")
-        .expect("higher ranked content");
-    let lower_pos = output
-        .context
-        .find("LOWER_RANKED_MEMORY_CONTENT")
-        .expect("lower ranked content");
-    assert!(higher_pos < lower_pos);
-    assert_eq!(output.memories[0].content, "HIGHER_RANKED_MEMORY_CONTENT");
-}
 
 #[tokio::test]
 async fn search_preserves_tenant_isolation_with_ranking() {

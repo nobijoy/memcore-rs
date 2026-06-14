@@ -309,3 +309,74 @@ async fn limit_above_max_returns_validation_error() {
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
     assert_eq!(json["error"]["message"], "limit cannot exceed 50");
 }
+
+#[tokio::test]
+async fn search_finds_keyword_phrase_match() {
+    let app = test_app();
+    let unique_phrase = "UNIQUE_KEYWORD_PHRASE_api_rrf_xyz";
+    let add_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Memory containing {unique_phrase} for fused search" }}],
+          "metadata": {{}}
+        }}"#
+    );
+
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &add_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+
+    let search_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{unique_phrase}"
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/memories/search", &search_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let results = json["results"].as_array().expect("results");
+    assert_eq!(results.len(), 1);
+    assert!(results[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains(unique_phrase));
+}
+
+#[tokio::test]
+async fn search_does_not_duplicate_same_fact() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let search_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}"
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/memories/search", &search_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let results = json["results"].as_array().expect("results");
+    assert!(!results.is_empty());
+    let fact_ids: Vec<_> = results
+        .iter()
+        .map(|result| result["fact_id"].as_str().unwrap())
+        .collect();
+    let unique: std::collections::HashSet<_> = fact_ids.iter().collect();
+    assert_eq!(unique.len(), fact_ids.len());
+}

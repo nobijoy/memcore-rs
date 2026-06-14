@@ -15,7 +15,10 @@ use crate::import::{
     collect_import_validation, ImportMode, ImportUserDataInput, ImportUserDataOutput,
     ImportValidationSummary, resolve_import_fact_id,
 };
-use crate::ranking::{apply_ranking, RankingConfig};
+use crate::ranking::{
+    reciprocal_rank_fusion, weighted_score_for, RankedCandidate, RankingConfig, RankingSource,
+    RrfConfig,
+};
 use crate::retention::{ApplyRetentionInput, ApplyRetentionOutput};
 use crate::admin::{
     ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
@@ -62,6 +65,7 @@ pub struct MemoryEngine {
     enable_pii_redaction: bool,
     embedding_dedup_config: EmbeddingDeduplicationConfig,
     ranking_config: RankingConfig,
+    rrf_config: RrfConfig,
 }
 
 impl MemoryEngine {
@@ -83,6 +87,7 @@ impl MemoryEngine {
             enable_pii_redaction: false,
             embedding_dedup_config: EmbeddingDeduplicationConfig::default(),
             ranking_config: RankingConfig::default(),
+            rrf_config: RrfConfig::default(),
         }
     }
 
@@ -118,6 +123,11 @@ impl MemoryEngine {
 
     pub fn with_ranking_config(mut self, config: RankingConfig) -> Self {
         self.ranking_config = config;
+        self
+    }
+
+    pub fn with_rrf_config(mut self, config: RrfConfig) -> Self {
+        self.rrf_config = config;
         self
     }
 
@@ -325,9 +335,13 @@ impl MemoryEngine {
         &self,
         input: SearchMemoryInput,
     ) -> MemcoreResult<SearchMemoryOutput> {
+        use std::cmp::Ordering;
+        use std::collections::HashMap;
+
         validate_tenant(&input.tenant)?;
         validate_query(&input.query)?;
         let limit = normalize_search_limit(input.limit)?;
+        let internal_limit = internal_search_limit(limit);
 
         let embedding = self.embedding_provider.embed_text(&input.query).await?;
 
@@ -336,48 +350,130 @@ impl MemoryEngine {
             .search_vectors(crate::ports::VectorSearchQuery {
                 tenant: input.tenant.clone(),
                 embedding,
-                limit,
-                memory_types: input.memory_types,
+                limit: internal_limit,
+                memory_types: input.memory_types.clone(),
                 metadata_filter: input.metadata_filter,
             })
             .await?;
 
-        let mut results = Vec::with_capacity(vector_results.len());
-        let mut updated_at_by_fact = std::collections::HashMap::with_capacity(vector_results.len());
+        let keyword_facts = self
+            .fact_store
+            .search_facts(FactSearchQuery {
+                tenant: input.tenant.clone(),
+                memory_types: input.memory_types.clone(),
+                query_text: Some(input.query.clone()),
+                limit: internal_limit,
+                cursor: None,
+                include_deleted: false,
+            })
+            .await?;
 
-        for vector_result in vector_results {
-            let semantic_score = vector_result.score;
-            let mut search_result = MemorySearchResult {
+        let semantic_candidates: Vec<RankedCandidate> = vector_results
+            .iter()
+            .enumerate()
+            .map(|(index, vector_result)| RankedCandidate {
                 fact_id: vector_result.fact_id,
-                content: vector_result.content,
-                memory_type: vector_result.memory_type,
-                score: semantic_score,
-                confidence: 0.0,
-                importance: 0.0,
-                valid_at: None,
-                metadata: vector_result.metadata,
+                source: RankingSource::Semantic,
+                rank: index + 1,
+                score: vector_result.score,
+            })
+            .collect();
+
+        let keyword_candidates: Vec<RankedCandidate> = keyword_facts
+            .iter()
+            .enumerate()
+            .map(|(index, fact)| RankedCandidate {
+                fact_id: fact.id,
+                source: RankingSource::Keyword,
+                rank: index + 1,
+                score: 0.0,
+            })
+            .collect();
+
+        let fused =
+            reciprocal_rank_fusion(&semantic_candidates, &keyword_candidates, &self.rrf_config);
+
+        let vector_by_fact: HashMap<Uuid, _> =
+            vector_results.iter().map(|result| (result.fact_id, result)).collect();
+        let keyword_by_fact: HashMap<Uuid, _> =
+            keyword_facts.iter().map(|fact| (fact.id, fact)).collect();
+        let now = Utc::now();
+
+        let mut scored: Vec<(MemorySearchResult, f32, f32, chrono::DateTime<Utc>)> =
+            Vec::with_capacity(fused.len());
+
+        for (fact_id, rrf_score) in fused {
+            let fact = if let Some(fact) = keyword_by_fact.get(&fact_id) {
+                Some((*fact).clone())
+            } else {
+                self.fact_store
+                    .get_fact(&input.tenant, fact_id)
+                    .await?
             };
 
-            if let Some(fact) = self
-                .fact_store
-                .get_fact(&input.tenant, search_result.fact_id)
-                .await?
-            {
-                search_result.confidence = fact.confidence;
-                search_result.importance = fact.importance;
-                search_result.valid_at = fact.valid_at;
-                updated_at_by_fact.insert(fact.id, fact.updated_at);
-            }
+            let Some(fact) = fact else {
+                continue;
+            };
 
-            results.push(search_result);
+            let vector_result = vector_by_fact.get(&fact_id);
+            let semantic_score = vector_result.map(|result| result.score).unwrap_or(0.0);
+            let content = vector_result
+                .map(|result| result.content.clone())
+                .unwrap_or_else(|| fact.content.clone());
+            let metadata = vector_result
+                .map(|result| result.metadata.clone())
+                .unwrap_or_else(|| fact.metadata.clone());
+
+            let weighted = weighted_score_for(
+                semantic_score,
+                fact.importance,
+                fact.confidence,
+                Some(fact.updated_at),
+                &fact.memory_type,
+                now,
+                &self.ranking_config,
+            );
+
+            scored.push((
+                MemorySearchResult {
+                    fact_id: fact.id,
+                    content,
+                    memory_type: fact.memory_type,
+                    score: rrf_score,
+                    confidence: fact.confidence,
+                    importance: fact.importance,
+                    valid_at: fact.valid_at,
+                    metadata,
+                },
+                rrf_score,
+                weighted,
+                fact.updated_at,
+            ));
         }
 
-        apply_ranking(
-            &mut results,
-            |fact_id| updated_at_by_fact.get(&fact_id).copied(),
-            Utc::now(),
-            &self.ranking_config,
-        );
+        scored.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(Ordering::Equal)
+                .then(
+                    right
+                        .2
+                        .partial_cmp(&left.2)
+                        .unwrap_or(Ordering::Equal),
+                )
+                .then(right.3.cmp(&left.3))
+                .then_with(|| left.0.fact_id.cmp(&right.0.fact_id))
+        });
+        scored.truncate(limit);
+
+        let results = scored
+            .into_iter()
+            .map(|(mut result, rrf_score, _, _)| {
+                result.score = rrf_score;
+                result
+            })
+            .collect();
 
         Ok(SearchMemoryOutput { results })
     }
@@ -992,6 +1088,11 @@ fn normalize_search_limit(limit: usize) -> MemcoreResult<usize> {
     }
 
     Ok(limit)
+}
+
+/// Per-source retrieval limit before RRF fusion (2× final limit, capped at max search limit).
+fn internal_search_limit(limit: usize) -> usize {
+    limit.saturating_mul(2).min(types::MAX_SEARCH_LIMIT)
 }
 
 fn normalize_memory_event_list_limit(limit: usize) -> MemcoreResult<usize> {

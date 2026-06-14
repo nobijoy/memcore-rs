@@ -41,7 +41,10 @@ pub use import::{
     ImportMode, ImportUserDataInput, ImportUserDataOutput, ImportValidationIssue,
     ImportValidationSummary,
 };
-pub use ranking::{apply_ranking, clamp01, freshness_score, memory_type_boost, MemoryRanker, RankingConfig};
+pub use ranking::{
+    apply_ranking, clamp01, freshness_score, memory_type_boost, reciprocal_rank_fusion,
+    weighted_score_for, MemoryRanker, RankedCandidate, RankingConfig, RankingSource, RrfConfig,
+};
 pub use retention::{
     ApplyRetentionInput, ApplyRetentionOutput, RetentionPolicy,
 };

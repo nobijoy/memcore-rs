@@ -1,13 +1,38 @@
+mod rrf;
 mod scorer;
 mod types;
 
 use chrono::{DateTime, Utc};
 use std::cmp::Ordering;
 
-use crate::MemorySearchResult;
+use crate::{MemorySearchResult, MemoryType};
 
+pub use rrf::{reciprocal_rank_fusion, RankedCandidate, RankingSource, RrfConfig};
 pub use scorer::{clamp01, freshness_score, memory_type_boost, MemoryRanker};
 pub use types::RankingConfig;
+
+/// Computes the weighted metadata ranking score for a search hit.
+pub fn weighted_score_for(
+    semantic_score: f32,
+    importance: f32,
+    confidence: f32,
+    updated_at: Option<DateTime<Utc>>,
+    memory_type: &MemoryType,
+    now: DateTime<Utc>,
+    config: &RankingConfig,
+) -> f32 {
+    let timestamp = updated_at.unwrap_or(now);
+    let fresh = freshness_score(timestamp, now);
+    let type_boost = memory_type_boost(memory_type);
+    MemoryRanker::score(
+        semantic_score,
+        importance,
+        confidence,
+        fresh,
+        type_boost,
+        config,
+    )
+}
 
 /// Applies weighted ranking to search results and sorts by final score descending.
 ///
@@ -24,16 +49,13 @@ pub fn apply_ranking(
 ) {
     for result in results.iter_mut() {
         let semantic_score = clamp01(result.score);
-        let timestamp = updated_at_for(result.fact_id).unwrap_or(now);
-        let fresh = freshness_score(timestamp, now);
-        let type_boost = memory_type_boost(&result.memory_type);
-
-        result.score = MemoryRanker::score(
+        result.score = weighted_score_for(
             semantic_score,
             result.importance,
             result.confidence,
-            fresh,
-            type_boost,
+            updated_at_for(result.fact_id),
+            &result.memory_type,
+            now,
             config,
         );
     }
