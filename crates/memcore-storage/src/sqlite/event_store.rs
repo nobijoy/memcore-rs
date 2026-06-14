@@ -171,6 +171,16 @@ impl MemoryEventStore for SqliteMemoryEventStore {
             builder.push_bind(memory_event_operation_to_str(operation));
         }
 
+        if let Some(created_after) = query.created_after {
+            builder.push(" AND created_at >= ");
+            builder.push_bind(datetime_to_str(created_after));
+        }
+
+        if let Some(created_before) = query.created_before {
+            builder.push(" AND created_at < ");
+            builder.push_bind(datetime_to_str(created_before));
+        }
+
         builder.push(" ORDER BY created_at DESC LIMIT ");
         builder.push_bind(i64::try_from(limit).map_err(|error| {
             storage_error("event list limit out of range for sqlite", error)
@@ -210,6 +220,16 @@ impl MemoryEventStore for SqliteMemoryEventStore {
         if let Some(operation) = query.operation {
             builder.push(" AND operation = ");
             builder.push_bind(memory_event_operation_to_str(operation));
+        }
+
+        if let Some(created_after) = query.created_after {
+            builder.push(" AND created_at >= ");
+            builder.push_bind(datetime_to_str(created_after));
+        }
+
+        if let Some(created_before) = query.created_before {
+            builder.push(" AND created_at < ");
+            builder.push_bind(datetime_to_str(created_before));
         }
 
         builder.push(" ORDER BY created_at DESC LIMIT ");
@@ -700,6 +720,8 @@ mod tests {
                 user_id: Some("user_a".to_string()),
                 fact_id: None,
                 operation: None,
+                created_after: None,
+                created_before: None,
                 limit: 10,
                 cursor: None,
             })
@@ -707,5 +729,116 @@ mod tests {
             .expect("list by user");
         assert_eq!(user_a.len(), 1);
         assert_eq!(user_a[0].fact_id, Some(fact_id));
+    }
+
+    async fn record_event_at(
+        store: &SqliteMemoryEventStore,
+        tenant: &TenantContext,
+        org_id: &str,
+        user_id: &str,
+        created_at: chrono::DateTime<Utc>,
+    ) {
+        let mut event = sample_event(
+            org_id,
+            user_id,
+            None,
+            MemoryEventOperation::Add,
+            json!({}),
+        );
+        event.created_at = created_at;
+        store
+            .record_event(tenant, event)
+            .await
+            .expect("record");
+    }
+
+    #[tokio::test]
+    async fn list_events_filters_by_created_after() {
+        let store = test_store().await;
+        let tenant = tenant("org_date", "user_a");
+        let jan = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+        let mar = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+
+        record_event_at(&store, &tenant, "org_date", "user_a", jan).await;
+        record_event_at(&store, &tenant, "org_date", "user_a", mar).await;
+
+        let mut query = MemoryEventQuery::new(tenant, 10);
+        query.created_after = Some(Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap());
+
+        let listed = store.list_events(query).await.expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].created_at, mar);
+    }
+
+    #[tokio::test]
+    async fn list_events_filters_by_created_before() {
+        let store = test_store().await;
+        let tenant = tenant("org_date", "user_a");
+        let jan = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+        let mar = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+
+        record_event_at(&store, &tenant, "org_date", "user_a", jan).await;
+        record_event_at(&store, &tenant, "org_date", "user_a", mar).await;
+
+        let mut query = MemoryEventQuery::new(tenant, 10);
+        query.created_before = Some(Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap());
+
+        let listed = store.list_events(query).await.expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].created_at, jan);
+    }
+
+    #[tokio::test]
+    async fn list_events_by_org_filters_by_date_range() {
+        use memcore_core::ports::OrgMemoryEventQuery;
+
+        let store = test_store().await;
+        let tenant_a = tenant("org_range", "user_a");
+        let tenant_b = tenant("org_range", "user_b");
+        let other_org = tenant("org_other", "user_x");
+        let early = Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap();
+        let mid = Utc.with_ymd_and_hms(2026, 3, 10, 0, 0, 0).unwrap();
+        let late = Utc.with_ymd_and_hms(2026, 5, 10, 0, 0, 0).unwrap();
+
+        record_event_at(&store, &tenant_a, "org_range", "user_a", early).await;
+        record_event_at(&store, &tenant_a, "org_range", "user_a", mid).await;
+        record_event_at(&store, &other_org, "org_other", "user_x", mid).await;
+        record_event_at(&store, &tenant_b, "org_range", "user_b", late).await;
+
+        let listed = store
+            .list_events_by_org(OrgMemoryEventQuery {
+                org_id: "org_range".to_string(),
+                user_id: None,
+                fact_id: None,
+                operation: None,
+                created_after: Some(Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()),
+                created_before: Some(Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap()),
+                limit: 10,
+                cursor: None,
+            })
+            .await
+            .expect("list");
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].created_at, mid);
+        assert_eq!(listed[0].user_id, "user_a");
+    }
+
+    #[tokio::test]
+    async fn date_filter_does_not_leak_other_user_events() {
+        let store = test_store().await;
+        let tenant_a = tenant("org_user_date", "user_a");
+        let tenant_b = tenant("org_user_date", "user_b");
+        let ts = Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap();
+
+        record_event_at(&store, &tenant_a, "org_user_date", "user_a", ts).await;
+        record_event_at(&store, &tenant_b, "org_user_date", "user_b", ts).await;
+
+        let mut query = MemoryEventQuery::new(tenant_a, 10);
+        query.created_after = Some(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
+
+        let listed = store.list_events(query).await.expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].user_id, "user_a");
     }
 }

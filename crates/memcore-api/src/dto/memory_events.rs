@@ -16,6 +16,8 @@ pub fn default_list_memory_events_limit() -> usize {
 pub struct ListMemoryEventsQuery {
     pub operation: Option<String>,
     pub fact_id: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
     #[serde(default = "default_list_memory_events_limit")]
     pub limit: usize,
     pub cursor: Option<String>,
@@ -100,5 +102,74 @@ pub fn parse_memory_event_operation_label(label: &str) -> Result<MemoryEventOper
         _ => Err(MemcoreError::ValidationError(
             "invalid operation".to_string(),
         )),
+    }
+}
+
+pub fn parse_optional_rfc3339_timestamp(
+    value: Option<&String>,
+    field_name: &str,
+) -> Result<Option<DateTime<Utc>>, MemcoreError> {
+    match value {
+        None => Ok(None),
+        Some(raw) => {
+            let parsed = DateTime::parse_from_rfc3339(raw.trim()).map_err(|_| {
+                MemcoreError::ValidationError(format!("invalid {field_name} timestamp"))
+            })?;
+            Ok(Some(parsed.with_timezone(&Utc)))
+        }
+    }
+}
+
+pub fn parse_event_date_filters(
+    created_after: Option<&String>,
+    created_before: Option<&String>,
+) -> Result<(Option<DateTime<Utc>>, Option<DateTime<Utc>>), MemcoreError> {
+    let created_after = parse_optional_rfc3339_timestamp(created_after, "created_after")?;
+    let created_before = parse_optional_rfc3339_timestamp(created_before, "created_before")?;
+    memcore_core::validate_event_date_range(created_after, created_before)?;
+    Ok((created_after, created_before))
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::*;
+
+    #[test]
+    fn parse_created_after_accepts_rfc3339() {
+        let (after, before) = parse_event_date_filters(
+            Some(&"2026-01-01T00:00:00Z".to_string()),
+            None,
+        )
+        .expect("parse");
+        assert!(after.is_some());
+        assert!(before.is_none());
+    }
+
+    #[test]
+    fn invalid_created_before_returns_validation_error() {
+        let error = parse_event_date_filters(
+            None,
+            Some(&"not-a-timestamp".to_string()),
+        )
+        .expect_err("invalid");
+        assert_eq!(
+            error,
+            MemcoreError::ValidationError("invalid created_before timestamp".to_string())
+        );
+    }
+
+    #[test]
+    fn created_after_must_be_earlier_than_created_before() {
+        let error = parse_event_date_filters(
+            Some(&"2026-06-01T00:00:00Z".to_string()),
+            Some(&"2026-01-01T00:00:00Z".to_string()),
+        )
+        .expect_err("invalid range");
+        assert_eq!(
+            error,
+            MemcoreError::ValidationError(
+                "created_after must be earlier than created_before".to_string()
+            )
+        );
     }
 }

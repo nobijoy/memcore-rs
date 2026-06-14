@@ -46,6 +46,8 @@ pub struct SearchOrgMemoryEventsInput {
     pub user_id: Option<String>,
     pub fact_id: Option<uuid::Uuid>,
     pub operation: Option<crate::MemoryEventOperation>,
+    pub created_after: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_before: Option<chrono::DateTime<chrono::Utc>>,
     pub limit: usize,
     pub cursor: Option<String>,
 }

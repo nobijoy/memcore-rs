@@ -24,6 +24,7 @@ use crate::admin::{
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, VectorRecord, VectorStore,
+    validate_event_date_range,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
 use crate::lifecycle::{
@@ -495,10 +496,14 @@ impl MemoryEngine {
             });
         };
 
+        validate_event_date_range(input.created_after, input.created_before)?;
+
         let mut query = OrgMemoryEventQuery::new(input.org_id, limit);
         query.user_id = input.user_id;
         query.fact_id = input.fact_id;
         query.operation = input.operation;
+        query.created_after = input.created_after;
+        query.created_before = input.created_before;
         query.cursor = input.cursor;
 
         let events = event_store.list_events_by_org(query).await?;
@@ -709,9 +714,13 @@ impl MemoryEngine {
             });
         };
 
+        validate_event_date_range(input.created_after, input.created_before)?;
+
         let mut query = MemoryEventQuery::new(input.tenant, limit);
         query.fact_id = input.fact_id;
         query.operation = input.operation;
+        query.created_after = input.created_after;
+        query.created_before = input.created_before;
         query.cursor = input.cursor;
 
         let events = event_store.list_events(query).await?;

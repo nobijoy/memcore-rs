@@ -153,6 +153,16 @@ impl MemoryEventStore for PostgresMemoryEventStore {
             builder.push_bind(memory_event_operation_to_str(operation));
         }
 
+        if let Some(created_after) = query.created_after {
+            builder.push(" AND created_at >= ");
+            builder.push_bind(created_after);
+        }
+
+        if let Some(created_before) = query.created_before {
+            builder.push(" AND created_at < ");
+            builder.push_bind(created_before);
+        }
+
         builder.push(" ORDER BY created_at DESC LIMIT ");
         builder.push_bind(i64::try_from(limit).map_err(|error| {
             storage_error("event list limit out of range for postgres", error)
@@ -192,6 +202,16 @@ impl MemoryEventStore for PostgresMemoryEventStore {
         if let Some(operation) = query.operation {
             builder.push(" AND operation = ");
             builder.push_bind(memory_event_operation_to_str(operation));
+        }
+
+        if let Some(created_after) = query.created_after {
+            builder.push(" AND created_at >= ");
+            builder.push_bind(created_after);
+        }
+
+        if let Some(created_before) = query.created_before {
+            builder.push(" AND created_at < ");
+            builder.push_bind(created_before);
         }
 
         builder.push(" ORDER BY created_at DESC LIMIT ");

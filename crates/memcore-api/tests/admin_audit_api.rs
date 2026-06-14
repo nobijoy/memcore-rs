@@ -480,3 +480,118 @@ async fn admin_audit_cursor_query_param_is_accepted() {
     assert_eq!(status, StatusCode::OK);
     assert!(json["next_cursor"].is_null());
 }
+
+#[tokio::test]
+async fn admin_audit_accepts_created_after() {
+    let app = dev_app();
+    seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, None).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri("created_after=2020-01-01T00:00:00Z"),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn admin_audit_accepts_created_before() {
+    let app = dev_app();
+    seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, None).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri("created_before=2099-01-01T00:00:00Z"),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn admin_audit_accepts_both_date_filters() {
+    let app = dev_app();
+    seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, None).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri(
+                "created_after=2020-01-01T00:00:00Z&created_before=2099-01-01T00:00:00Z",
+            ),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn admin_audit_invalid_created_after_returns_validation_error() {
+    let app = dev_app();
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri("created_after=not-valid"),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "invalid created_after timestamp");
+}
+
+#[tokio::test]
+async fn admin_audit_invalid_created_before_returns_validation_error() {
+    let app = dev_app();
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri("created_before=not-valid"),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "invalid created_before timestamp");
+}
+
+#[tokio::test]
+async fn admin_audit_invalid_date_range_returns_validation_error() {
+    let app = dev_app();
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &admin_audit_uri(
+                "created_after=2026-06-01T00:00:00Z&created_before=2026-01-01T00:00:00Z",
+            ),
+            Some(ORG_A),
+            Some(DEV_API_KEY),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        json["error"]["message"],
+        "created_after must be earlier than created_before"
+    );
+}

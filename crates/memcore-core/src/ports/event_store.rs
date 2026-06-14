@@ -16,6 +16,8 @@ pub struct MemoryEventQuery {
     pub tenant: TenantContext,
     pub fact_id: Option<Uuid>,
     pub operation: Option<MemoryEventOperation>,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
     pub limit: usize,
     pub cursor: Option<String>,
 }
@@ -26,10 +28,30 @@ impl MemoryEventQuery {
             tenant,
             fact_id: None,
             operation: None,
+            created_after: None,
+            created_before: None,
             limit,
             cursor: None,
         }
     }
+}
+
+/// Validates that `created_after` is strictly earlier than `created_before` when both are set.
+pub fn validate_event_date_range(
+    created_after: Option<DateTime<Utc>>,
+    created_before: Option<DateTime<Utc>>,
+) -> memcore_common::MemcoreResult<()> {
+    use memcore_common::MemcoreError;
+
+    if let (Some(after), Some(before)) = (created_after, created_before) {
+        if after >= before {
+            return Err(MemcoreError::ValidationError(
+                "created_after must be earlier than created_before".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +60,8 @@ pub struct OrgMemoryEventQuery {
     pub user_id: Option<String>,
     pub fact_id: Option<Uuid>,
     pub operation: Option<MemoryEventOperation>,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
     pub limit: usize,
     pub cursor: Option<String>,
 }
@@ -49,6 +73,8 @@ impl OrgMemoryEventQuery {
             user_id: None,
             fact_id: None,
             operation: None,
+            created_after: None,
+            created_before: None,
             limit,
             cursor: None,
         }

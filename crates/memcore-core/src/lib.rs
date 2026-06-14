@@ -47,6 +47,6 @@ pub use ports::{
     ApiKeyStore, EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery,
     FactStore, LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
     OrgUserSummary, OrgMemoryEventQuery, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
-    VectorStore,
+    VectorStore, validate_event_date_range,
     DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };

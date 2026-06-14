@@ -76,6 +76,8 @@ async fn org_audit_search_returns_events_for_current_org() {
             user_id: None,
             fact_id: None,
             operation: None,
+            created_after: None,
+            created_before: None,
             limit: 50,
             cursor: None,
         })
@@ -112,6 +114,8 @@ async fn org_audit_search_excludes_other_org() {
             user_id: None,
             fact_id: None,
             operation: None,
+            created_after: None,
+            created_before: None,
             limit: 50,
             cursor: None,
         })
@@ -149,6 +153,8 @@ async fn org_audit_search_user_id_filter_works() {
             user_id: Some("user_a".to_string()),
             fact_id: None,
             operation: None,
+            created_after: None,
+            created_before: None,
             limit: 50,
             cursor: None,
         })
@@ -187,6 +193,8 @@ async fn org_audit_search_fact_id_filter_works() {
             user_id: None,
             fact_id: Some(fact_id),
             operation: None,
+            created_after: None,
+            created_before: None,
             limit: 50,
             cursor: None,
         })
@@ -224,6 +232,8 @@ async fn org_audit_search_operation_filter_works() {
             user_id: None,
             fact_id: None,
             operation: Some(MemoryEventOperation::Delete),
+            created_after: None,
+            created_before: None,
             limit: 50,
             cursor: None,
         })
@@ -255,6 +265,8 @@ async fn org_audit_search_respects_limit() {
             user_id: None,
             fact_id: None,
             operation: None,
+            created_after: None,
+            created_before: None,
             limit: 2,
             cursor: None,
         })
@@ -274,6 +286,8 @@ async fn org_audit_search_rejects_limit_above_max() {
             user_id: None,
             fact_id: None,
             operation: None,
+            created_after: None,
+            created_before: None,
             limit: memcore_core::MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT + 1,
             cursor: None,
         })

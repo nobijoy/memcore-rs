@@ -124,6 +124,8 @@ pub struct ListMemoryEventsInput {
     pub tenant: TenantContext,
     pub fact_id: Option<Uuid>,
     pub operation: Option<crate::MemoryEventOperation>,
+    pub created_after: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_before: Option<chrono::DateTime<chrono::Utc>>,
     pub limit: usize,
     pub cursor: Option<String>,
 }

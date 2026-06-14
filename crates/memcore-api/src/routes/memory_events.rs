@@ -5,7 +5,8 @@ use memcore_core::{ApiKeyScope, ListMemoryEventsInput, MAX_LIST_MEMORY_EVENTS_LI
 use uuid::Uuid;
 
 use crate::dto::{
-    parse_memory_event_operation_label, ListMemoryEventsQuery, ListMemoryEventsResponse,
+    parse_event_date_filters, parse_memory_event_operation_label, ListMemoryEventsQuery,
+    ListMemoryEventsResponse,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_scope, ApiError};
@@ -34,6 +35,11 @@ pub async fn list_user_memory_events(
         .map(parse_fact_id)
         .transpose()?;
 
+    let (created_after, created_before) = parse_event_date_filters(
+        query.created_after.as_ref(),
+        query.created_before.as_ref(),
+    )?;
+
     if query.limit == 0 {
         return Err(MemcoreError::ValidationError(
             "limit must be greater than 0".to_string(),
@@ -56,6 +62,8 @@ pub async fn list_user_memory_events(
             tenant,
             fact_id,
             operation,
+            created_after,
+            created_before,
             limit: query.limit,
             cursor: query.cursor,
         })

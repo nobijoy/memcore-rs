@@ -220,6 +220,8 @@ async fn dry_run_counts_old_events_without_deleting() {
             tenant,
             operation: None,
             fact_id: None,
+            created_after: None,
+            created_before: None,
             limit: 20,
             cursor: None,
         })
@@ -262,6 +264,8 @@ async fn apply_deletes_old_events() {
             tenant,
             operation: None,
             fact_id: None,
+            created_after: None,
+            created_before: None,
             limit: 20,
             cursor: None,
         })

@@ -5,9 +5,10 @@ use memcore_core::{ApiKeyScope, ListOrgUsersInput, SearchOrgMemoryEventsInput};
 use uuid::Uuid;
 
 use crate::dto::{
-    parse_memory_event_operation_label, ListOrgUsersQuery, ListOrgUsersResponse,
-    OrgSummaryResponse, SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse,
-    org_summary_input, validate_list_org_users_limit, validate_search_org_memory_events_limit,
+    parse_event_date_filters, parse_memory_event_operation_label, ListOrgUsersQuery,
+    ListOrgUsersResponse, OrgSummaryResponse, SearchOrgMemoryEventsQuery,
+    SearchOrgMemoryEventsResponse, org_summary_input, validate_list_org_users_limit,
+    validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_any_scope, ApiError};
@@ -82,11 +83,18 @@ pub async fn search_org_memory_events(
         .map(parse_fact_id)
         .transpose()?;
 
+    let (created_after, created_before) = parse_event_date_filters(
+        query.created_after.as_ref(),
+        query.created_before.as_ref(),
+    )?;
+
     let input = SearchOrgMemoryEventsInput {
         org_id: organization.org_id,
         user_id: query.user_id,
         fact_id,
         operation,
+        created_after,
+        created_before,
         limit: query.limit,
         cursor: query.cursor,
     };

@@ -442,3 +442,121 @@ async fn sqlite_backend_returns_persisted_audit_events_via_api() {
     assert!(json["events"].as_array().unwrap().len() >= 1);
     assert_eq!(json["events"][0]["operation"], "Add");
 }
+
+#[tokio::test]
+async fn user_memory_events_accepts_created_after() {
+    let app = test_app();
+    seed_memory_for_user(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(USER_A, "created_after=2020-01-01T00:00:00Z"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn user_memory_events_accepts_created_before() {
+    let app = test_app();
+    seed_memory_for_user(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(USER_A, "created_before=2099-01-01T00:00:00Z"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn user_memory_events_accepts_both_date_filters() {
+    let app = test_app();
+    seed_memory_for_user(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
+
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(
+                USER_A,
+                "created_after=2020-01-01T00:00:00Z&created_before=2099-01-01T00:00:00Z",
+            ),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(!json["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn user_memory_events_invalid_created_after_returns_validation_error() {
+    let app = test_app();
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(USER_A, "created_after=not-a-timestamp"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(json["error"]["message"], "invalid created_after timestamp");
+}
+
+#[tokio::test]
+async fn user_memory_events_invalid_created_before_returns_validation_error() {
+    let app = test_app();
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(USER_A, "created_before=bad"),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "invalid created_before timestamp");
+}
+
+#[tokio::test]
+async fn user_memory_events_invalid_date_range_returns_validation_error() {
+    let app = test_app();
+    let (status, json) = response_parts(
+        app,
+        get_request(
+            &memory_events_uri(
+                USER_A,
+                "created_after=2026-06-01T00:00:00Z&created_before=2026-01-01T00:00:00Z",
+            ),
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        json["error"]["message"],
+        "created_after must be earlier than created_before"
+    );
+}

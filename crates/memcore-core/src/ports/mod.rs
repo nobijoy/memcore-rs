@@ -5,8 +5,8 @@ pub mod storage;
 
 pub use api_key_store::ApiKeyStore;
 pub use event_store::{
-    MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
-    MAX_MEMORY_EVENT_LIST_LIMIT,
+    validate_event_date_range, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery,
+    DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };
 pub use provider::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, LlmProvider, MemoryMessage,

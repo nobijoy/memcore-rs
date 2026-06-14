@@ -41,6 +41,6 @@ pub use memories::{
     SearchMemoryResultResponse,
 };
 pub use memory_events::{
-    parse_memory_event_operation_label, ListMemoryEventsQuery, ListMemoryEventsResponse,
-    MemoryEventItemResponse, MemoryEventOperationResponse,
+    parse_event_date_filters, parse_memory_event_operation_label, ListMemoryEventsQuery,
+    ListMemoryEventsResponse, MemoryEventItemResponse, MemoryEventOperationResponse,
 };

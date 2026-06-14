@@ -25,6 +25,8 @@ pub struct SearchOrgMemoryEventsQuery {
     pub user_id: Option<String>,
     pub fact_id: Option<String>,
     pub operation: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
     #[serde(default = "default_search_org_memory_events_limit")]
     pub limit: usize,
     pub cursor: Option<String>,

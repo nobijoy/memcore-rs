@@ -475,6 +475,16 @@ impl MemoryEventStore for MockMemoryEventStore {
                     .operation
                     .is_none_or(|operation| event.operation == operation)
             })
+            .filter(|event| {
+                query
+                    .created_after
+                    .is_none_or(|created_after| event.created_at >= created_after)
+            })
+            .filter(|event| {
+                query
+                    .created_before
+                    .is_none_or(|created_before| event.created_at < created_before)
+            })
             .cloned()
             .collect();
 
@@ -509,6 +519,16 @@ impl MemoryEventStore for MockMemoryEventStore {
                 query
                     .operation
                     .is_none_or(|operation| event.operation == operation)
+            })
+            .filter(|event| {
+                query
+                    .created_after
+                    .is_none_or(|created_after| event.created_at >= created_after)
+            })
+            .filter(|event| {
+                query
+                    .created_before
+                    .is_none_or(|created_before| event.created_at < created_before)
             })
             .cloned()
             .collect();
