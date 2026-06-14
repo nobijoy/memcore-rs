@@ -283,3 +283,65 @@ async fn no_memories_found_returns_empty_context_message() {
     assert_eq!(json["context"], EMPTY_CONTEXT_MESSAGE);
     assert_eq!(json["memories"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn context_lists_higher_ranked_memory_before_lower_ranked() {
+    let app = test_app();
+    let first_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "First sqlite integration memory alpha bravo charlie delta" }}],
+          "metadata": {{}}
+        }}"#
+    );
+    let second_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Second distinct sqlite integration memory foxtrot golf hotel india" }}],
+          "metadata": {{}}
+        }}"#
+    );
+
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &first_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &second_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "integration memory",
+          "max_memories": 10
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let context = json["context"].as_str().expect("context");
+    let memories = json["memories"].as_array().expect("memories");
+    assert!(memories.len() >= 2);
+
+    let first_content = memories[0]["content"].as_str().unwrap();
+    let first_pos = context.find(first_content).expect("first in context");
+    let second_content = memories[1]["content"].as_str().unwrap();
+    let second_pos = context.find(second_content).expect("second in context");
+    assert!(first_pos < second_pos);
+}

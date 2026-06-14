@@ -120,7 +120,68 @@ async fn search_memory_response_includes_results() {
     assert_eq!(results[0]["content"], MEMORY_CONTENT);
     assert_eq!(results[0]["memory_type"], "Conversation");
     assert!(results[0]["score"].is_number());
+    assert!(results[0]["score"].as_f64().unwrap() > 0.0);
     assert!(results[0]["metadata"].is_object());
+}
+
+#[tokio::test]
+async fn search_results_are_sorted_by_score_descending() {
+    let app = test_app();
+    let first_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "First sqlite integration memory alpha bravo charlie delta" }}],
+          "metadata": {{}}
+        }}"#
+    );
+    let second_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Second distinct sqlite integration memory foxtrot golf hotel india" }}],
+          "metadata": {{}}
+        }}"#
+    );
+
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &first_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &second_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+
+    let search_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "integration memory",
+          "limit": 10
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/memories/search", &search_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let results = json["results"].as_array().expect("results");
+    assert!(results.len() >= 2);
+    for window in results.windows(2) {
+        let left = window[0]["score"].as_f64().expect("score");
+        let right = window[1]["score"].as_f64().expect("score");
+        assert!(left >= right);
+    }
 }
 
 #[tokio::test]

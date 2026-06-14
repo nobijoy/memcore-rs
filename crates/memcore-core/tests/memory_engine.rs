@@ -384,7 +384,10 @@ async fn search_memory_returns_vector_matches_after_add() {
 
     assert_eq!(output.results.len(), 1);
     assert_eq!(output.results[0].content, content);
-    assert!(output.results[0].score > 0.99);
+    assert!(output.results[0].score > 0.0);
+    assert!(output.results[0].score <= 1.0);
+    assert!(output.results[0].importance > 0.0);
+    assert!(output.results[0].confidence > 0.0);
 }
 
 #[tokio::test]

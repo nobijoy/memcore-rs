@@ -15,6 +15,7 @@ use crate::import::{
     collect_import_validation, ImportMode, ImportUserDataInput, ImportUserDataOutput,
     ImportValidationSummary, resolve_import_fact_id,
 };
+use crate::ranking::{apply_ranking, RankingConfig};
 use crate::retention::{ApplyRetentionInput, ApplyRetentionOutput};
 use crate::admin::{
     ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
@@ -60,6 +61,7 @@ pub struct MemoryEngine {
     min_importance: f32,
     enable_pii_redaction: bool,
     embedding_dedup_config: EmbeddingDeduplicationConfig,
+    ranking_config: RankingConfig,
 }
 
 impl MemoryEngine {
@@ -80,6 +82,7 @@ impl MemoryEngine {
             min_importance: types::DEFAULT_MIN_IMPORTANCE,
             enable_pii_redaction: false,
             embedding_dedup_config: EmbeddingDeduplicationConfig::default(),
+            ranking_config: RankingConfig::default(),
         }
     }
 
@@ -110,6 +113,11 @@ impl MemoryEngine {
 
     pub fn with_embedding_dedup_config(mut self, config: EmbeddingDeduplicationConfig) -> Self {
         self.embedding_dedup_config = config;
+        self
+    }
+
+    pub fn with_ranking_config(mut self, config: RankingConfig) -> Self {
+        self.ranking_config = config;
         self
     }
 
@@ -335,12 +343,15 @@ impl MemoryEngine {
             .await?;
 
         let mut results = Vec::with_capacity(vector_results.len());
+        let mut updated_at_by_fact = std::collections::HashMap::with_capacity(vector_results.len());
+
         for vector_result in vector_results {
+            let semantic_score = vector_result.score;
             let mut search_result = MemorySearchResult {
                 fact_id: vector_result.fact_id,
                 content: vector_result.content,
                 memory_type: vector_result.memory_type,
-                score: vector_result.score,
+                score: semantic_score,
                 confidence: 0.0,
                 importance: 0.0,
                 valid_at: None,
@@ -355,10 +366,18 @@ impl MemoryEngine {
                 search_result.confidence = fact.confidence;
                 search_result.importance = fact.importance;
                 search_result.valid_at = fact.valid_at;
+                updated_at_by_fact.insert(fact.id, fact.updated_at);
             }
 
             results.push(search_result);
         }
+
+        apply_ranking(
+            &mut results,
+            |fact_id| updated_at_by_fact.get(&fact_id).copied(),
+            Utc::now(),
+            &self.ranking_config,
+        );
 
         Ok(SearchMemoryOutput { results })
     }

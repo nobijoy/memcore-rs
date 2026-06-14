@@ -7,6 +7,7 @@ pub mod importance;
 pub mod pagination;
 pub mod export;
 pub mod import;
+pub mod ranking;
 pub mod retention;
 pub mod lifecycle;
 pub mod models;
@@ -40,6 +41,7 @@ pub use import::{
     ImportMode, ImportUserDataInput, ImportUserDataOutput, ImportValidationIssue,
     ImportValidationSummary,
 };
+pub use ranking::{apply_ranking, clamp01, freshness_score, memory_type_boost, MemoryRanker, RankingConfig};
 pub use retention::{
     ApplyRetentionInput, ApplyRetentionOutput, RetentionPolicy,
 };
