@@ -33,3 +33,25 @@ pub struct ListOrgUsersOutput {
     pub users: Vec<OrgUserSummary>,
     pub next_cursor: Option<String>,
 }
+
+/// Default page size for admin org memory event search.
+pub const DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT: usize = 50;
+
+/// Maximum page size for admin org memory event search.
+pub const MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchOrgMemoryEventsInput {
+    pub org_id: String,
+    pub user_id: Option<String>,
+    pub fact_id: Option<uuid::Uuid>,
+    pub operation: Option<crate::MemoryEventOperation>,
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchOrgMemoryEventsOutput {
+    pub events: Vec<crate::MemoryEvent>,
+    pub next_cursor: Option<String>,
+}

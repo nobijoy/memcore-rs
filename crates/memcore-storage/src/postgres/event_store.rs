@@ -6,7 +6,7 @@ use sqlx::postgres::PgPool;
 use sqlx::{Postgres, QueryBuilder, Row};
 
 use memcore_core::ports::{
-    MemoryEventQuery, MemoryEventStore, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
+    MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
     MAX_MEMORY_EVENT_LIST_LIMIT,
 };
 
@@ -163,6 +163,47 @@ impl MemoryEventStore for PostgresMemoryEventStore {
             .fetch_all(&self.pool)
             .await
             .map_err(|error| storage_error("failed to list memory events", error))?;
+
+        rows.iter().map(parse_event_row).collect()
+    }
+
+    async fn list_events_by_org(
+        &self,
+        query: OrgMemoryEventQuery,
+    ) -> MemcoreResult<Vec<MemoryEvent>> {
+        let limit = normalize_event_list_limit(query.limit)?;
+        let _ = query.cursor;
+
+        let mut builder = QueryBuilder::<Postgres>::new(
+            "SELECT id, org_id, user_id, fact_id, operation, input_text, previous_content, new_content, provider_name, model_name, metadata, created_at FROM memory_events WHERE org_id = ",
+        );
+        builder.push_bind(query.org_id.clone());
+
+        if let Some(user_id) = &query.user_id {
+            builder.push(" AND user_id = ");
+            builder.push_bind(user_id.clone());
+        }
+
+        if let Some(fact_id) = query.fact_id {
+            builder.push(" AND fact_id = ");
+            builder.push_bind(fact_id);
+        }
+
+        if let Some(operation) = query.operation {
+            builder.push(" AND operation = ");
+            builder.push_bind(memory_event_operation_to_str(operation));
+        }
+
+        builder.push(" ORDER BY created_at DESC LIMIT ");
+        builder.push_bind(i64::try_from(limit).map_err(|error| {
+            storage_error("org event list limit out of range for postgres", error)
+        })?);
+
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| storage_error("failed to list org memory events", error))?;
 
         rows.iter().map(parse_event_row).collect()
     }

@@ -75,6 +75,15 @@ impl MemoryEventStore for FailingMemoryEventStore {
             "audit store unavailable".to_string(),
         ))
     }
+
+    async fn list_events_by_org(
+        &self,
+        _query: memcore_core::ports::OrgMemoryEventQuery,
+    ) -> MemcoreResult<Vec<memcore_core::MemoryEvent>> {
+        Err(MemcoreError::StorageError(
+            "audit store unavailable".to_string(),
+        ))
+    }
 }
 
 #[tokio::test]

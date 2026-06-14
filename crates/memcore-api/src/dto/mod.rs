@@ -8,8 +8,10 @@ pub mod retention;
 pub mod memory_events;
 
 pub use admin::{
-    org_summary_input, validate_list_org_users_limit, ListOrgUsersQuery, ListOrgUsersResponse,
+    org_summary_input, validate_list_org_users_limit, validate_search_org_memory_events_limit,
+    AdminOrgMemoryEventItemResponse, ListOrgUsersQuery, ListOrgUsersResponse,
     OrgSummaryBodyResponse, OrgSummaryResponse, OrgUserSummaryResponse,
+    SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse,
 };
 pub use api_keys::{
     parse_api_key_scope_label, parse_create_api_key_request, ApiKeyItemResponse,

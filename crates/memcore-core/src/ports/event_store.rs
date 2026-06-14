@@ -32,6 +32,29 @@ impl MemoryEventQuery {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrgMemoryEventQuery {
+    pub org_id: String,
+    pub user_id: Option<String>,
+    pub fact_id: Option<Uuid>,
+    pub operation: Option<MemoryEventOperation>,
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+impl OrgMemoryEventQuery {
+    pub fn new(org_id: String, limit: usize) -> Self {
+        Self {
+            org_id,
+            user_id: None,
+            fact_id: None,
+            operation: None,
+            limit,
+            cursor: None,
+        }
+    }
+}
+
 #[async_trait]
 pub trait MemoryEventStore: Send + Sync {
     async fn record_event(
@@ -41,6 +64,13 @@ pub trait MemoryEventStore: Send + Sync {
     ) -> MemcoreResult<MemoryEvent>;
 
     async fn list_events(&self, query: MemoryEventQuery) -> MemcoreResult<Vec<MemoryEvent>>;
+
+    /// Lists memory audit events for an organization with optional filters.
+    /// Cursor pagination is accepted but not implemented yet.
+    async fn list_events_by_org(
+        &self,
+        query: OrgMemoryEventQuery,
+    ) -> MemcoreResult<Vec<MemoryEvent>>;
 
     /// Hard-deletes memory audit events with `created_at` older than `cutoff` for the tenant.
     /// When `dry_run` is true, counts matches without deleting.

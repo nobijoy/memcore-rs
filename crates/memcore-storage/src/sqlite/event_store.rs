@@ -6,7 +6,7 @@ use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::{QueryBuilder, Row, Sqlite};
 
 use memcore_core::ports::{
-    MemoryEventQuery, MemoryEventStore, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
+    MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
     MAX_MEMORY_EVENT_LIST_LIMIT,
 };
 use crate::sqlite::conversions::{
@@ -181,6 +181,47 @@ impl MemoryEventStore for SqliteMemoryEventStore {
             .fetch_all(&self.pool)
             .await
             .map_err(|error| storage_error("failed to list memory events", error))?;
+
+        rows.iter().map(parse_event_row).collect()
+    }
+
+    async fn list_events_by_org(
+        &self,
+        query: OrgMemoryEventQuery,
+    ) -> MemcoreResult<Vec<MemoryEvent>> {
+        let limit = normalize_event_list_limit(query.limit)?;
+        let _ = query.cursor;
+
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT id, org_id, user_id, fact_id, operation, input_text, previous_content, new_content, provider_name, model_name, metadata, created_at FROM memory_events WHERE org_id = ",
+        );
+        builder.push_bind(query.org_id.clone());
+
+        if let Some(user_id) = &query.user_id {
+            builder.push(" AND user_id = ");
+            builder.push_bind(user_id.clone());
+        }
+
+        if let Some(fact_id) = query.fact_id {
+            builder.push(" AND fact_id = ");
+            builder.push_bind(fact_id.to_string());
+        }
+
+        if let Some(operation) = query.operation {
+            builder.push(" AND operation = ");
+            builder.push_bind(memory_event_operation_to_str(operation));
+        }
+
+        builder.push(" ORDER BY created_at DESC LIMIT ");
+        builder.push_bind(i64::try_from(limit).map_err(|error| {
+            storage_error("org event list limit out of range for sqlite", error)
+        })?);
+
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| storage_error("failed to list org memory events", error))?;
 
         rows.iter().map(parse_event_row).collect()
     }
@@ -592,5 +633,79 @@ mod tests {
             .await
             .expect_err("cross-tenant record should fail");
         assert_eq!(error, MemcoreError::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn list_events_by_org_filters_and_scopes() {
+        use memcore_core::ports::OrgMemoryEventQuery;
+
+        let store = test_store().await;
+        let tenant_a = tenant("org_sqlite_audit", "user_a");
+        let tenant_b = tenant("org_sqlite_audit", "user_b");
+        let other_org = tenant("org_other", "user_x");
+        let fact_id = Uuid::new_v4();
+
+        store
+            .record_event(
+                &tenant_a,
+                sample_event(
+                    "org_sqlite_audit",
+                    "user_a",
+                    Some(fact_id),
+                    MemoryEventOperation::Update,
+                    json!({}),
+                ),
+            )
+            .await
+            .expect("record");
+        store
+            .record_event(
+                &tenant_b,
+                sample_event(
+                    "org_sqlite_audit",
+                    "user_b",
+                    None,
+                    MemoryEventOperation::Add,
+                    json!({}),
+                ),
+            )
+            .await
+            .expect("record");
+        store
+            .record_event(
+                &other_org,
+                sample_event(
+                    "org_other",
+                    "user_x",
+                    None,
+                    MemoryEventOperation::Add,
+                    json!({}),
+                ),
+            )
+            .await
+            .expect("record");
+
+        let all = store
+            .list_events_by_org(OrgMemoryEventQuery::new(
+                "org_sqlite_audit".to_string(),
+                10,
+            ))
+            .await
+            .expect("list by org");
+        assert_eq!(all.len(), 2);
+
+        let user_a = store
+            .list_events_by_org(OrgMemoryEventQuery {
+                org_id: "org_sqlite_audit".to_string(),
+                user_id: Some("user_a".to_string()),
+                fact_id: None,
+                operation: None,
+                limit: 10,
+                cursor: None,
+            })
+            .await
+            .expect("list by user");
+        assert_eq!(user_a.len(), 1);
+        assert_eq!(user_a[0].fact_id, Some(fact_id));
     }
 }

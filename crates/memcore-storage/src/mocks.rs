@@ -9,8 +9,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use memcore_core::ports::{
-    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, OrgUserSummary,
-    RetentionPruneResult, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
+    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery,
+    OrgUserSummary, RetentionPruneResult, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
 };
 use memcore_core::{ApiKeyRecord, MemoryEvent};
 
@@ -465,6 +465,41 @@ impl MemoryEventStore for MockMemoryEventStore {
         let mut results: Vec<MemoryEvent> = events
             .iter()
             .filter(|event| event_matches_tenant(event, &query.tenant))
+            .filter(|event| {
+                query
+                    .fact_id
+                    .is_none_or(|fact_id| event.fact_id == Some(fact_id))
+            })
+            .filter(|event| {
+                query
+                    .operation
+                    .is_none_or(|operation| event.operation == operation)
+            })
+            .cloned()
+            .collect();
+
+        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    async fn list_events_by_org(
+        &self,
+        query: OrgMemoryEventQuery,
+    ) -> MemcoreResult<Vec<MemoryEvent>> {
+        let limit = normalize_event_list_limit(query.limit)?;
+        let _ = query.cursor;
+        let events = self.events.read().expect("events lock poisoned");
+
+        let mut results: Vec<MemoryEvent> = events
+            .iter()
+            .filter(|event| event.org_id == query.org_id)
+            .filter(|event| {
+                query
+                    .user_id
+                    .as_ref()
+                    .is_none_or(|user_id| event.user_id == *user_id)
+            })
             .filter(|event| {
                 query
                     .fact_id
@@ -1202,5 +1237,80 @@ mod tests {
             .await
             .expect("list users");
         assert_eq!(users.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn org_audit_mock_list_events_by_org() {
+        use super::MockMemoryEventStore;
+        use memcore_core::MemoryEventOperation;
+        use memcore_core::ports::OrgMemoryEventQuery;
+        use crate::traits::MemoryEventStore;
+
+        let store = MockMemoryEventStore::new();
+        let tenant_a = tenant("org_mock_audit", "user_a");
+        let tenant_b = tenant("org_mock_audit", "user_b");
+        let other_org = tenant("org_other", "user_x");
+        let fact_id = Uuid::new_v4();
+
+        store
+            .record_event(
+                &tenant_a,
+                memcore_core::MemoryEvent::new(
+                    tenant_a.org_id.clone(),
+                    tenant_a.user_id.clone(),
+                    Some(fact_id),
+                    MemoryEventOperation::Update,
+                    None,
+                    None,
+                    None,
+                    None,
+                    serde_json::json!({}),
+                ),
+            )
+            .await
+            .expect("record");
+        store
+            .record_event(
+                &tenant_b,
+                memcore_core::MemoryEvent::new(
+                    tenant_b.org_id.clone(),
+                    tenant_b.user_id.clone(),
+                    None,
+                    MemoryEventOperation::Add,
+                    None,
+                    None,
+                    None,
+                    None,
+                    serde_json::json!({}),
+                ),
+            )
+            .await
+            .expect("record");
+        store
+            .record_event(
+                &other_org,
+                memcore_core::MemoryEvent::new(
+                    other_org.org_id.clone(),
+                    other_org.user_id.clone(),
+                    None,
+                    MemoryEventOperation::Add,
+                    None,
+                    None,
+                    None,
+                    None,
+                    serde_json::json!({}),
+                ),
+            )
+            .await
+            .expect("record");
+
+        let events = store
+            .list_events_by_org(OrgMemoryEventQuery::new(
+                "org_mock_audit".to_string(),
+                10,
+            ))
+            .await
+            .expect("list");
+        assert_eq!(events.len(), 2);
     }
 }

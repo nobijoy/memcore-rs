@@ -34,7 +34,9 @@ pub use retention::{
 };
 pub use admin::{
     ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
-    DEFAULT_LIST_ORG_USERS_LIMIT, MAX_LIST_ORG_USERS_LIMIT,
+    SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
+    DEFAULT_LIST_ORG_USERS_LIMIT, DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
+    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
 };
 pub use models::{
     ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
@@ -44,7 +46,7 @@ pub use privacy::PiiRedactor;
 pub use ports::{
     ApiKeyStore, EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery,
     FactStore, LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
-    OrgUserSummary, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
+    OrgUserSummary, OrgMemoryEventQuery, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
     VectorStore,
     DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };

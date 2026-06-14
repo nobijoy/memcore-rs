@@ -18,11 +18,12 @@ use crate::import::{
 use crate::retention::{ApplyRetentionInput, ApplyRetentionOutput};
 use crate::admin::{
     ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
-    DEFAULT_LIST_ORG_USERS_LIMIT, MAX_LIST_ORG_USERS_LIMIT,
+    SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
+    DEFAULT_LIST_ORG_USERS_LIMIT, MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
 };
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventQuery, MemoryEventStore, VectorRecord, VectorStore,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, VectorRecord, VectorStore,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
 use crate::lifecycle::{
@@ -479,6 +480,35 @@ impl MemoryEngine {
         })
     }
 
+    pub async fn search_org_memory_events(
+        &self,
+        input: SearchOrgMemoryEventsInput,
+    ) -> MemcoreResult<SearchOrgMemoryEventsOutput> {
+        validate_org_id(&input.org_id)?;
+        let limit = normalize_org_memory_events_limit(input.limit)?;
+        let _ = input.cursor;
+
+        let Some(event_store) = &self.event_store else {
+            return Ok(SearchOrgMemoryEventsOutput {
+                events: Vec::new(),
+                next_cursor: None,
+            });
+        };
+
+        let mut query = OrgMemoryEventQuery::new(input.org_id, limit);
+        query.user_id = input.user_id;
+        query.fact_id = input.fact_id;
+        query.operation = input.operation;
+        query.cursor = input.cursor;
+
+        let events = event_store.list_events_by_org(query).await?;
+
+        Ok(SearchOrgMemoryEventsOutput {
+            events,
+            next_cursor: None,
+        })
+    }
+
     pub async fn forget_user(&self, input: ForgetUserInput) -> MemcoreResult<ForgetUserOutput> {
         validate_tenant(&input.tenant)?;
 
@@ -747,6 +777,24 @@ fn normalize_org_users_limit(limit: usize) -> MemcoreResult<usize> {
     }
 
     Ok(normalized)
+}
+
+fn normalize_org_memory_events_limit(limit: usize) -> MemcoreResult<usize> {
+    use memcore_common::MemcoreError;
+
+    if limit == 0 {
+        return Err(MemcoreError::ValidationError(
+            "limit must be greater than 0".to_string(),
+        ));
+    }
+
+    if limit > MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT}"
+        )));
+    }
+
+    Ok(limit)
 }
 
 fn validate_query(query: &str) -> MemcoreResult<()> {

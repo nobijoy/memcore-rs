@@ -1,10 +1,13 @@
 use axum::Json;
 use axum::extract::{Extension, Query, State};
-use memcore_core::{ApiKeyScope, ListOrgUsersInput};
+use memcore_common::MemcoreError;
+use memcore_core::{ApiKeyScope, ListOrgUsersInput, SearchOrgMemoryEventsInput};
+use uuid::Uuid;
 
 use crate::dto::{
-    ListOrgUsersQuery, ListOrgUsersResponse, OrgSummaryResponse, org_summary_input,
-    validate_list_org_users_limit,
+    parse_memory_event_operation_label, ListOrgUsersQuery, ListOrgUsersResponse,
+    OrgSummaryResponse, SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse,
+    org_summary_input, validate_list_org_users_limit, validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_any_scope, ApiError};
@@ -48,4 +51,52 @@ pub async fn list_org_users(
     let output = state.memory_engine.list_org_users(input).await?;
 
     Ok(Json(ListOrgUsersResponse::from(output)))
+}
+
+pub async fn search_org_memory_events(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Query(query): Query<SearchOrgMemoryEventsQuery>,
+) -> Result<Json<SearchOrgMemoryEventsResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[
+            ApiKeyScope::AdminRead,
+            ApiKeyScope::AdminWrite,
+            ApiKeyScope::AuditRead,
+        ],
+    )?;
+
+    validate_search_org_memory_events_limit(query.limit)?;
+
+    let operation = query
+        .operation
+        .as_deref()
+        .map(parse_memory_event_operation_label)
+        .transpose()?;
+
+    let fact_id = query
+        .fact_id
+        .as_deref()
+        .map(parse_fact_id)
+        .transpose()?;
+
+    let input = SearchOrgMemoryEventsInput {
+        org_id: organization.org_id,
+        user_id: query.user_id,
+        fact_id,
+        operation,
+        limit: query.limit,
+        cursor: query.cursor,
+    };
+
+    let output = state.memory_engine.search_org_memory_events(input).await?;
+
+    Ok(Json(SearchOrgMemoryEventsResponse::from(output)))
+}
+
+fn parse_fact_id(value: &str) -> Result<Uuid, MemcoreError> {
+    Uuid::parse_str(value.trim())
+        .map_err(|_| MemcoreError::ValidationError("invalid fact_id".to_string()))
 }

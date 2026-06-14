@@ -67,6 +67,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/v1/admin/org/users",
             get(admin::list_org_users),
         )
+        .route(
+            "/api/v1/admin/org/memory-events",
+            get(admin::search_org_memory_events),
+        )
         .route_layer(from_fn(log_protected_request))
         .route_layer(from_fn_with_state(state.clone(), enforce_rate_limit))
         .route_layer(from_fn(require_organization))

@@ -7,6 +7,7 @@ use crate::dto::{
     CreateApiKeyRequest, CreateApiKeyResponse, DeleteMemoryResponse, ExportUserResponse,
     ApplyRetentionRequest, ApplyRetentionResponse, ForgetUserResponse, ImportUserDataRequest,
     ImportUserDataResponse, ListApiKeysResponse, ListOrgUsersResponse, OrgSummaryResponse,
+    SearchOrgMemoryEventsResponse,
     ListMemoriesResponse, ListMemoryEventsResponse,
     RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
 };
@@ -374,3 +375,28 @@ pub fn get_org_summary() {}
     )
 )]
 pub fn list_org_users() {}
+
+/// Search memory audit events across the organization. Does not return input_text.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/memory-events",
+    tag = "Admin",
+    params(
+        ("user_id" = Option<String>, Query, description = "Filter by user id"),
+        ("fact_id" = Option<String>, Query, description = "Filter by fact UUID"),
+        ("operation" = Option<String>, Query, description = "Filter by operation (Add, Update, Delete, NoOp, ForgetUser)"),
+        ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
+        ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but not implemented yet)"),
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization memory audit events", body = SearchOrgMemoryEventsResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead, AdminWrite, or AuditRead scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn search_org_memory_events() {}
