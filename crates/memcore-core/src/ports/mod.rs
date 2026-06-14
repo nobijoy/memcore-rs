@@ -13,6 +13,6 @@ pub use provider::{
     MessageRole, SummarizationInput,
 };
 pub use storage::{
-    FactSearchQuery, FactStore, RetentionPruneResult, VectorRecord, VectorSearchQuery,
-    VectorSearchResult, VectorStore,
+    FactSearchQuery, FactStore, OrgUserSummary, RetentionPruneResult, VectorRecord,
+    VectorSearchQuery, VectorSearchResult, VectorStore,
 };

@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod api_keys;
 pub mod context;
 pub mod export;
@@ -6,6 +7,10 @@ pub mod memories;
 pub mod retention;
 pub mod memory_events;
 
+pub use admin::{
+    org_summary_input, validate_list_org_users_limit, ListOrgUsersQuery, ListOrgUsersResponse,
+    OrgSummaryBodyResponse, OrgSummaryResponse, OrgUserSummaryResponse,
+};
 pub use api_keys::{
     parse_api_key_scope_label, parse_create_api_key_request, ApiKeyItemResponse,
     ApiKeyScopeResponse, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysQuery,

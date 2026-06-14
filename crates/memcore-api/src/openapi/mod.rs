@@ -10,7 +10,8 @@ use crate::dto::{
     ApplyRetentionRequest, ApplyRetentionResponse, ApplyRetentionSummaryResponse, ExportUserResponse,
     ForgetUserResponse, ImportUserDataRequest, ImportUserDataResponse, ImportUserDataSummaryResponse,
     ImportValidationIssueResponse, ImportValidationSummaryResponse, ListApiKeysResponse,
-    ListMemoriesResponse,
+    ListMemoriesResponse, ListOrgUsersResponse, OrgSummaryBodyResponse, OrgSummaryResponse,
+    OrgUserSummaryResponse,
     ListMemoryEventsResponse, ListMemoryItemResponse, MemoryEventItemResponse,
     MemoryEventOperationResponse, MemoryItemResponse, MemoryMessageRequest,
     MemoryOperationSummaryResponse, RevokeApiKeyResponse, SearchMemoryFiltersRequest,
@@ -47,6 +48,8 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         paths::create_api_key,
         paths::list_api_keys,
         paths::revoke_api_key,
+        paths::get_org_summary,
+        paths::list_org_users,
     ),
     components(schemas(
         ErrorBody,
@@ -91,6 +94,10 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         ApiKeyScopeResponse,
         ListApiKeysResponse,
         RevokeApiKeyResponse,
+        OrgSummaryResponse,
+        OrgSummaryBodyResponse,
+        ListOrgUsersResponse,
+        OrgUserSummaryResponse,
     )),
     tags(
         (name = "Health", description = "Liveness and readiness probes"),
@@ -100,6 +107,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         (name = "Users", description = "User-scoped data management"),
         (name = "Memory Events", description = "User-scoped memory audit events"),
         (name = "API Keys", description = "Organization API key management"),
+        (name = "Admin", description = "Organization-level admin read endpoints"),
     ),
     modifiers(&SecurityAddon),
 )]

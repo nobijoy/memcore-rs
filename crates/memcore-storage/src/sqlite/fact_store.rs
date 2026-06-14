@@ -377,6 +377,91 @@ impl FactStore for SqliteFactStore {
             fact_ids,
         })
     }
+
+    async fn count_facts_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) as count FROM facts WHERE org_id = ? AND deleted_at IS NULL",
+        )
+        .bind(org_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to count facts by org", error))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|error| storage_error("row count", error))?;
+        Ok(count as usize)
+    }
+
+    async fn count_users_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let row = sqlx::query(
+            "SELECT COUNT(DISTINCT user_id) as count FROM facts WHERE org_id = ? AND deleted_at IS NULL",
+        )
+        .bind(org_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to count users by org", error))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|error| storage_error("row count", error))?;
+        Ok(count as usize)
+    }
+
+    async fn list_users_by_org(
+        &self,
+        org_id: &str,
+        limit: usize,
+        cursor: Option<String>,
+    ) -> MemcoreResult<Vec<memcore_core::ports::OrgUserSummary>> {
+        use memcore_core::ports::OrgUserSummary;
+
+        let _ = cursor;
+        let rows = sqlx::query(
+            r#"
+            SELECT user_id, COUNT(*) as memory_count, MAX(updated_at) as last_memory_at
+            FROM facts
+            WHERE org_id = ? AND deleted_at IS NULL
+            GROUP BY user_id
+            ORDER BY user_id ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(org_id)
+        .bind(i64::try_from(limit).map_err(|error| {
+            storage_error("org users list limit out of range for sqlite", error)
+        })?)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to list users by org", error))?;
+
+        rows.iter()
+            .map(|row| {
+                let user_id: String = row
+                    .try_get("user_id")
+                    .map_err(|error| storage_error("row user_id", error))?;
+                let memory_count: i64 = row
+                    .try_get("memory_count")
+                    .map_err(|error| storage_error("row memory_count", error))?;
+                let last_memory_at_str: Option<String> = row
+                    .try_get("last_memory_at")
+                    .map_err(|error| storage_error("row last_memory_at", error))?;
+                let last_memory_at = match last_memory_at_str {
+                    Some(value) => Some(
+                        crate::sqlite::conversions::datetime_from_str(&value)
+                            .map_err(|error| storage_error("invalid last_memory_at", error))?,
+                    ),
+                    None => None,
+                };
+
+                Ok(OrgUserSummary {
+                    user_id,
+                    memory_count: memory_count as usize,
+                    last_memory_at,
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -810,5 +895,98 @@ mod tests {
 
         assert_eq!(fetched.valid_at, Some(valid_at));
         assert_eq!(fetched.invalid_at, Some(invalid_at));
+    }
+
+    #[tokio::test]
+    async fn org_admin_counts_exclude_other_org_and_deleted_facts() {
+        let store = test_store().await;
+        let tenant_a = tenant("org_sqlite_admin", "user_a");
+        let tenant_b = tenant("org_sqlite_admin", "user_b");
+        let other_org = tenant("org_other", "user_x");
+
+        let fact_a = sample_fact(
+            "org_sqlite_admin",
+            "user_a",
+            "active",
+            MemoryType::Profile,
+            json!({}),
+            None,
+            None,
+        );
+        let fact_deleted = sample_fact(
+            "org_sqlite_admin",
+            "user_a",
+            "deleted",
+            MemoryType::Profile,
+            json!({}),
+            None,
+            None,
+        );
+        let fact_b = sample_fact(
+            "org_sqlite_admin",
+            "user_b",
+            "active b",
+            MemoryType::Profile,
+            json!({}),
+            None,
+            None,
+        );
+        let fact_other = sample_fact(
+            "org_other",
+            "user_x",
+            "other org",
+            MemoryType::Profile,
+            json!({}),
+            None,
+            None,
+        );
+
+        store
+            .insert_fact(&tenant_a, fact_a.clone())
+            .await
+            .expect("insert");
+        store
+            .insert_fact(&tenant_a, fact_deleted.clone())
+            .await
+            .expect("insert");
+        store
+            .soft_delete_fact(&tenant_a, fact_deleted.id)
+            .await
+            .expect("soft delete");
+        store
+            .insert_fact(&tenant_b, fact_b)
+            .await
+            .expect("insert");
+        store
+            .insert_fact(&other_org, fact_other)
+            .await
+            .expect("insert");
+
+        assert_eq!(
+            store
+                .count_facts_by_org("org_sqlite_admin")
+                .await
+                .expect("count facts"),
+            2
+        );
+        assert_eq!(
+            store
+                .count_users_by_org("org_sqlite_admin")
+                .await
+                .expect("count users"),
+            2
+        );
+
+        let users = store
+            .list_users_by_org("org_sqlite_admin", 10, None)
+            .await
+            .expect("list users");
+        assert_eq!(users.len(), 2);
+        let user_a = users
+            .iter()
+            .find(|user| user.user_id == "user_a")
+            .expect("user_a");
+        assert_eq!(user_a.memory_count, 1);
+        assert_eq!(user_a.last_memory_at, Some(fact_a.updated_at));
     }
 }

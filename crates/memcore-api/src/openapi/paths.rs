@@ -6,7 +6,7 @@ use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, BuildContextRequest, BuildContextResponse,
     CreateApiKeyRequest, CreateApiKeyResponse, DeleteMemoryResponse, ExportUserResponse,
     ApplyRetentionRequest, ApplyRetentionResponse, ForgetUserResponse, ImportUserDataRequest,
-    ImportUserDataResponse, ListApiKeysResponse,
+    ImportUserDataResponse, ListApiKeysResponse, ListOrgUsersResponse, OrgSummaryResponse,
     ListMemoriesResponse, ListMemoryEventsResponse,
     RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
 };
@@ -333,3 +333,44 @@ pub fn list_api_keys() {}
     )
 )]
 pub fn revoke_api_key() {}
+
+/// Organization-level aggregate counts for admin visibility. Does not return memory content.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/summary",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization summary", body = OrgSummaryResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_org_summary() {}
+
+/// List users in the organization with memory aggregates. Does not return memory content.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/users",
+    tag = "Admin",
+    params(
+        ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
+        ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but not implemented yet)"),
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization users", body = ListOrgUsersResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn list_org_users() {}

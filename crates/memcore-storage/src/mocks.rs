@@ -9,7 +9,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use memcore_core::ports::{
-    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore,
+    ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore, OrgUserSummary,
     RetentionPruneResult, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
 };
 use memcore_core::{ApiKeyRecord, MemoryEvent};
@@ -274,6 +274,67 @@ impl FactStore for MockFactStore {
             fact_ids: matching_ids,
         })
     }
+
+    async fn count_facts_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let facts = self.facts.read().expect("facts lock poisoned");
+        let deleted_set = self.deleted.read().expect("deleted lock poisoned");
+        Ok(facts
+            .values()
+            .filter(|fact| fact.org_id == org_id)
+            .filter(|fact| !deleted_set.contains(&fact.id))
+            .count())
+    }
+
+    async fn count_users_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let facts = self.facts.read().expect("facts lock poisoned");
+        let deleted_set = self.deleted.read().expect("deleted lock poisoned");
+        let mut users = HashSet::new();
+        for fact in facts.values() {
+            if fact.org_id == org_id && !deleted_set.contains(&fact.id) {
+                users.insert(fact.user_id.clone());
+            }
+        }
+        Ok(users.len())
+    }
+
+    async fn list_users_by_org(
+        &self,
+        org_id: &str,
+        limit: usize,
+        cursor: Option<String>,
+    ) -> MemcoreResult<Vec<OrgUserSummary>> {
+        let _ = cursor;
+        let facts = self.facts.read().expect("facts lock poisoned");
+        let deleted_set = self.deleted.read().expect("deleted lock poisoned");
+
+        let mut aggregates: HashMap<String, (usize, Option<DateTime<Utc>>)> = HashMap::new();
+        for fact in facts.values() {
+            if fact.org_id != org_id || deleted_set.contains(&fact.id) {
+                continue;
+            }
+            let entry = aggregates
+                .entry(fact.user_id.clone())
+                .or_insert((0, None));
+            entry.0 += 1;
+            entry.1 = Some(match entry.1 {
+                Some(current) => current.max(fact.updated_at),
+                None => fact.updated_at,
+            });
+        }
+
+        let mut users: Vec<OrgUserSummary> = aggregates
+            .into_iter()
+            .map(|(user_id, (memory_count, last_memory_at))| OrgUserSummary {
+                user_id,
+                memory_count,
+                last_memory_at,
+            })
+            .collect();
+
+        users.sort_by(|a, b| a.user_id.cmp(&b.user_id));
+        users.truncate(limit);
+        Ok(users)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -445,6 +506,11 @@ impl MemoryEventStore for MockMemoryEventStore {
         });
 
         Ok(before_len - events.len())
+    }
+
+    async fn count_events_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let events = self.events.read().expect("events lock poisoned");
+        Ok(events.iter().filter(|event| event.org_id == org_id).count())
     }
 }
 
@@ -1085,5 +1151,56 @@ mod tests {
             .await
             .expect_err("cross-tenant record should fail");
         assert_eq!(error, MemcoreError::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn org_admin_mock_counts_are_org_scoped() {
+        let store = MockFactStore::new();
+        let tenant_a = tenant("org_mock_admin", "user_a");
+        let tenant_b = tenant("org_mock_admin", "user_b");
+        let other_org = tenant("org_other", "user_x");
+
+        store
+            .insert_fact(
+                &tenant_a,
+                sample_fact("org_mock_admin", "user_a", "one", MemoryType::Profile),
+            )
+            .await
+            .expect("insert");
+        store
+            .insert_fact(
+                &tenant_b,
+                sample_fact("org_mock_admin", "user_b", "two", MemoryType::Profile),
+            )
+            .await
+            .expect("insert");
+        store
+            .insert_fact(
+                &other_org,
+                sample_fact("org_other", "user_x", "other", MemoryType::Profile),
+            )
+            .await
+            .expect("insert");
+
+        assert_eq!(
+            store
+                .count_facts_by_org("org_mock_admin")
+                .await
+                .expect("count facts"),
+            2
+        );
+        assert_eq!(
+            store
+                .count_users_by_org("org_mock_admin")
+                .await
+                .expect("count users"),
+            2
+        );
+
+        let users = store
+            .list_users_by_org("org_mock_admin", 1, None)
+            .await
+            .expect("list users");
+        assert_eq!(users.len(), 1);
     }
 }

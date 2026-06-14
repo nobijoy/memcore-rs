@@ -16,6 +16,10 @@ use crate::import::{
     ImportValidationSummary, resolve_import_fact_id,
 };
 use crate::retention::{ApplyRetentionInput, ApplyRetentionOutput};
+use crate::admin::{
+    ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
+    DEFAULT_LIST_ORG_USERS_LIMIT, MAX_LIST_ORG_USERS_LIMIT,
+};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryEventQuery, MemoryEventStore, VectorRecord, VectorStore,
@@ -435,6 +439,46 @@ impl MemoryEngine {
         Ok(output)
     }
 
+    pub async fn get_org_summary(
+        &self,
+        input: OrgSummaryInput,
+    ) -> MemcoreResult<OrgSummaryOutput> {
+        validate_org_id(&input.org_id)?;
+
+        let total_facts = self.fact_store.count_facts_by_org(&input.org_id).await?;
+        let total_users = self.fact_store.count_users_by_org(&input.org_id).await?;
+        let total_events = match &self.event_store {
+            Some(store) => Some(store.count_events_by_org(&input.org_id).await?),
+            None => None,
+        };
+
+        Ok(OrgSummaryOutput {
+            org_id: input.org_id,
+            total_users,
+            total_facts,
+            total_events,
+        })
+    }
+
+    pub async fn list_org_users(
+        &self,
+        input: ListOrgUsersInput,
+    ) -> MemcoreResult<ListOrgUsersOutput> {
+        validate_org_id(&input.org_id)?;
+        let limit = normalize_org_users_limit(input.limit)?;
+        let _ = input.cursor;
+
+        let users = self
+            .fact_store
+            .list_users_by_org(&input.org_id, limit, None)
+            .await?;
+
+        Ok(ListOrgUsersOutput {
+            users,
+            next_cursor: None,
+        })
+    }
+
     pub async fn forget_user(&self, input: ForgetUserInput) -> MemcoreResult<ForgetUserOutput> {
         validate_tenant(&input.tenant)?;
 
@@ -674,6 +718,35 @@ fn validate_tenant(tenant: &TenantContext) -> MemcoreResult<()> {
         ));
     }
     Ok(())
+}
+
+fn validate_org_id(org_id: &str) -> MemcoreResult<()> {
+    use memcore_common::MemcoreError;
+
+    if org_id.trim().is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "org_id cannot be empty".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_org_users_limit(limit: usize) -> MemcoreResult<usize> {
+    use memcore_common::MemcoreError;
+
+    let normalized = if limit == 0 {
+        DEFAULT_LIST_ORG_USERS_LIMIT
+    } else {
+        limit
+    };
+
+    if normalized > MAX_LIST_ORG_USERS_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {MAX_LIST_ORG_USERS_LIMIT}"
+        )));
+    }
+
+    Ok(normalized)
 }
 
 fn validate_query(query: &str) -> MemcoreResult<()> {

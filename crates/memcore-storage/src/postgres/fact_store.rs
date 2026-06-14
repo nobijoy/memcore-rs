@@ -348,4 +348,82 @@ impl FactStore for PostgresFactStore {
             fact_ids,
         })
     }
+
+    async fn count_facts_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let row = sqlx::query(
+            "SELECT COUNT(*)::bigint AS count FROM facts WHERE org_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(org_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to count facts by org", error))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|error| storage_error("row count", error))?;
+        Ok(count as usize)
+    }
+
+    async fn count_users_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let row = sqlx::query(
+            "SELECT COUNT(DISTINCT user_id)::bigint AS count FROM facts WHERE org_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(org_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to count users by org", error))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|error| storage_error("row count", error))?;
+        Ok(count as usize)
+    }
+
+    async fn list_users_by_org(
+        &self,
+        org_id: &str,
+        limit: usize,
+        cursor: Option<String>,
+    ) -> MemcoreResult<Vec<memcore_core::ports::OrgUserSummary>> {
+        use memcore_core::ports::OrgUserSummary;
+
+        let _ = cursor;
+        let rows = sqlx::query(
+            r#"
+            SELECT user_id, COUNT(*)::bigint AS memory_count, MAX(updated_at) AS last_memory_at
+            FROM facts
+            WHERE org_id = $1 AND deleted_at IS NULL
+            GROUP BY user_id
+            ORDER BY user_id ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(org_id)
+        .bind(i64::try_from(limit).map_err(|error| {
+            storage_error("org users list limit out of range for postgres", error)
+        })?)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to list users by org", error))?;
+
+        rows.iter()
+            .map(|row| {
+                let user_id: String = row
+                    .try_get("user_id")
+                    .map_err(|error| storage_error("row user_id", error))?;
+                let memory_count: i64 = row
+                    .try_get("memory_count")
+                    .map_err(|error| storage_error("row memory_count", error))?;
+                let last_memory_at: Option<DateTime<Utc>> = row
+                    .try_get("last_memory_at")
+                    .map_err(|error| storage_error("row last_memory_at", error))?;
+
+                Ok(OrgUserSummary {
+                    user_id,
+                    memory_count: memory_count as usize,
+                    last_memory_at,
+                })
+            })
+            .collect()
+    }
 }

@@ -50,4 +50,7 @@ pub trait MemoryEventStore: Send + Sync {
         cutoff: DateTime<Utc>,
         dry_run: bool,
     ) -> MemcoreResult<usize>;
+
+    /// Counts memory audit events for an organization.
+    async fn count_events_by_org(&self, org_id: &str) -> MemcoreResult<usize>;
 }

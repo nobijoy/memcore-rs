@@ -69,6 +69,12 @@ impl MemoryEventStore for FailingMemoryEventStore {
             "audit store unavailable".to_string(),
         ))
     }
+
+    async fn count_events_by_org(&self, _org_id: &str) -> MemcoreResult<usize> {
+        Err(MemcoreError::StorageError(
+            "audit store unavailable".to_string(),
+        ))
+    }
 }
 
 #[tokio::test]

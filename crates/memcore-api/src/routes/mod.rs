@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod api_keys;
 pub mod common;
 pub mod context;
@@ -57,6 +58,14 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route(
             "/api/v1/api-keys/{api_key_id}",
             delete(api_keys::revoke_api_key),
+        )
+        .route(
+            "/api/v1/admin/org/summary",
+            get(admin::get_org_summary),
+        )
+        .route(
+            "/api/v1/admin/org/users",
+            get(admin::list_org_users),
         )
         .route_layer(from_fn(log_protected_request))
         .route_layer(from_fn_with_state(state.clone(), enforce_rate_limit))

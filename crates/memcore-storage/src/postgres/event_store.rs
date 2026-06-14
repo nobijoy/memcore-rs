@@ -202,4 +202,19 @@ impl MemoryEventStore for PostgresMemoryEventStore {
 
         Ok(result.rows_affected() as usize)
     }
+
+    async fn count_events_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
+        let row = sqlx::query(
+            "SELECT COUNT(*)::bigint AS count FROM memory_events WHERE org_id = $1",
+        )
+        .bind(org_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to count events by org", error))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|error| storage_error("row count", error))?;
+        Ok(count as usize)
+    }
 }

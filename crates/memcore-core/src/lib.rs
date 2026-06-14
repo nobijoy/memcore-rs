@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod audit;
 pub mod context;
 pub mod engine;
@@ -28,7 +29,13 @@ pub use import::{
     ImportMode, ImportUserDataInput, ImportUserDataOutput, ImportValidationIssue,
     ImportValidationSummary,
 };
-pub use retention::{ApplyRetentionInput, ApplyRetentionOutput, RetentionPolicy};
+pub use retention::{
+    ApplyRetentionInput, ApplyRetentionOutput, RetentionPolicy,
+};
+pub use admin::{
+    ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
+    DEFAULT_LIST_ORG_USERS_LIMIT, MAX_LIST_ORG_USERS_LIMIT,
+};
 pub use models::{
     ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
     MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,
@@ -37,7 +44,7 @@ pub use privacy::PiiRedactor;
 pub use ports::{
     ApiKeyStore, EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery,
     FactStore, LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryMessage, MessageRole,
-    RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
+    OrgUserSummary, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult,
     VectorStore,
     DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT,
 };

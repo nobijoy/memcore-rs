@@ -16,6 +16,14 @@ pub struct RetentionPruneResult {
     pub fact_ids: Vec<Uuid>,
 }
 
+/// Per-user aggregate for organization admin listing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrgUserSummary {
+    pub user_id: String,
+    pub memory_count: usize,
+    pub last_memory_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FactSearchQuery {
     pub tenant: TenantContext,
@@ -99,6 +107,20 @@ pub trait FactStore: Send + Sync {
         cutoff: DateTime<Utc>,
         dry_run: bool,
     ) -> MemcoreResult<RetentionPruneResult>;
+
+    /// Counts active (non-deleted) facts for an organization.
+    async fn count_facts_by_org(&self, org_id: &str) -> MemcoreResult<usize>;
+
+    /// Counts distinct users with at least one active fact in the organization.
+    async fn count_users_by_org(&self, org_id: &str) -> MemcoreResult<usize>;
+
+    /// Lists users with memory aggregates for an organization. Cursor pagination is accepted but not implemented yet.
+    async fn list_users_by_org(
+        &self,
+        org_id: &str,
+        limit: usize,
+        cursor: Option<String>,
+    ) -> MemcoreResult<Vec<OrgUserSummary>>;
 }
 
 #[async_trait]
