@@ -499,3 +499,199 @@ async fn context_output_respects_token_budget() {
     assert_eq!(json["budget"]["skipped_memories"], 1);
     assert_eq!(json["memories"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn format_markdown_with_sections_groups_output() {
+    let app = test_app();
+    let profile_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Profile context format user is a full-stack developer" }}],
+          "metadata": {{}}
+        }}"#
+    );
+    let project_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Project context format user is building memcore engine" }}],
+          "metadata": {{}}
+        }}"#
+    );
+
+    for body in [profile_body, project_body] {
+        assert_eq!(
+            response_parts(
+                app.clone(),
+                post_request("/api/v1/memories", &body, Some(ORG_ID)),
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "context format",
+          "format": "markdown",
+          "section_by_memory_type": true
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let context = json["context"].as_str().unwrap();
+    assert!(context.contains("## "));
+    assert!(json["memories"].as_array().unwrap().len() >= 1);
+}
+
+#[tokio::test]
+async fn format_plain_text_works() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}",
+          "format": "plain_text"
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["context"].as_str().unwrap().contains(MEMORY_CONTENT));
+}
+
+#[tokio::test]
+async fn format_json_works() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}",
+          "format": "json"
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let context: serde_json::Value =
+        serde_json::from_str(json["context"].as_str().unwrap()).expect("json context");
+    assert!(context["memories"].is_array());
+}
+
+#[tokio::test]
+async fn invalid_format_returns_validation_error() {
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "test",
+          "format": "yaml"
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        test_app(),
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn section_by_memory_type_false_preserves_flat_ranking() {
+    let app = test_app();
+    let first_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Flat format first ranked memory alpha" }}],
+          "metadata": {{}}
+        }}"#
+    );
+    let second_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Flat format second ranked memory beta" }}],
+          "metadata": {{}}
+        }}"#
+    );
+
+    for body in [first_body, second_body] {
+        assert_eq!(
+            response_parts(
+                app.clone(),
+                post_request("/api/v1/memories", &body, Some(ORG_ID)),
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "Flat format ranked",
+          "format": "markdown",
+          "section_by_memory_type": false
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let context = json["context"].as_str().unwrap();
+    assert!(!context.contains("## "));
+    let first = context.find("Flat format first").unwrap_or(0);
+    let second = context.find("Flat format second").unwrap_or(usize::MAX);
+    if first > 0 && second < usize::MAX {
+        assert!(first < second);
+    }
+}
+
+#[tokio::test]
+async fn metadata_flags_affect_context_output() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}",
+          "format": "markdown",
+          "include_scores": true,
+          "include_memory_types": true
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let context = json["context"].as_str().unwrap();
+    assert!(context.contains("score=") || context.contains("Conversation"));
+}

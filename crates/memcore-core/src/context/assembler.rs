@@ -1,6 +1,8 @@
 use crate::MemorySearchResult;
 
 use super::budget::{ContextBudget, ContextBudgetUsage};
+use super::format_options::ContextFormatOptions;
+use super::formatter::{ContextFormatter, ContextMemoryItem};
 use super::token_estimator::{SimpleTokenEstimator, TokenEstimator};
 use super::types::EMPTY_CONTEXT_MESSAGE;
 
@@ -17,6 +19,7 @@ pub fn assemble_context(memories: &[MemorySearchResult], include_metadata: bool)
     assemble_context_with_budget(
         memories,
         include_metadata,
+        &ContextFormatOptions::default(),
         &ContextBudget {
             max_tokens: usize::MAX / 4,
             reserved_tokens: 0,
@@ -29,11 +32,12 @@ pub fn assemble_context(memories: &[MemorySearchResult], include_metadata: bool)
 /// Assembles context from ranked memories while enforcing a token budget.
 ///
 /// Memories are considered in ranked order. Each memory is included only if its
-/// fully formatted line fits the remaining budget; oversized memories are skipped
-/// without truncation, and later shorter memories may still be included.
+/// fully formatted representation (including section headings and metadata) fits
+/// the remaining budget; oversized memories are skipped without truncation.
 pub fn assemble_context_with_budget(
     memories: &[MemorySearchResult],
-    include_metadata: bool,
+    legacy_include_fact_metadata: bool,
+    format_options: &ContextFormatOptions,
     budget: &ContextBudget,
     estimator: &impl TokenEstimator,
 ) -> AssembledContext {
@@ -56,33 +60,40 @@ pub fn assemble_context_with_budget(
         };
     }
 
-    let header = "Relevant long-term memories:";
-    let header_tokens = estimator.estimate_tokens(header);
-    let newline_tokens = 1;
-
-    let mut included = Vec::new();
+    let items: Vec<ContextMemoryItem> = memories.iter().map(ContextMemoryItem::from).collect();
+    let mut included_items: Vec<ContextMemoryItem> = Vec::new();
+    let mut included_memories: Vec<MemorySearchResult> = Vec::new();
     let mut skipped = 0;
-    let mut used = 0;
 
-    for memory in memories {
-        let line = format_memory_line(memory, include_metadata);
-        let line_tokens = estimator.estimate_tokens(&line);
+    for (item, memory) in items.iter().zip(memories.iter()) {
+        let delta = token_delta_for_addition(
+            &included_items,
+            item,
+            format_options,
+            legacy_include_fact_metadata,
+            estimator,
+        );
 
-        let additional = if included.is_empty() {
-            header_tokens + newline_tokens + line_tokens
+        let used_so_far = if included_items.is_empty() {
+            0
         } else {
-            newline_tokens + line_tokens
+            estimate_context_tokens(
+                &included_items,
+                format_options,
+                legacy_include_fact_metadata,
+                estimator,
+            )
         };
 
-        if used + additional <= available {
-            used += additional;
-            included.push(memory.clone());
+        if used_so_far + delta <= available {
+            included_items.push(item.clone());
+            included_memories.push(memory.clone());
         } else {
             skipped += 1;
         }
     }
 
-    if included.is_empty() {
+    if included_items.is_empty() {
         let context = EMPTY_CONTEXT_MESSAGE.to_string();
         return AssembledContext {
             context: context.clone(),
@@ -98,37 +109,65 @@ pub fn assemble_context_with_budget(
         };
     }
 
-    let context = format_context_from_memories(&included, include_metadata);
+    let context = ContextFormatter::format(
+        &included_items,
+        format_options,
+        legacy_include_fact_metadata,
+    )
+    .expect("context formatting")
+    .context;
     let used_tokens = estimator.estimate_tokens(&context).min(available);
 
     AssembledContext {
         context,
-        memories: included.clone(),
+        memories: included_memories,
         budget: ContextBudgetUsage {
             max_tokens: budget.max_tokens,
             reserved_tokens: budget.reserved_tokens,
             available_tokens: available,
             used_tokens,
-            included_memories: included.len(),
+            included_memories: included_items.len(),
             skipped_memories: skipped,
         },
     }
 }
 
-fn format_memory_line(memory: &MemorySearchResult, include_metadata: bool) -> String {
-    if include_metadata && !memory.metadata.is_null() && memory.metadata != serde_json::json!({}) {
-        format!("- {} (metadata: {})", memory.content, memory.metadata)
-    } else {
-        format!("- {}", memory.content)
+fn estimate_context_tokens(
+    items: &[ContextMemoryItem],
+    format_options: &ContextFormatOptions,
+    legacy_include_fact_metadata: bool,
+    estimator: &impl TokenEstimator,
+) -> usize {
+    if items.is_empty() {
+        return 0;
     }
+    ContextFormatter::format(items, format_options, legacy_include_fact_metadata)
+        .map(|formatted| estimator.estimate_tokens(&formatted.context))
+        .unwrap_or(0)
 }
 
-fn format_context_from_memories(memories: &[MemorySearchResult], include_metadata: bool) -> String {
-    let mut lines = vec!["Relevant long-term memories:".to_string()];
-    for memory in memories {
-        lines.push(format_memory_line(memory, include_metadata));
-    }
-    lines.join("\n")
+fn token_delta_for_addition(
+    current: &[ContextMemoryItem],
+    candidate: &ContextMemoryItem,
+    format_options: &ContextFormatOptions,
+    legacy_include_fact_metadata: bool,
+    estimator: &impl TokenEstimator,
+) -> usize {
+    let before = estimate_context_tokens(
+        current,
+        format_options,
+        legacy_include_fact_metadata,
+        estimator,
+    );
+    let mut with_candidate = current.to_vec();
+    with_candidate.push(candidate.clone());
+    let after = estimate_context_tokens(
+        &with_candidate,
+        format_options,
+        legacy_include_fact_metadata,
+        estimator,
+    );
+    after.saturating_sub(before)
 }
 
 #[cfg(test)]
@@ -138,6 +177,7 @@ mod tests {
 
     use super::*;
     use crate::context::budget::{ContextBudget, DEFAULT_CONTEXT_RESERVED_TOKENS};
+    use crate::context::format_options::ContextFormatOptions;
     use crate::{MemorySearchResult, MemoryType};
 
     fn sample_result(content: &str) -> MemorySearchResult {
@@ -150,6 +190,13 @@ mod tests {
             importance: 0.7,
             valid_at: None,
             metadata: json!({}),
+        }
+    }
+
+    fn sample_result_with_type(content: &str, memory_type: MemoryType) -> MemorySearchResult {
+        MemorySearchResult {
+            memory_type,
+            ..sample_result(content)
         }
     }
 
@@ -194,8 +241,13 @@ mod tests {
             reserved_tokens: DEFAULT_CONTEXT_RESERVED_TOKENS,
         };
 
-        let assembled =
-            assemble_context_with_budget(&memories, false, &budget, &SimpleTokenEstimator);
+        let assembled = assemble_context_with_budget(
+            &memories,
+            false,
+            &ContextFormatOptions::default(),
+            &budget,
+            &SimpleTokenEstimator,
+        );
 
         assert_eq!(assembled.memories.len(), 2);
         assert!(assembled.context.contains("Short memory one."));
@@ -215,8 +267,13 @@ mod tests {
             reserved_tokens: 20,
         };
 
-        let assembled =
-            assemble_context_with_budget(&memories, false, &budget, &SimpleTokenEstimator);
+        let assembled = assemble_context_with_budget(
+            &memories,
+            false,
+            &ContextFormatOptions::default(),
+            &budget,
+            &SimpleTokenEstimator,
+        );
 
         assert_eq!(assembled.memories.len(), 1);
         assert_eq!(assembled.memories[0].content, "tiny");
@@ -236,8 +293,13 @@ mod tests {
             reserved_tokens: 20,
         };
 
-        let assembled =
-            assemble_context_with_budget(&memories, false, &budget, &SimpleTokenEstimator);
+        let assembled = assemble_context_with_budget(
+            &memories,
+            false,
+            &ContextFormatOptions::default(),
+            &budget,
+            &SimpleTokenEstimator,
+        );
 
         assert_eq!(assembled.memories.len(), 2);
         assert_eq!(assembled.memories[0].content, "first ranked");
@@ -256,9 +318,86 @@ mod tests {
             reserved_tokens: 20,
         };
 
-        let assembled =
-            assemble_context_with_budget(&memories, false, &budget, &SimpleTokenEstimator);
+        let assembled = assemble_context_with_budget(
+            &memories,
+            false,
+            &ContextFormatOptions::default(),
+            &budget,
+            &SimpleTokenEstimator,
+        );
 
         assert!(assembled.budget.used_tokens <= assembled.budget.available_tokens);
+    }
+
+    #[test]
+    fn section_headings_count_toward_token_usage() {
+        let memories = vec![
+            sample_result_with_type("profile memory", MemoryType::Profile),
+            sample_result_with_type("preference memory", MemoryType::Preference),
+        ];
+        let options = ContextFormatOptions::structured_markdown();
+        let tight_budget = ContextBudget {
+            max_tokens: 40,
+            reserved_tokens: 10,
+        };
+        let loose_budget = ContextBudget {
+            max_tokens: 500,
+            reserved_tokens: 10,
+        };
+
+        let tight = assemble_context_with_budget(
+            &memories,
+            false,
+            &options,
+            &tight_budget,
+            &SimpleTokenEstimator,
+        );
+        let loose = assemble_context_with_budget(
+            &memories,
+            false,
+            &options,
+            &loose_budget,
+            &SimpleTokenEstimator,
+        );
+
+        assert!(tight.budget.included_memories <= loose.budget.included_memories);
+        assert!(tight.budget.used_tokens <= tight.budget.available_tokens);
+    }
+
+    #[test]
+    fn metadata_increases_formatted_output_size() {
+        let memories = vec![sample_result(
+            "short content with enough text to show metadata formatting differences",
+        )];
+        let without = ContextFormatOptions::default();
+        let with_metadata = ContextFormatOptions {
+            include_scores: true,
+            include_memory_types: true,
+            include_confidence: true,
+            include_importance: true,
+            ..ContextFormatOptions::default()
+        };
+        let budget = ContextBudget {
+            max_tokens: 2000,
+            reserved_tokens: 0,
+        };
+
+        let plain = assemble_context_with_budget(
+            &memories,
+            false,
+            &without,
+            &budget,
+            &SimpleTokenEstimator,
+        );
+        let rich = assemble_context_with_budget(
+            &memories,
+            false,
+            &with_metadata,
+            &budget,
+            &SimpleTokenEstimator,
+        );
+
+        assert!(rich.context.len() > plain.context.len());
+        assert!(rich.budget.used_tokens >= plain.budget.used_tokens);
     }
 }

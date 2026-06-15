@@ -421,6 +421,7 @@ async fn build_context_formats_memories_after_add() {
             memory_types: None,
             include_metadata: false,
             budget: Default::default(),
+            format_options: Default::default(),
         })
         .await
         .expect("build context should succeed");
@@ -443,6 +444,7 @@ async fn build_context_returns_empty_message_when_no_matches() {
             memory_types: None,
             include_metadata: false,
             budget: Default::default(),
+            format_options: Default::default(),
         })
         .await
         .expect("build context should succeed");

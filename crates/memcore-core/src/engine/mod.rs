@@ -500,6 +500,7 @@ impl MemoryEngine {
         let assembled = assemble_context_with_budget(
             &search_output.results,
             input.include_metadata,
+            &input.format_options,
             &input.budget,
             &SimpleTokenEstimator,
         );

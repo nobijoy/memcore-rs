@@ -2,7 +2,10 @@ use axum::Json;
 use axum::extract::{Extension, State};
 use memcore_core::{ApiKeyScope, BuildContextInput, ContextBudget};
 
-use crate::dto::{BuildContextRequest, BuildContextResponse, validate_build_context_request};
+use crate::dto::{
+    format_options_from_request, BuildContextRequest, BuildContextResponse,
+    validate_build_context_request,
+};
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_scope, ApiError};
 use crate::security::AuthContext;
@@ -17,6 +20,7 @@ pub async fn build_context(
     check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryRead)?;
     validate_build_context_request(&request)?;
 
+    let format_options = format_options_from_request(&request)?;
     let tenant = organization.tenant_with_user_id(request.user_id)?;
     let memory_types = request.filters.parse_memory_types()?;
 
@@ -32,6 +36,7 @@ pub async fn build_context(
                 max_tokens: request.max_tokens,
                 reserved_tokens: request.reserved_tokens,
             },
+            format_options,
         })
         .await?;
 

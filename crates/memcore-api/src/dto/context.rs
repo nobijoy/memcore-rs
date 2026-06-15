@@ -1,5 +1,8 @@
 use memcore_common::MemcoreError;
-use memcore_core::{BuildContextOutput, ContextBudget, ContextBudgetUsage, MemorySearchResult};
+use memcore_core::{
+    BuildContextOutput, ContextBudget, ContextBudgetUsage, ContextFormat, ContextFormatOptions,
+    MemorySearchResult,
+};
 
 use super::memories::SearchMemoryFiltersRequest;
 use serde::{Deserialize, Serialize};
@@ -30,6 +33,23 @@ pub struct BuildContextRequest {
     pub reserved_tokens: usize,
     #[serde(default)]
     pub include_metadata: bool,
+    /// Output format: `plain_text`, `markdown`, or `json`.
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub section_by_memory_type: Option<bool>,
+    #[serde(default)]
+    pub include_memory_ids: Option<bool>,
+    #[serde(default)]
+    pub include_memory_types: Option<bool>,
+    #[serde(default)]
+    pub include_scores: Option<bool>,
+    #[serde(default)]
+    pub include_timestamps: Option<bool>,
+    #[serde(default)]
+    pub include_confidence: Option<bool>,
+    #[serde(default)]
+    pub include_importance: Option<bool>,
     #[serde(default)]
     pub filters: SearchMemoryFiltersRequest,
 }
@@ -101,6 +121,37 @@ impl From<&MemorySearchResult> for ContextMemoryResponse {
     }
 }
 
+pub fn format_options_from_request(request: &BuildContextRequest) -> Result<ContextFormatOptions, MemcoreError> {
+    let mut options = ContextFormatOptions::default();
+
+    if let Some(format) = &request.format {
+        options.format = ContextFormat::parse(format)?;
+    }
+    if let Some(section_by_memory_type) = request.section_by_memory_type {
+        options.section_by_memory_type = section_by_memory_type;
+    }
+    if let Some(include_memory_ids) = request.include_memory_ids {
+        options.include_memory_ids = include_memory_ids;
+    }
+    if let Some(include_memory_types) = request.include_memory_types {
+        options.include_memory_types = include_memory_types;
+    }
+    if let Some(include_scores) = request.include_scores {
+        options.include_scores = include_scores;
+    }
+    if let Some(include_timestamps) = request.include_timestamps {
+        options.include_timestamps = include_timestamps;
+    }
+    if let Some(include_confidence) = request.include_confidence {
+        options.include_confidence = include_confidence;
+    }
+    if let Some(include_importance) = request.include_importance {
+        options.include_importance = include_importance;
+    }
+
+    Ok(options)
+}
+
 pub fn validate_build_context_request(request: &BuildContextRequest) -> Result<(), MemcoreError> {
     if request.user_id.trim().is_empty() {
         return Err(MemcoreError::ValidationError(
@@ -131,5 +182,9 @@ pub fn validate_build_context_request(request: &BuildContextRequest) -> Result<(
         max_tokens: request.max_tokens,
         reserved_tokens: request.reserved_tokens,
     }
-    .validate()
+    .validate()?;
+
+    format_options_from_request(request)?;
+
+    Ok(())
 }
