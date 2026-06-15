@@ -1,6 +1,6 @@
 use memcore_core::{
-    assemble_context_with_budget, ContextBudget, ContextFormat, ContextFormatOptions,
-    MemorySearchResult, MemoryType, SimpleTokenEstimator,
+    assemble_context_with_budget, ContextBudget, ContextCompressionOptions, ContextFormat,
+    ContextFormatOptions, MemorySearchResult, MemoryType, SimpleTokenEstimator,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -33,6 +33,7 @@ fn markdown_sections_group_by_memory_type() {
             max_tokens: 2000,
             reserved_tokens: 0,
         },
+        &ContextCompressionOptions::default(),
         &SimpleTokenEstimator,
     );
 
@@ -60,6 +61,7 @@ fn flat_format_preserves_ranked_order_without_sections() {
             max_tokens: 2000,
             reserved_tokens: 0,
         },
+        &ContextCompressionOptions::default(),
         &SimpleTokenEstimator,
     );
 
@@ -84,6 +86,7 @@ fn json_format_returns_string_context_payload() {
             max_tokens: 2000,
             reserved_tokens: 0,
         },
+        &ContextCompressionOptions::default(),
         &SimpleTokenEstimator,
     );
 
@@ -108,6 +111,7 @@ fn metadata_flags_affect_formatted_output() {
             max_tokens: 2000,
             reserved_tokens: 0,
         },
+        &ContextCompressionOptions::default(),
         &SimpleTokenEstimator,
     );
 
@@ -130,6 +134,7 @@ fn oversized_formatted_memory_is_skipped_with_sections() {
             max_tokens: 80,
             reserved_tokens: 10,
         },
+        &ContextCompressionOptions::default(),
         &SimpleTokenEstimator,
     );
 

@@ -1,6 +1,7 @@
 use memcore_common::MemcoreError;
 use memcore_core::{
-    BuildContextOutput, ContextBudget, ContextBudgetUsage, ContextFormat, ContextFormatOptions,
+    BuildContextOutput, ContextBudget, ContextBudgetUsage, ContextCompressionMode,
+    ContextCompressionOptions, ContextCompressionUsage, ContextFormat, ContextFormatOptions,
     MemorySearchResult,
 };
 
@@ -50,6 +51,13 @@ pub struct BuildContextRequest {
     pub include_confidence: Option<bool>,
     #[serde(default)]
     pub include_importance: Option<bool>,
+    /// Compression mode: `disabled`, `simple_extractive`, or `provider_summary`.
+    #[serde(default)]
+    pub compression_mode: Option<String>,
+    #[serde(default)]
+    pub summary_max_tokens: Option<usize>,
+    #[serde(default)]
+    pub include_summary_section: Option<bool>,
     #[serde(default)]
     pub filters: SearchMemoryFiltersRequest,
 }
@@ -60,6 +68,38 @@ pub struct BuildContextResponse {
     pub context: String,
     pub memories: Vec<ContextMemoryResponse>,
     pub budget: ContextBudgetResponse,
+    #[serde(skip_serializing_if = "ContextCompressionResponse::is_disabled")]
+    pub compression: ContextCompressionResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ContextCompressionResponse {
+    pub enabled: bool,
+    pub mode: String,
+    pub summarized_memories: usize,
+    pub summary_tokens: usize,
+}
+
+impl ContextCompressionResponse {
+    fn is_disabled(&self) -> bool {
+        !self.enabled
+    }
+}
+
+impl From<ContextCompressionUsage> for ContextCompressionResponse {
+    fn from(usage: ContextCompressionUsage) -> Self {
+        let mode = match usage.mode {
+            ContextCompressionMode::Disabled => "disabled",
+            ContextCompressionMode::SimpleExtractive => "simple_extractive",
+            ContextCompressionMode::ProviderSummary => "provider_summary",
+        };
+        Self {
+            enabled: usage.enabled,
+            mode: mode.to_string(),
+            summarized_memories: usage.summarized_memories,
+            summary_tokens: usage.summary_tokens,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -105,6 +145,7 @@ impl From<BuildContextOutput> for BuildContextResponse {
                 .map(ContextMemoryResponse::from)
                 .collect(),
             budget: output.budget.into(),
+            compression: output.compression.into(),
         }
     }
 }
@@ -152,6 +193,27 @@ pub fn format_options_from_request(request: &BuildContextRequest) -> Result<Cont
     Ok(options)
 }
 
+pub fn compression_options_from_request(
+    request: &BuildContextRequest,
+    available_tokens: usize,
+) -> Result<ContextCompressionOptions, MemcoreError> {
+    let mut options = ContextCompressionOptions::default();
+
+    if let Some(mode) = &request.compression_mode {
+        options.mode = ContextCompressionMode::parse(mode)?;
+    }
+    if let Some(summary_max_tokens) = request.summary_max_tokens {
+        options.summary_max_tokens = summary_max_tokens;
+    }
+    if let Some(include_summary_section) = request.include_summary_section {
+        options.include_summary_section = include_summary_section;
+    }
+
+    options.validate(available_tokens)?;
+
+    Ok(options)
+}
+
 pub fn validate_build_context_request(request: &BuildContextRequest) -> Result<(), MemcoreError> {
     if request.user_id.trim().is_empty() {
         return Err(MemcoreError::ValidationError(
@@ -185,6 +247,30 @@ pub fn validate_build_context_request(request: &BuildContextRequest) -> Result<(
     .validate()?;
 
     format_options_from_request(request)?;
+
+    let budget = ContextBudget {
+        max_tokens: request.max_tokens,
+        reserved_tokens: request.reserved_tokens,
+    };
+    compression_options_from_request(request, budget.available_tokens())?;
+
+    if let Some(summary_max_tokens) = request.summary_max_tokens {
+        if summary_max_tokens == 0 {
+            return Err(MemcoreError::ValidationError(
+                "summary_max_tokens must be greater than 0".to_string(),
+            ));
+        }
+        if summary_max_tokens > memcore_core::MAX_SUMMARY_MAX_TOKENS {
+            return Err(MemcoreError::ValidationError(format!(
+                "summary_max_tokens cannot exceed {}",
+                memcore_core::MAX_SUMMARY_MAX_TOKENS
+            )));
+        }
+    }
+
+    if let Some(mode) = &request.compression_mode {
+        ContextCompressionMode::parse(mode)?;
+    }
 
     Ok(())
 }

@@ -90,6 +90,7 @@ async fn default_budget_is_applied() {
             include_metadata: false,
             budget: ContextBudget::default(),
             format_options: Default::default(),
+            ..Default::default()
         })
         .await
         .expect("context");
@@ -136,6 +137,7 @@ async fn tight_budget_skips_oversized_memories() {
                 reserved_tokens: 20,
             },
             format_options: Default::default(),
+            ..Default::default()
         })
         .await
         .expect("context");
@@ -165,6 +167,7 @@ async fn invalid_reserved_gte_max_is_rejected() {
                 reserved_tokens: 100,
             },
             format_options: Default::default(),
+            ..Default::default()
         })
         .await;
 
@@ -199,6 +202,7 @@ async fn used_tokens_never_exceed_available_tokens() {
                 reserved_tokens: 30,
             },
             format_options: Default::default(),
+            ..Default::default()
         })
         .await
         .expect("context");
@@ -223,6 +227,7 @@ async fn tenant_isolation_preserved_for_context_budget() {
             include_metadata: false,
             budget: ContextBudget::default(),
             format_options: Default::default(),
+            ..Default::default()
         })
         .await
         .expect("context");

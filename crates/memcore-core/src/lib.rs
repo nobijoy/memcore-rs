@@ -23,11 +23,15 @@ pub use dedup::{
 };
 pub use importance::ImportanceScorer;
 pub use context::{
-    assemble_context, assemble_context_with_budget, AssembledContext, BuildContextInput,
-    BuildContextOutput, ContextBudget, ContextBudgetUsage, ContextFormat, ContextFormatOptions,
-    ContextFormatter, ContextMemoryItem, DEFAULT_CONTEXT_MAX_MEMORIES, DEFAULT_CONTEXT_MAX_TOKENS,
-    DEFAULT_CONTEXT_RESERVED_TOKENS, EMPTY_CONTEXT_MESSAGE, FormattedContext, MAX_CONTEXT_MAX_MEMORIES,
-    MAX_CONTEXT_MAX_TOKENS, SimpleTokenEstimator, TokenEstimator,
+    assemble_context, assemble_context_with_budget, apply_provider_compression_summary,
+    AssembledContext, BuildContextInput, BuildContextOutput, ContextBudget, ContextBudgetUsage,
+    ContextCompressionMode, ContextCompressionOptions, ContextCompressionUsage, ContextFormat,
+    ContextFormatOptions, ContextFormatter, ContextMemoryItem, ContextSummarizer,
+    DEFAULT_CONTEXT_MAX_MEMORIES, DEFAULT_CONTEXT_MAX_TOKENS, DEFAULT_CONTEXT_RESERVED_TOKENS,
+    DEFAULT_SUMMARY_MAX_TOKENS, EMPTY_CONTEXT_MESSAGE, FormattedContext, LlmContextSummarizer,
+    MAX_CONTEXT_MAX_MEMORIES, MAX_CONTEXT_MAX_TOKENS, MAX_SUMMARY_MAX_TOKENS,
+    SimpleContextCompressor, SimpleContextSummarizer, SimpleTokenEstimator, TokenEstimator,
+    effective_summary_budget, summarize_skipped_memories,
 };
 pub use engine::{
     AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ExportUserDataInput,

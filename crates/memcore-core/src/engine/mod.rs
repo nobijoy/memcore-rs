@@ -40,7 +40,7 @@ use crate::importance::ImportanceScorer;
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
 };
-use crate::{assemble_context_with_budget, BuildContextInput, BuildContextOutput, Fact, FactOperation,
+use crate::{assemble_context_with_budget, apply_provider_compression_summary, BuildContextInput, BuildContextOutput, Fact, FactOperation,
     FactOperationDecision, MemoryEvent, MemorySearchResult, SimpleTokenEstimator, TenantContext};
 use uuid::Uuid;
 
@@ -485,7 +485,13 @@ impl MemoryEngine {
         validate_tenant(&input.tenant)?;
         validate_query(&input.query)?;
         input.budget.validate()?;
+        input
+            .compression_options
+            .validate(input.budget.available_tokens())?;
         let max_memories = normalize_context_max_memories(input.max_memories)?;
+        let tenant = input.tenant.clone();
+        let compression_options = input.compression_options.clone();
+        let format_options = input.format_options.clone();
 
         let search_output = self
             .search_memory(SearchMemoryInput {
@@ -497,18 +503,57 @@ impl MemoryEngine {
             })
             .await?;
 
-        let assembled = assemble_context_with_budget(
+        let mut assembled = assemble_context_with_budget(
             &search_output.results,
             input.include_metadata,
-            &input.format_options,
+            &format_options,
             &input.budget,
+            &compression_options,
             &SimpleTokenEstimator,
         );
+
+        if matches!(
+            compression_options.mode,
+            crate::ContextCompressionMode::ProviderSummary
+        ) && !assembled.skipped_items.is_empty()
+        {
+            let available_tokens = assembled.budget.available_tokens;
+            let summary_budget = crate::effective_summary_budget(
+                available_tokens,
+                assembled.budget.used_tokens,
+                compression_options.summary_max_tokens,
+            );
+
+            if summary_budget > 0 {
+                let (compressed, effective_mode) = crate::summarize_skipped_memories(
+                    compression_options.mode,
+                    self.llm_provider.clone(),
+                    &tenant,
+                    &assembled.skipped_items,
+                    summary_budget,
+                    format_options.format,
+                    compression_options.include_summary_section,
+                )
+                .await;
+
+                if !compressed.text.is_empty() {
+                    assembled = apply_provider_compression_summary(
+                        assembled,
+                        compressed,
+                        format_options.format,
+                        available_tokens,
+                        effective_mode,
+                        &SimpleTokenEstimator,
+                    );
+                }
+            }
+        }
 
         Ok(BuildContextOutput {
             context: assembled.context,
             memories: assembled.memories,
             budget: assembled.budget,
+            compression: assembled.compression,
         })
     }
 

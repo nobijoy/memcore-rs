@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{MemorySearchResult, MemoryType, TenantContext};
 
 use super::budget::{ContextBudget, ContextBudgetUsage};
+use super::compression_options::{ContextCompressionOptions, ContextCompressionUsage};
 use super::format_options::ContextFormatOptions;
 
 /// Default maximum memories included in assembled context when callers omit a value.
@@ -25,6 +26,8 @@ pub struct BuildContextInput {
     pub budget: ContextBudget,
     #[serde(default)]
     pub format_options: ContextFormatOptions,
+    #[serde(default)]
+    pub compression_options: ContextCompressionOptions,
 }
 
 impl Default for BuildContextInput {
@@ -37,6 +40,7 @@ impl Default for BuildContextInput {
             include_metadata: false,
             budget: ContextBudget::default(),
             format_options: ContextFormatOptions::default(),
+            compression_options: ContextCompressionOptions::default(),
         }
     }
 }
@@ -46,4 +50,5 @@ pub struct BuildContextOutput {
     pub context: String,
     pub memories: Vec<MemorySearchResult>,
     pub budget: ContextBudgetUsage,
+    pub compression: ContextCompressionUsage,
 }

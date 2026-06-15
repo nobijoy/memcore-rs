@@ -695,3 +695,137 @@ async fn metadata_flags_affect_context_output() {
     let context = json["context"].as_str().unwrap();
     assert!(context.contains("score=") || context.contains("Conversation"));
 }
+
+#[tokio::test]
+async fn default_context_request_has_no_compression_field() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}"
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert!(json.get("compression").is_none());
+}
+
+#[tokio::test]
+async fn simple_extractive_compression_returns_metadata() {
+    let app = test_app();
+    for index in 0..6 {
+        let body = format!(
+            r#"{{
+              "user_id": "{USER_ID}",
+              "messages": [{{ "role": "user", "content": "compression api memory item {index} extra words" }}],
+              "metadata": {{}}
+            }}"#
+        );
+        assert_eq!(
+            response_parts(
+                app.clone(),
+                post_request("/api/v1/memories", &body, Some(ORG_ID)),
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "compression api memory",
+          "max_tokens": 60,
+          "reserved_tokens": 10,
+          "compression_mode": "simple_extractive",
+          "summary_max_tokens": 35,
+          "include_summary_section": true
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["compression"]["enabled"], true);
+    assert_eq!(json["compression"]["mode"], "simple_extractive");
+    assert!(json["compression"]["summarized_memories"].as_u64().unwrap() > 0);
+    assert!(json["context"].as_str().unwrap().contains("Compressed Memory Summary"));
+    assert!(json["budget"]["used_tokens"].as_u64().unwrap()
+        <= json["budget"]["available_tokens"].as_u64().unwrap());
+}
+
+#[tokio::test]
+async fn invalid_compression_mode_returns_validation_error() {
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "test",
+          "compression_mode": "invalid_mode"
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        test_app(),
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn invalid_summary_max_tokens_returns_validation_error() {
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "test",
+          "compression_mode": "simple_extractive",
+          "summary_max_tokens": 0
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        test_app(),
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn compression_mode_disabled_works() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}",
+          "compression_mode": "disabled"
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json.get("compression").is_none());
+}

@@ -3,8 +3,8 @@ use axum::extract::{Extension, State};
 use memcore_core::{ApiKeyScope, BuildContextInput, ContextBudget};
 
 use crate::dto::{
-    format_options_from_request, BuildContextRequest, BuildContextResponse,
-    validate_build_context_request,
+    compression_options_from_request, format_options_from_request, BuildContextRequest,
+    BuildContextResponse, validate_build_context_request,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{check_scope, ApiError};
@@ -21,6 +21,11 @@ pub async fn build_context(
     validate_build_context_request(&request)?;
 
     let format_options = format_options_from_request(&request)?;
+    let budget = ContextBudget {
+        max_tokens: request.max_tokens,
+        reserved_tokens: request.reserved_tokens,
+    };
+    let compression_options = compression_options_from_request(&request, budget.available_tokens())?;
     let tenant = organization.tenant_with_user_id(request.user_id)?;
     let memory_types = request.filters.parse_memory_types()?;
 
@@ -32,11 +37,9 @@ pub async fn build_context(
             max_memories: request.max_memories,
             memory_types,
             include_metadata: request.include_metadata,
-            budget: ContextBudget {
-                max_tokens: request.max_tokens,
-                reserved_tokens: request.reserved_tokens,
-            },
+            budget,
             format_options,
+            compression_options,
         })
         .await?;
 

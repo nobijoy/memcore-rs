@@ -20,8 +20,9 @@ pub use api_keys::{
     ListApiKeysResponse, RevokeApiKeyResponse, MAX_LIST_API_KEYS_LIMIT,
 };
 pub use context::{
-    format_options_from_request, validate_build_context_request, BuildContextRequest,
-    BuildContextResponse, ContextBudgetResponse, ContextMemoryResponse,
+    format_options_from_request, compression_options_from_request,
+    validate_build_context_request, BuildContextRequest,
+    BuildContextResponse, ContextBudgetResponse, ContextCompressionResponse, ContextMemoryResponse,
 };
 pub use keyword_search::parse_keyword_query;
 pub use export::{

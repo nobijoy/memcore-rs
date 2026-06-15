@@ -478,6 +478,7 @@ async fn context_uses_fused_ranking_order() {
             include_metadata: false,
             budget: Default::default(),
             format_options: Default::default(),
+            ..Default::default()
         })
         .await
         .expect("build context");
