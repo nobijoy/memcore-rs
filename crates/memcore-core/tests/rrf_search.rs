@@ -476,6 +476,7 @@ async fn context_uses_fused_ranking_order() {
             max_memories: 10,
             memory_types: None,
             include_metadata: false,
+            budget: Default::default(),
         })
         .await
         .expect("build context");

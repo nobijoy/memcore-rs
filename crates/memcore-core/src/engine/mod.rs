@@ -40,8 +40,8 @@ use crate::importance::ImportanceScorer;
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
 };
-use crate::{assemble_context, BuildContextInput, BuildContextOutput, Fact, FactOperation,
-    FactOperationDecision, MemoryEvent, MemorySearchResult, TenantContext};
+use crate::{assemble_context_with_budget, BuildContextInput, BuildContextOutput, Fact, FactOperation,
+    FactOperationDecision, MemoryEvent, MemorySearchResult, SimpleTokenEstimator, TenantContext};
 use uuid::Uuid;
 
 pub use types::{
@@ -484,6 +484,7 @@ impl MemoryEngine {
     ) -> MemcoreResult<BuildContextOutput> {
         validate_tenant(&input.tenant)?;
         validate_query(&input.query)?;
+        input.budget.validate()?;
         let max_memories = normalize_context_max_memories(input.max_memories)?;
 
         let search_output = self
@@ -496,11 +497,17 @@ impl MemoryEngine {
             })
             .await?;
 
-        let context = assemble_context(&search_output.results, input.include_metadata);
+        let assembled = assemble_context_with_budget(
+            &search_output.results,
+            input.include_metadata,
+            &input.budget,
+            &SimpleTokenEstimator,
+        );
 
         Ok(BuildContextOutput {
-            context,
-            memories: search_output.results,
+            context: assembled.context,
+            memories: assembled.memories,
+            budget: assembled.budget,
         })
     }
 

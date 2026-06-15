@@ -21,7 +21,7 @@ pub use api_keys::{
 };
 pub use context::{
     validate_build_context_request, BuildContextRequest, BuildContextResponse,
-    ContextMemoryResponse,
+    ContextBudgetResponse, ContextMemoryResponse,
 };
 pub use keyword_search::parse_keyword_query;
 pub use export::{

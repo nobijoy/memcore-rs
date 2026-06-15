@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::extract::{Extension, State};
-use memcore_core::{ApiKeyScope, BuildContextInput};
+use memcore_core::{ApiKeyScope, BuildContextInput, ContextBudget};
 
 use crate::dto::{BuildContextRequest, BuildContextResponse, validate_build_context_request};
 use crate::middleware::OrganizationContext;
@@ -28,6 +28,10 @@ pub async fn build_context(
             max_memories: request.max_memories,
             memory_types,
             include_metadata: request.include_metadata,
+            budget: ContextBudget {
+                max_tokens: request.max_tokens,
+                reserved_tokens: request.reserved_tokens,
+            },
         })
         .await?;
 

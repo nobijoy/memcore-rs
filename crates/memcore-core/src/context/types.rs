@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{MemorySearchResult, MemoryType, TenantContext};
 
+use super::budget::{ContextBudget, ContextBudgetUsage};
+
 /// Default maximum memories included in assembled context when callers omit a value.
 pub const DEFAULT_CONTEXT_MAX_MEMORIES: usize = 10;
 
@@ -18,10 +20,13 @@ pub struct BuildContextInput {
     pub max_memories: usize,
     pub memory_types: Option<Vec<MemoryType>>,
     pub include_metadata: bool,
+    #[serde(default)]
+    pub budget: ContextBudget,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuildContextOutput {
     pub context: String,
     pub memories: Vec<MemorySearchResult>,
+    pub budget: ContextBudgetUsage,
 }

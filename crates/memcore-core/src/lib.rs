@@ -23,8 +23,10 @@ pub use dedup::{
 };
 pub use importance::ImportanceScorer;
 pub use context::{
-    assemble_context, BuildContextInput, BuildContextOutput, DEFAULT_CONTEXT_MAX_MEMORIES,
-    EMPTY_CONTEXT_MESSAGE, MAX_CONTEXT_MAX_MEMORIES,
+    assemble_context, assemble_context_with_budget, AssembledContext, BuildContextInput,
+    BuildContextOutput, ContextBudget, ContextBudgetUsage, DEFAULT_CONTEXT_MAX_MEMORIES,
+    DEFAULT_CONTEXT_MAX_TOKENS, DEFAULT_CONTEXT_RESERVED_TOKENS, EMPTY_CONTEXT_MESSAGE,
+    MAX_CONTEXT_MAX_MEMORIES, MAX_CONTEXT_MAX_TOKENS, SimpleTokenEstimator, TokenEstimator,
 };
 pub use engine::{
     AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ExportUserDataInput,

@@ -5,7 +5,7 @@ use utoipa::{Modify, OpenApi};
 
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, ApiKeyItemResponse, ApiKeyScopeResponse,
-    BuildContextRequest, BuildContextResponse, ContextMemoryResponse, CreateApiKeyRequest,
+    BuildContextRequest, BuildContextResponse, ContextBudgetResponse, ContextMemoryResponse, CreateApiKeyRequest,
     CreateApiKeyResponse, DeleteMemoryResponse, ExportFactItemResponse, ExportMemorySourceResponse,
     ApplyRetentionRequest, ApplyRetentionResponse, ApplyRetentionSummaryResponse, ExportUserResponse,
     ForgetUserResponse, ImportUserDataRequest, ImportUserDataResponse, ImportUserDataSummaryResponse,
@@ -85,6 +85,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         ApplyRetentionSummaryResponse,
         BuildContextRequest,
         BuildContextResponse,
+        ContextBudgetResponse,
         ContextMemoryResponse,
         ListMemoryEventsResponse,
         MemoryEventItemResponse,

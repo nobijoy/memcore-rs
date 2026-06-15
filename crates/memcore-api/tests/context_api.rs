@@ -345,3 +345,157 @@ async fn context_lists_higher_ranked_memory_before_lower_ranked() {
     let second_pos = context.find(second_content).expect("second in context");
     assert!(first_pos < second_pos);
 }
+
+#[tokio::test]
+async fn build_context_works_without_budget_fields() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}"
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["context"].as_str().unwrap().contains(MEMORY_CONTENT));
+    assert_eq!(json["budget"]["max_tokens"], 2000);
+    assert_eq!(json["budget"]["reserved_tokens"], 300);
+}
+
+#[tokio::test]
+async fn build_context_accepts_max_tokens_and_reserved_tokens() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}",
+          "max_tokens": 1200,
+          "reserved_tokens": 200
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["budget"]["max_tokens"], 1200);
+    assert_eq!(json["budget"]["reserved_tokens"], 200);
+    assert_eq!(json["budget"]["available_tokens"], 1000);
+}
+
+#[tokio::test]
+async fn invalid_budget_returns_validation_error() {
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "test query",
+          "max_tokens": 500,
+          "reserved_tokens": 500
+        }}"#
+    );
+
+    let (status, json) = response_parts(
+        test_app(),
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn build_context_response_includes_budget_metadata() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}"
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    let budget = &json["budget"];
+    assert!(budget["used_tokens"].is_number());
+    assert!(budget["included_memories"].is_number());
+    assert!(budget["skipped_memories"].is_number());
+    assert!(budget["available_tokens"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn context_output_respects_token_budget() {
+    let app = test_app();
+    let long_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "{}" }}],
+          "metadata": {{}}
+        }}"#,
+        "x".repeat(2000)
+    );
+    let short_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "budget tiny memory alpha bravo" }}],
+          "metadata": {{}}
+        }}"#
+    );
+
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &long_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &short_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "budget tiny memory",
+          "max_tokens": 120,
+          "reserved_tokens": 20
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert_eq!(json["budget"]["included_memories"], 1);
+    assert_eq!(json["budget"]["skipped_memories"], 1);
+    assert_eq!(json["memories"].as_array().unwrap().len(), 1);
+}

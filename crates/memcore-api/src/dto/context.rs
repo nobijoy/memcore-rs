@@ -1,5 +1,5 @@
 use memcore_common::MemcoreError;
-use memcore_core::{BuildContextOutput, MemorySearchResult};
+use memcore_core::{BuildContextOutput, ContextBudget, ContextBudgetUsage, MemorySearchResult};
 
 use super::memories::SearchMemoryFiltersRequest;
 use serde::{Deserialize, Serialize};
@@ -10,12 +10,24 @@ pub fn default_context_max_memories() -> usize {
     memcore_core::DEFAULT_CONTEXT_MAX_MEMORIES
 }
 
+pub fn default_context_max_tokens() -> usize {
+    memcore_core::DEFAULT_CONTEXT_MAX_TOKENS
+}
+
+pub fn default_context_reserved_tokens() -> usize {
+    memcore_core::DEFAULT_CONTEXT_RESERVED_TOKENS
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct BuildContextRequest {
     pub user_id: String,
     pub query: String,
     #[serde(default = "default_context_max_memories")]
     pub max_memories: usize,
+    #[serde(default = "default_context_max_tokens")]
+    pub max_tokens: usize,
+    #[serde(default = "default_context_reserved_tokens")]
+    pub reserved_tokens: usize,
     #[serde(default)]
     pub include_metadata: bool,
     #[serde(default)]
@@ -27,6 +39,30 @@ pub struct BuildContextResponse {
     pub status: &'static str,
     pub context: String,
     pub memories: Vec<ContextMemoryResponse>,
+    pub budget: ContextBudgetResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ContextBudgetResponse {
+    pub max_tokens: usize,
+    pub reserved_tokens: usize,
+    pub available_tokens: usize,
+    pub used_tokens: usize,
+    pub included_memories: usize,
+    pub skipped_memories: usize,
+}
+
+impl From<ContextBudgetUsage> for ContextBudgetResponse {
+    fn from(usage: ContextBudgetUsage) -> Self {
+        Self {
+            max_tokens: usage.max_tokens,
+            reserved_tokens: usage.reserved_tokens,
+            available_tokens: usage.available_tokens,
+            used_tokens: usage.used_tokens,
+            included_memories: usage.included_memories,
+            skipped_memories: usage.skipped_memories,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -48,6 +84,7 @@ impl From<BuildContextOutput> for BuildContextResponse {
                 .iter()
                 .map(ContextMemoryResponse::from)
                 .collect(),
+            budget: output.budget.into(),
         }
     }
 }
@@ -90,5 +127,9 @@ pub fn validate_build_context_request(request: &BuildContextRequest) -> Result<(
         )));
     }
 
-    Ok(())
+    ContextBudget {
+        max_tokens: request.max_tokens,
+        reserved_tokens: request.reserved_tokens,
+    }
+    .validate()
 }
