@@ -15,6 +15,7 @@ use crate::import::{
     collect_import_validation, ImportMode, ImportUserDataInput, ImportUserDataOutput,
     ImportValidationSummary, resolve_import_fact_id,
 };
+use crate::{InMemoryContextCache, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES};
 use crate::ranking::{
     reciprocal_rank_fusion, weighted_score_for, RankedCandidate, RankingConfig, RankingSource,
     RrfConfig,
@@ -40,7 +41,7 @@ use crate::importance::ImportanceScorer;
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
 };
-use crate::{assemble_context_with_budget, apply_provider_compression_summary, BuildContextInput, BuildContextOutput, Fact, FactOperation,
+use crate::{assemble_context_with_budget, apply_provider_compression_summary, build_context_cache_key, cached_entry_from_output, BuildContextInput, BuildContextOutput, ContextCache, ContextCacheConfig, ContextCacheUsage, Fact, FactOperation,
     FactOperationDecision, MemoryEvent, MemorySearchResult, SimpleTokenEstimator, TenantContext};
 use uuid::Uuid;
 
@@ -66,6 +67,8 @@ pub struct MemoryEngine {
     embedding_dedup_config: EmbeddingDeduplicationConfig,
     ranking_config: RankingConfig,
     rrf_config: RrfConfig,
+    context_cache: Arc<dyn ContextCache>,
+    context_cache_config: ContextCacheConfig,
 }
 
 impl MemoryEngine {
@@ -88,6 +91,8 @@ impl MemoryEngine {
             embedding_dedup_config: EmbeddingDeduplicationConfig::default(),
             ranking_config: RankingConfig::default(),
             rrf_config: RrfConfig::default(),
+            context_cache: Arc::new(InMemoryContextCache::new(DEFAULT_CONTEXT_CACHE_MAX_ENTRIES)),
+            context_cache_config: ContextCacheConfig::default(),
         }
     }
 
@@ -129,6 +134,20 @@ impl MemoryEngine {
     pub fn with_rrf_config(mut self, config: RrfConfig) -> Self {
         self.rrf_config = config;
         self
+    }
+
+    pub fn with_context_cache(
+        mut self,
+        cache: Arc<dyn ContextCache>,
+        config: ContextCacheConfig,
+    ) -> Self {
+        self.context_cache = cache;
+        self.context_cache_config = config;
+        self
+    }
+
+    pub fn context_cache_config(&self) -> ContextCacheConfig {
+        self.context_cache_config
     }
 
     pub fn pii_redaction_enabled(&self) -> bool {
@@ -322,6 +341,10 @@ impl MemoryEngine {
             }
         }
 
+        if summary.added + summary.updated + summary.deleted > 0 {
+            self.invalidate_user_context_cache(&input.tenant).await;
+        }
+
         Ok(AddMemoryOutput {
             added: summary.added,
             updated: summary.updated,
@@ -488,6 +511,21 @@ impl MemoryEngine {
         input
             .compression_options
             .validate(input.budget.available_tokens())?;
+        self.context_cache_config.validate()?;
+
+        let cache_key = build_context_cache_key(&input);
+        if self.context_cache_config.enabled {
+            if let Some(entry) = self.context_cache.get(&cache_key).await? {
+                return Ok(BuildContextOutput {
+                    context: entry.context,
+                    memories: entry.memories,
+                    budget: entry.budget,
+                    compression: entry.compression,
+                    cache: ContextCacheUsage::hit(&self.context_cache_config),
+                });
+            }
+        }
+
         let max_memories = normalize_context_max_memories(input.max_memories)?;
         let tenant = input.tenant.clone();
         let compression_options = input.compression_options.clone();
@@ -549,12 +587,26 @@ impl MemoryEngine {
             }
         }
 
-        Ok(BuildContextOutput {
+        let output = BuildContextOutput {
             context: assembled.context,
             memories: assembled.memories,
             budget: assembled.budget,
             compression: assembled.compression,
-        })
+            cache: if self.context_cache_config.enabled {
+                ContextCacheUsage::miss(&self.context_cache_config)
+            } else {
+                ContextCacheUsage::disabled()
+            },
+        };
+
+        if self.context_cache_config.enabled {
+            let entry = cached_entry_from_output(&output, self.context_cache_config.ttl_seconds);
+            self.context_cache
+                .set(cache_key, entry)
+                .await?;
+        }
+
+        Ok(output)
     }
 
     pub async fn list_memories(
@@ -632,6 +684,8 @@ impl MemoryEngine {
         )
         .await;
 
+        self.invalidate_user_context_cache(&input.tenant).await;
+
         Ok(DeleteMemoryOutput { deleted: true })
     }
 
@@ -683,6 +737,10 @@ impl MemoryEngine {
                 output.events_matched = count;
                 output.events_deleted = if input.dry_run { 0 } else { count };
             }
+        }
+
+        if !input.dry_run && output.facts_deleted > 0 {
+            self.invalidate_user_context_cache(&input.tenant).await;
         }
 
         Ok(output)
@@ -798,6 +856,8 @@ impl MemoryEngine {
         )
         .await;
 
+        self.invalidate_user_context_cache(&input.tenant).await;
+
         Ok(ForgetUserOutput { deleted: true })
     }
 
@@ -910,6 +970,8 @@ impl MemoryEngine {
             }
         }
 
+        self.invalidate_user_context_cache(&input.tenant).await;
+
         Ok(ImportUserDataOutput {
             imported_facts,
             imported_events,
@@ -998,6 +1060,15 @@ impl MemoryEngine {
             events: page.items,
             next_cursor: page.next_cursor,
         })
+    }
+
+    async fn invalidate_user_context_cache(&self, tenant: &TenantContext) {
+        if self.context_cache_config.enabled {
+            let _ = self
+                .context_cache
+                .invalidate_user(&tenant.org_id, &tenant.user_id)
+                .await;
+        }
     }
 }
 

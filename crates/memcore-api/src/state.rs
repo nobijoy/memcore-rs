@@ -6,7 +6,10 @@ use memcore_config::{
     AuthMode, EmbeddingProviderKind, EventBackend, FactBackend, LlmProviderKind, Settings,
     VectorBackend,
 };
-use memcore_core::{ApiKeyStore, EmbeddingProvider, FactStore, LlmProvider, MemoryEngine, MemoryEventStore, VectorStore};
+use memcore_core::{
+    ApiKeyStore, ContextCacheConfig, EmbeddingProvider, FactStore, InMemoryContextCache,
+    LlmProvider, MemoryEngine, MemoryEventStore, VectorStore,
+};
 use memcore_providers::{
     MockEmbeddingProvider, MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider,
     OpenAiLlmProvider, default_embedding_dimensions_for_model,
@@ -104,18 +107,21 @@ pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEn
     let vector_store =
         create_vector_store(settings, embedding_provider.dimensions()).await?;
 
-    Ok(MemoryEngine::new(
-        fact_store,
-        vector_store,
-        llm_provider,
-        embedding_provider,
-    )
-    .with_pii_redaction(settings.enable_pii_redaction)
-    .with_event_store(event_store)
-    .with_audit_provider_info(
-        Some(llm_provider_name(settings)),
-        Some(settings.llm_model.clone()),
-    ))
+    Ok(apply_context_cache(
+        MemoryEngine::new(
+            fact_store,
+            vector_store,
+            llm_provider,
+            embedding_provider,
+        )
+        .with_pii_redaction(settings.enable_pii_redaction)
+        .with_event_store(event_store)
+        .with_audit_provider_info(
+            Some(llm_provider_name(settings)),
+            Some(settings.llm_model.clone()),
+        ),
+        settings,
+    )?)
 }
 
 async fn create_api_key_store(settings: &Settings) -> MemcoreResult<Arc<dyn ApiKeyStore>> {
@@ -386,18 +392,35 @@ fn require_qdrant_url(settings: &Settings) -> MemcoreResult<String> {
 
 /// In-memory mock fact and vector stores for fast API tests.
 pub fn create_mock_memory_engine(settings: &Settings) -> MemoryEngine {
-    MemoryEngine::new(
-        Arc::new(MockFactStore::new()),
-        Arc::new(MockVectorStore::new()),
-        Arc::new(MockLlmProvider::new()),
-        Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS)),
+    apply_context_cache(
+        MemoryEngine::new(
+            Arc::new(MockFactStore::new()),
+            Arc::new(MockVectorStore::new()),
+            Arc::new(MockLlmProvider::new()),
+            Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS)),
+        )
+        .with_pii_redaction(settings.enable_pii_redaction)
+        .with_event_store(Arc::new(MockMemoryEventStore::new()))
+        .with_audit_provider_info(
+            Some(llm_provider_name(settings)),
+            Some(settings.llm_model.clone()),
+        ),
+        settings,
     )
-    .with_pii_redaction(settings.enable_pii_redaction)
-    .with_event_store(Arc::new(MockMemoryEventStore::new()))
-    .with_audit_provider_info(
-        Some(llm_provider_name(settings)),
-        Some(settings.llm_model.clone()),
-    )
+    .expect("mock context cache config should be valid")
+}
+
+fn apply_context_cache(engine: MemoryEngine, settings: &Settings) -> MemcoreResult<MemoryEngine> {
+    let config = ContextCacheConfig {
+        enabled: settings.context_cache_enabled,
+        ttl_seconds: settings.context_cache_ttl_seconds,
+        max_entries: settings.context_cache_max_entries,
+    };
+    config.validate()?;
+    Ok(engine.with_context_cache(
+        Arc::new(InMemoryContextCache::new(settings.context_cache_max_entries)),
+        config,
+    ))
 }
 
 fn llm_provider_name(settings: &Settings) -> String {

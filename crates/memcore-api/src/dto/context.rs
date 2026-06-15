@@ -1,8 +1,8 @@
 use memcore_common::MemcoreError;
 use memcore_core::{
-    BuildContextOutput, ContextBudget, ContextBudgetUsage, ContextCompressionMode,
-    ContextCompressionOptions, ContextCompressionUsage, ContextFormat, ContextFormatOptions,
-    MemorySearchResult,
+    BuildContextOutput, ContextBudget, ContextBudgetUsage, ContextCacheUsage,
+    ContextCompressionMode, ContextCompressionOptions, ContextCompressionUsage, ContextFormat,
+    ContextFormatOptions, MemorySearchResult,
 };
 
 use super::memories::SearchMemoryFiltersRequest;
@@ -70,6 +70,8 @@ pub struct BuildContextResponse {
     pub budget: ContextBudgetResponse,
     #[serde(skip_serializing_if = "ContextCompressionResponse::is_disabled")]
     pub compression: ContextCompressionResponse,
+    #[serde(skip_serializing_if = "ContextCacheResponse::is_disabled")]
+    pub cache: ContextCacheResponse,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -78,6 +80,29 @@ pub struct ContextCompressionResponse {
     pub mode: String,
     pub summarized_memories: usize,
     pub summary_tokens: usize,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ContextCacheResponse {
+    pub enabled: bool,
+    pub hit: bool,
+    pub ttl_seconds: Option<u64>,
+}
+
+impl ContextCacheResponse {
+    fn is_disabled(&self) -> bool {
+        !self.enabled
+    }
+}
+
+impl From<ContextCacheUsage> for ContextCacheResponse {
+    fn from(usage: ContextCacheUsage) -> Self {
+        Self {
+            enabled: usage.enabled,
+            hit: usage.hit,
+            ttl_seconds: usage.ttl_seconds,
+        }
+    }
 }
 
 impl ContextCompressionResponse {
@@ -146,6 +171,7 @@ impl From<BuildContextOutput> for BuildContextResponse {
                 .collect(),
             budget: output.budget.into(),
             compression: output.compression.into(),
+            cache: output.cache.into(),
         }
     }
 }

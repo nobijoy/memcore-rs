@@ -25,13 +25,16 @@ pub use importance::ImportanceScorer;
 pub use context::{
     assemble_context, assemble_context_with_budget, apply_provider_compression_summary,
     AssembledContext, BuildContextInput, BuildContextOutput, ContextBudget, ContextBudgetUsage,
-    ContextCompressionMode, ContextCompressionOptions, ContextCompressionUsage, ContextFormat,
+    ContextCompressionMode, ContextCompressionOptions, ContextCompressionUsage, ContextCache,
+    ContextCacheConfig, ContextCacheKey, ContextCacheUsage, ContextFormat,
     ContextFormatOptions, ContextFormatter, ContextMemoryItem, ContextSummarizer,
+    DEFAULT_CONTEXT_CACHE_MAX_ENTRIES, DEFAULT_CONTEXT_CACHE_TTL_SECONDS,
     DEFAULT_CONTEXT_MAX_MEMORIES, DEFAULT_CONTEXT_MAX_TOKENS, DEFAULT_CONTEXT_RESERVED_TOKENS,
-    DEFAULT_SUMMARY_MAX_TOKENS, EMPTY_CONTEXT_MESSAGE, FormattedContext, LlmContextSummarizer,
-    MAX_CONTEXT_MAX_MEMORIES, MAX_CONTEXT_MAX_TOKENS, MAX_SUMMARY_MAX_TOKENS,
+    DEFAULT_SUMMARY_MAX_TOKENS, EMPTY_CONTEXT_MESSAGE, FormattedContext, InMemoryContextCache,
+    LlmContextSummarizer, MAX_CONTEXT_MAX_MEMORIES, MAX_CONTEXT_MAX_TOKENS, MAX_SUMMARY_MAX_TOKENS,
     SimpleContextCompressor, SimpleContextSummarizer, SimpleTokenEstimator, TokenEstimator,
-    effective_summary_budget, summarize_skipped_memories,
+    build_context_cache_key, cached_entry_from_output, effective_summary_budget,
+    summarize_skipped_memories,
 };
 pub use engine::{
     AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ExportUserDataInput,

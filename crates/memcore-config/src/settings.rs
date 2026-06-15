@@ -35,6 +35,9 @@ const MEMCORE_METRICS_ENABLED: &str = "MEMCORE_METRICS_ENABLED";
 const MEMCORE_RETENTION_ENABLED: &str = "MEMCORE_RETENTION_ENABLED";
 const MEMCORE_FACT_RETENTION_DAYS: &str = "MEMCORE_FACT_RETENTION_DAYS";
 const MEMCORE_EVENT_RETENTION_DAYS: &str = "MEMCORE_EVENT_RETENTION_DAYS";
+const MEMCORE_CONTEXT_CACHE_ENABLED: &str = "MEMCORE_CONTEXT_CACHE_ENABLED";
+const MEMCORE_CONTEXT_CACHE_TTL_SECONDS: &str = "MEMCORE_CONTEXT_CACHE_TTL_SECONDS";
+const MEMCORE_CONTEXT_CACHE_MAX_ENTRIES: &str = "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 
@@ -173,6 +176,12 @@ pub struct Settings {
     pub fact_retention_days: u32,
     /// Default event retention window in days (`0` disables event retention).
     pub event_retention_days: u32,
+    /// In-memory context response cache toggle.
+    pub context_cache_enabled: bool,
+    /// Context cache entry TTL in seconds.
+    pub context_cache_ttl_seconds: u64,
+    /// Maximum in-memory context cache entries per process.
+    pub context_cache_max_entries: usize,
 }
 
 impl Default for Settings {
@@ -212,6 +221,9 @@ impl Default for Settings {
             retention_enabled: false,
             fact_retention_days: 0,
             event_retention_days: 0,
+            context_cache_enabled: false,
+            context_cache_ttl_seconds: 300,
+            context_cache_max_entries: 1000,
         }
     }
 }
@@ -273,6 +285,16 @@ impl Settings {
             parse_u32(MEMCORE_FACT_RETENTION_DAYS, defaults.fact_retention_days)?;
         let event_retention_days =
             parse_u32(MEMCORE_EVENT_RETENTION_DAYS, defaults.event_retention_days)?;
+        let context_cache_enabled =
+            parse_bool(MEMCORE_CONTEXT_CACHE_ENABLED, defaults.context_cache_enabled)?;
+        let context_cache_ttl_seconds = parse_u64(
+            MEMCORE_CONTEXT_CACHE_TTL_SECONDS,
+            defaults.context_cache_ttl_seconds,
+        )?;
+        let context_cache_max_entries = parse_usize(
+            MEMCORE_CONTEXT_CACHE_MAX_ENTRIES,
+            defaults.context_cache_max_entries,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -315,6 +337,9 @@ impl Settings {
             retention_enabled,
             fact_retention_days,
             event_retention_days,
+            context_cache_enabled,
+            context_cache_ttl_seconds,
+            context_cache_max_entries,
         };
 
         settings.validate()?;
@@ -478,6 +503,21 @@ impl Settings {
             ));
         }
 
+        if self.context_cache_enabled {
+            if self.context_cache_ttl_seconds == 0 {
+                return Err(MemcoreError::ValidationError(
+                    "MEMCORE_CONTEXT_CACHE_TTL_SECONDS must be greater than 0 when context cache is enabled"
+                        .to_string(),
+                ));
+            }
+            if self.context_cache_max_entries == 0 {
+                return Err(MemcoreError::ValidationError(
+                    "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES must be greater than 0 when context cache is enabled"
+                        .to_string(),
+                ));
+            }
+        }
+
         if self.vector_backend == VectorBackend::Qdrant {
             if self.qdrant_url.trim().is_empty() {
                 return Err(MemcoreError::ValidationError(
@@ -544,6 +584,24 @@ fn parse_f32(key: &str, default: f32) -> MemcoreResult<f32> {
     match env::var(key) {
         Ok(value) => value.parse::<f32>().map_err(|_| {
             MemcoreError::ValidationError(format!("{key} must be a valid floating-point number"))
+        }),
+        Err(_) => Ok(default),
+    }
+}
+
+fn parse_u64(key: &str, default: u64) -> MemcoreResult<u64> {
+    match env::var(key) {
+        Ok(value) => value.parse::<u64>().map_err(|_| {
+            MemcoreError::ValidationError(format!("{key} must be a valid unsigned integer"))
+        }),
+        Err(_) => Ok(default),
+    }
+}
+
+fn parse_usize(key: &str, default: usize) -> MemcoreResult<usize> {
+    match env::var(key) {
+        Ok(value) => value.parse::<usize>().map_err(|_| {
+            MemcoreError::ValidationError(format!("{key} must be a valid unsigned integer"))
         }),
         Err(_) => Ok(default),
     }
@@ -728,7 +786,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 34] = [
+    const ENV_KEYS: [&str; 37] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -761,6 +819,9 @@ mod tests {
         "MEMCORE_RETENTION_ENABLED",
         "MEMCORE_FACT_RETENTION_DAYS",
         "MEMCORE_EVENT_RETENTION_DAYS",
+        "MEMCORE_CONTEXT_CACHE_ENABLED",
+        "MEMCORE_CONTEXT_CACHE_TTL_SECONDS",
+        "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     ];
@@ -833,6 +894,35 @@ mod tests {
         assert!(!settings.retention_enabled);
         assert_eq!(settings.fact_retention_days, 0);
         assert_eq!(settings.event_retention_days, 0);
+    }
+
+    #[test]
+    fn context_cache_disabled_by_default() {
+        let settings = Settings::default();
+        assert!(!settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_ttl_seconds, 300);
+        assert_eq!(settings.context_cache_max_entries, 1000);
+    }
+
+    #[test]
+    fn loads_context_cache_settings_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_ENABLED", "true");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_TTL_SECONDS", "120");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_MAX_ENTRIES", "50");
+        }
+
+        let settings = Settings::from_env().expect("context cache settings should load");
+        assert!(settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_ttl_seconds, 120);
+        assert_eq!(settings.context_cache_max_entries, 50);
     }
 
     #[test]

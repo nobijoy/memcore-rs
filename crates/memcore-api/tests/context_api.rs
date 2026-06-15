@@ -3,9 +3,10 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{AppState, create_app};
+use memcore_api::{create_mock_memory_engine, AppState, create_app};
 use memcore_config::Settings;
-use memcore_core::EMPTY_CONTEXT_MESSAGE;
+use memcore_core::{ContextCacheConfig, InMemoryContextCache, EMPTY_CONTEXT_MESSAGE};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 use common::authorization_header;
@@ -13,6 +14,21 @@ use common::authorization_header;
 const ORG_ID: &str = "org_123";
 const USER_ID: &str = "user_123";
 const MEMORY_CONTENT: &str = "I am learning Rust and building a memory engine.";
+
+fn test_app_with_cache() -> axum::Router {
+    let settings = Settings::default();
+    let engine = Arc::new(
+        create_mock_memory_engine(&settings).with_context_cache(
+            Arc::new(InMemoryContextCache::new(100)),
+            ContextCacheConfig {
+                enabled: true,
+                ttl_seconds: 300,
+                max_entries: 100,
+            },
+        ),
+    );
+    create_app(AppState::with_memory_engine(settings, engine))
+}
 
 fn test_app() -> axum::Router {
     create_app(AppState::new(Settings::default()))
@@ -828,4 +844,102 @@ async fn compression_mode_disabled_works() {
 
     assert_eq!(status, StatusCode::OK);
     assert!(json.get("compression").is_none());
+}
+
+#[tokio::test]
+async fn default_context_request_has_no_cache_field() {
+    let app = test_app();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}"
+        }}"#
+    );
+
+    let (_, json) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+
+    assert!(json.get("cache").is_none());
+}
+
+#[tokio::test]
+async fn repeated_context_request_returns_cache_hit_when_enabled() {
+    let app = test_app_with_cache();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}"
+        }}"#
+    );
+
+    let (_, first) = response_parts(
+        app.clone(),
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+    assert_eq!(first["cache"]["enabled"], true);
+    assert_eq!(first["cache"]["hit"], false);
+
+    let (_, second) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+    assert_eq!(second["cache"]["hit"], true);
+}
+
+#[tokio::test]
+async fn memory_add_invalidates_context_cache() {
+    let app = test_app_with_cache();
+    seed_memory(&app).await;
+
+    let context_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "query": "{MEMORY_CONTENT}"
+        }}"#
+    );
+
+    let _ = response_parts(
+        app.clone(),
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+    let (_, hit) = response_parts(
+        app.clone(),
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+    assert_eq!(hit["cache"]["hit"], true);
+
+    let add_body = format!(
+        r#"{{
+          "user_id": "{USER_ID}",
+          "messages": [{{ "role": "user", "content": "Another cache invalidation memory." }}],
+          "metadata": {{}}
+        }}"#
+    );
+    assert_eq!(
+        response_parts(
+            app.clone(),
+            post_request("/api/v1/memories", &add_body, Some(ORG_ID)),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+
+    let (_, miss) = response_parts(
+        app,
+        post_request("/api/v1/context", &context_body, Some(ORG_ID)),
+    )
+    .await;
+    assert_eq!(miss["cache"]["hit"], false);
 }

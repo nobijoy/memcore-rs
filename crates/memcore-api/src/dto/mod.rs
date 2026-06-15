@@ -22,7 +22,8 @@ pub use api_keys::{
 pub use context::{
     format_options_from_request, compression_options_from_request,
     validate_build_context_request, BuildContextRequest,
-    BuildContextResponse, ContextBudgetResponse, ContextCompressionResponse, ContextMemoryResponse,
+    BuildContextResponse, ContextBudgetResponse, ContextCacheResponse, ContextCompressionResponse,
+    ContextMemoryResponse,
 };
 pub use keyword_search::parse_keyword_query;
 pub use export::{

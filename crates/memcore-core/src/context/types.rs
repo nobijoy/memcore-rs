@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{MemorySearchResult, MemoryType, TenantContext};
 
 use super::budget::{ContextBudget, ContextBudgetUsage};
+use super::cache::ContextCacheUsage;
 use super::compression_options::{ContextCompressionOptions, ContextCompressionUsage};
 use super::format_options::ContextFormatOptions;
 
@@ -51,4 +52,5 @@ pub struct BuildContextOutput {
     pub memories: Vec<MemorySearchResult>,
     pub budget: ContextBudgetUsage,
     pub compression: ContextCompressionUsage,
+    pub cache: ContextCacheUsage,
 }
