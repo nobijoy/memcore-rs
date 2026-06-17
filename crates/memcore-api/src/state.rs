@@ -11,9 +11,12 @@ use memcore_core::{
     LlmProvider, MemoryEngine, MemoryEventStore, VectorStore,
 };
 use memcore_providers::{
-    MockEmbeddingProvider, MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider,
-    OpenAiLlmProvider, ProviderExecutionPolicy, default_embedding_dimensions_for_model,
-    wrap_embedding_provider, wrap_llm_provider,
+    build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
+    validate_embedding_provider_name, validate_llm_provider_name, validate_provider_fallback_order,
+    validate_summarizer_provider_name, CircuitBreakerConfig, MockEmbeddingProvider,
+    MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider, ProviderCandidate,
+    ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
+    ProviderRoutingMetrics, default_embedding_dimensions_for_model,
 };
 use memcore_storage::{
     MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteApiKeyStore,
@@ -32,6 +35,134 @@ use memcore_storage::RedisContextCache;
 
 /// Default embedding dimensions for the mock embedding provider.
 const MOCK_EMBEDDING_DIMENSIONS: usize = 8;
+
+struct ProviderRuntime {
+    circuit_breaker: Arc<ProviderCircuitBreaker>,
+    metrics: Arc<ProviderRoutingMetrics>,
+    policy: ProviderExecutionPolicy,
+}
+
+fn provider_runtime(settings: &Settings) -> MemcoreResult<ProviderRuntime> {
+    Ok(ProviderRuntime {
+        circuit_breaker: Arc::new(ProviderCircuitBreaker::new(
+            CircuitBreakerConfig::from_config(
+                settings.provider_circuit_breaker_enabled,
+                settings.provider_circuit_breaker_failure_threshold,
+                settings.provider_circuit_breaker_reset_timeout_seconds,
+                settings.provider_circuit_breaker_half_open_max_calls,
+            )?,
+        )),
+        metrics: ProviderRoutingMetrics::new(),
+        policy: provider_execution_policy(settings)?,
+    })
+}
+
+fn llm_provider_kind_name(kind: &LlmProviderKind) -> &'static str {
+    match kind {
+        LlmProviderKind::Mock => "mock",
+        LlmProviderKind::OpenAi => "openai",
+        LlmProviderKind::OpenRouter => "openrouter",
+        LlmProviderKind::Anthropic => "anthropic",
+        LlmProviderKind::Groq => "groq",
+    }
+}
+
+fn embedding_provider_kind_name(kind: &EmbeddingProviderKind) -> &'static str {
+    match kind {
+        EmbeddingProviderKind::Mock => "mock",
+        EmbeddingProviderKind::OpenAi => "openai",
+    }
+}
+
+fn build_llm_provider_by_name(
+    name: &str,
+    settings: &Settings,
+) -> MemcoreResult<Arc<dyn LlmProvider>> {
+    match name {
+        "mock" => Ok(Arc::new(MockLlmProvider::new())),
+        "openai" => {
+            let api_key = require_openai_api_key(
+                settings,
+                "OPENAI_API_KEY is required when MEMCORE_LLM_PROVIDER=openai",
+            )?;
+            let client = OpenAiClient::new(&api_key, &settings.openai_base_url)
+                .map_err(|err| provider_init_error("OpenAI LLM", err))?;
+            Ok(Arc::new(OpenAiLlmProvider::new(client, settings.llm_model.clone())))
+        }
+        "openrouter" => Err(MemcoreError::ValidationError(
+            "openrouter LLM provider is not wired into the API yet".to_string(),
+        )),
+        "anthropic" => Err(MemcoreError::ValidationError(
+            "anthropic LLM provider is not wired into the API yet".to_string(),
+        )),
+        "groq" => Err(MemcoreError::ValidationError(
+            "groq LLM provider is not wired into the API yet".to_string(),
+        )),
+        _ => Err(MemcoreError::ValidationError(format!(
+            "unknown LLM provider in fallback order: {name}"
+        ))),
+    }
+}
+
+fn build_embedding_provider_by_name(
+    name: &str,
+    settings: &Settings,
+) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
+    match name {
+        "mock" => Ok(Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS))),
+        "openai" => {
+            let api_key = require_openai_api_key(
+                settings,
+                "OPENAI_API_KEY is required when MEMCORE_EMBEDDING_PROVIDER=openai",
+            )?;
+            let client = OpenAiClient::new(&api_key, &settings.openai_base_url)
+                .map_err(|err| provider_init_error("OpenAI embedding", err))?;
+            let dimensions =
+                default_embedding_dimensions_for_model(&settings.embedding_model);
+            let provider = OpenAiEmbeddingProvider::new(
+                client,
+                settings.embedding_model.clone(),
+                dimensions,
+            )
+            .map_err(|err| provider_init_error("OpenAI embedding", err))?;
+            Ok(Arc::new(provider))
+        }
+        _ => Err(MemcoreError::ValidationError(format!(
+            "unknown embedding provider in fallback order: {name}"
+        ))),
+    }
+}
+
+fn llm_candidates_from_names(
+    names: &[String],
+    capability: ProviderCapability,
+    settings: &Settings,
+) -> MemcoreResult<Vec<ProviderCandidate<Arc<dyn LlmProvider>>>> {
+    names
+        .iter()
+        .map(|name| {
+            Ok(ProviderCandidate {
+                provider_id: ProviderId::new(name.clone(), capability),
+                provider: build_llm_provider_by_name(name, settings)?,
+            })
+        })
+        .collect()
+}
+
+fn embedding_candidates_from_names(
+    names: &[String],
+    settings: &Settings,
+) -> MemcoreResult<Vec<ProviderCandidate<Arc<dyn EmbeddingProvider>>>> {
+    names
+        .iter()
+        .map(|name| {
+            Ok(ProviderCandidate {
+                provider_id: ProviderId::new(name.clone(), ProviderCapability::Embedding),
+                provider: build_embedding_provider_by_name(name, settings)?,
+            })
+        })
+        .collect()
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -286,64 +417,71 @@ fn provider_execution_policy(settings: &Settings) -> MemcoreResult<ProviderExecu
 }
 
 fn create_llm_provider(settings: &Settings) -> MemcoreResult<Arc<dyn LlmProvider>> {
-    let policy = provider_execution_policy(settings)?;
-    let inner: Arc<dyn LlmProvider> = match settings.llm_provider {
-        LlmProviderKind::Mock => Arc::new(MockLlmProvider::new()),
-        LlmProviderKind::OpenAi => {
-            let api_key = require_openai_api_key(
-                settings,
-                "OPENAI_API_KEY is required when MEMCORE_LLM_PROVIDER=openai",
-            )?;
-            let client = OpenAiClient::new(&api_key, &settings.openai_base_url).map_err(|err| {
-                provider_init_error("OpenAI LLM", err)
-            })?;
-            Arc::new(OpenAiLlmProvider::new(client, settings.llm_model.clone()))
-        }
-        LlmProviderKind::OpenRouter => {
-            return Err(MemcoreError::ValidationError(
-                "openrouter LLM provider is not wired into the API yet".to_string(),
-            ))
-        }
-        LlmProviderKind::Anthropic => {
-            return Err(MemcoreError::ValidationError(
-                "anthropic LLM provider is not wired into the API yet".to_string(),
-            ))
-        }
-        LlmProviderKind::Groq => {
-            return Err(MemcoreError::ValidationError(
-                "groq LLM provider is not wired into the API yet".to_string(),
-            ))
-        }
+    let runtime = provider_runtime(settings)?;
+    let llm_names = if settings.provider_fallback_enabled {
+        settings.llm_fallback_order.clone()
+    } else {
+        vec![llm_provider_kind_name(&settings.llm_provider).to_string()]
     };
-    Ok(wrap_llm_provider(inner, policy))
+    let summarizer_names = if settings.provider_fallback_enabled {
+        settings.summarizer_fallback_order.clone()
+    } else {
+        vec![llm_provider_kind_name(&settings.llm_provider).to_string()]
+    };
+
+    if settings.provider_fallback_enabled {
+        validate_provider_fallback_order(&llm_names, validate_llm_provider_name)?;
+        validate_provider_fallback_order(&summarizer_names, validate_summarizer_provider_name)?;
+    } else if matches!(
+        settings.llm_provider,
+        LlmProviderKind::OpenRouter | LlmProviderKind::Anthropic | LlmProviderKind::Groq
+    ) {
+        return build_llm_provider_by_name(
+            llm_provider_kind_name(&settings.llm_provider),
+            settings,
+        );
+    }
+
+    let providers = llm_candidates_from_names(&llm_names, ProviderCapability::Llm, settings)?;
+    let summarizer_providers = llm_candidates_from_names(
+        &summarizer_names,
+        ProviderCapability::Summarization,
+        settings,
+    )?;
+
+    Ok(build_resilient_llm_from_candidates(
+        providers,
+        summarizer_providers,
+        runtime.circuit_breaker,
+        runtime.policy,
+        settings.provider_fallback_enabled,
+        Some(runtime.metrics),
+    ))
 }
 
 fn create_embedding_provider(settings: &Settings) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
-    let policy = provider_execution_policy(settings)?;
-    let inner: Arc<dyn EmbeddingProvider> = match settings.embedding_provider {
-        EmbeddingProviderKind::Mock => {
-            Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS))
-        }
-        EmbeddingProviderKind::OpenAi => {
-            let api_key = require_openai_api_key(
-                settings,
-                "OPENAI_API_KEY is required when MEMCORE_EMBEDDING_PROVIDER=openai",
-            )?;
-            let client = OpenAiClient::new(&api_key, &settings.openai_base_url).map_err(|err| {
-                provider_init_error("OpenAI embedding", err)
-            })?;
-            let dimensions =
-                default_embedding_dimensions_for_model(&settings.embedding_model);
-            let provider = OpenAiEmbeddingProvider::new(
-                client,
-                settings.embedding_model.clone(),
-                dimensions,
-            )
-            .map_err(|err| provider_init_error("OpenAI embedding", err))?;
-            Arc::new(provider)
-        }
+    let runtime = provider_runtime(settings)?;
+    let names = if settings.provider_fallback_enabled {
+        settings.embedding_fallback_order.clone()
+    } else {
+        vec![
+            embedding_provider_kind_name(&settings.embedding_provider).to_string(),
+        ]
     };
-    Ok(wrap_embedding_provider(inner, policy))
+
+    if settings.provider_fallback_enabled {
+        validate_provider_fallback_order(&names, validate_embedding_provider_name)?;
+    }
+
+    let providers = embedding_candidates_from_names(&names, settings)?;
+
+    build_resilient_embedding_from_candidates(
+        providers,
+        runtime.circuit_breaker,
+        runtime.policy,
+        settings.provider_fallback_enabled,
+        Some(runtime.metrics),
+    )
 }
 
 fn require_openai_api_key(settings: &Settings, message: &str) -> MemcoreResult<String> {
@@ -424,8 +562,8 @@ pub fn create_mock_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEng
         MemoryEngine::new(
             Arc::new(MockFactStore::new()),
             Arc::new(MockVectorStore::new()),
-            Arc::new(MockLlmProvider::new()),
-            Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS)),
+            create_llm_provider(settings)?,
+            create_embedding_provider(settings)?,
         )
         .with_pii_redaction(settings.enable_pii_redaction)
         .with_event_store(Arc::new(MockMemoryEventStore::new()))

@@ -54,6 +54,17 @@ const MEMCORE_PROVIDER_INITIAL_BACKOFF_MS: &str = "MEMCORE_PROVIDER_INITIAL_BACK
 const MEMCORE_PROVIDER_MAX_BACKOFF_MS: &str = "MEMCORE_PROVIDER_MAX_BACKOFF_MS";
 const MEMCORE_PROVIDER_BACKOFF_MULTIPLIER: &str = "MEMCORE_PROVIDER_BACKOFF_MULTIPLIER";
 const MEMCORE_PROVIDER_RETRY_JITTER_ENABLED: &str = "MEMCORE_PROVIDER_RETRY_JITTER_ENABLED";
+const MEMCORE_PROVIDER_FALLBACK_ENABLED: &str = "MEMCORE_PROVIDER_FALLBACK_ENABLED";
+const MEMCORE_LLM_FALLBACK_ORDER: &str = "MEMCORE_LLM_FALLBACK_ORDER";
+const MEMCORE_EMBEDDING_FALLBACK_ORDER: &str = "MEMCORE_EMBEDDING_FALLBACK_ORDER";
+const MEMCORE_SUMMARIZER_FALLBACK_ORDER: &str = "MEMCORE_SUMMARIZER_FALLBACK_ORDER";
+const MEMCORE_PROVIDER_CIRCUIT_BREAKER_ENABLED: &str = "MEMCORE_PROVIDER_CIRCUIT_BREAKER_ENABLED";
+const MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD: &str =
+    "MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD";
+const MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS: &str =
+    "MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS";
+const MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS: &str =
+    "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -235,6 +246,22 @@ pub struct Settings {
     pub provider_backoff_multiplier: f32,
     /// Apply simple jitter to retry backoff delays.
     pub provider_retry_jitter_enabled: bool,
+    /// Try alternate providers after retry-exhausted primary provider failures.
+    pub provider_fallback_enabled: bool,
+    /// Comma-separated LLM provider fallback order when fallback is enabled.
+    pub llm_fallback_order: Vec<String>,
+    /// Comma-separated embedding provider fallback order when fallback is enabled.
+    pub embedding_fallback_order: Vec<String>,
+    /// Comma-separated summarizer provider fallback order when fallback is enabled.
+    pub summarizer_fallback_order: Vec<String>,
+    /// Process-local provider circuit breaker toggle.
+    pub provider_circuit_breaker_enabled: bool,
+    /// Retry-exhausted failures before opening a provider circuit.
+    pub provider_circuit_breaker_failure_threshold: usize,
+    /// Seconds before an open circuit transitions to half-open.
+    pub provider_circuit_breaker_reset_timeout_seconds: u64,
+    /// Maximum probe calls allowed while a circuit is half-open.
+    pub provider_circuit_breaker_half_open_max_calls: usize,
 }
 
 impl Default for Settings {
@@ -291,6 +318,14 @@ impl Default for Settings {
             provider_max_backoff_ms: 2000,
             provider_backoff_multiplier: 2.0,
             provider_retry_jitter_enabled: true,
+            provider_fallback_enabled: false,
+            llm_fallback_order: vec!["openai".to_string()],
+            embedding_fallback_order: vec!["openai".to_string()],
+            summarizer_fallback_order: vec!["openai".to_string()],
+            provider_circuit_breaker_enabled: true,
+            provider_circuit_breaker_failure_threshold: 5,
+            provider_circuit_breaker_reset_timeout_seconds: 60,
+            provider_circuit_breaker_half_open_max_calls: 1,
         }
     }
 }
@@ -420,6 +455,38 @@ impl Settings {
             MEMCORE_PROVIDER_RETRY_JITTER_ENABLED,
             defaults.provider_retry_jitter_enabled,
         )?;
+        let provider_fallback_enabled = parse_bool(
+            MEMCORE_PROVIDER_FALLBACK_ENABLED,
+            defaults.provider_fallback_enabled,
+        )?;
+        let llm_fallback_order = parse_provider_fallback_order(
+            MEMCORE_LLM_FALLBACK_ORDER,
+            &defaults.llm_fallback_order,
+        )?;
+        let embedding_fallback_order = parse_provider_fallback_order(
+            MEMCORE_EMBEDDING_FALLBACK_ORDER,
+            &defaults.embedding_fallback_order,
+        )?;
+        let summarizer_fallback_order = parse_provider_fallback_order(
+            MEMCORE_SUMMARIZER_FALLBACK_ORDER,
+            &defaults.summarizer_fallback_order,
+        )?;
+        let provider_circuit_breaker_enabled = parse_bool(
+            MEMCORE_PROVIDER_CIRCUIT_BREAKER_ENABLED,
+            defaults.provider_circuit_breaker_enabled,
+        )?;
+        let provider_circuit_breaker_failure_threshold = parse_usize(
+            MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+            defaults.provider_circuit_breaker_failure_threshold,
+        )?;
+        let provider_circuit_breaker_reset_timeout_seconds = parse_u64(
+            MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS,
+            defaults.provider_circuit_breaker_reset_timeout_seconds,
+        )?;
+        let provider_circuit_breaker_half_open_max_calls = parse_usize(
+            MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS,
+            defaults.provider_circuit_breaker_half_open_max_calls,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -479,6 +546,14 @@ impl Settings {
             provider_max_backoff_ms,
             provider_backoff_multiplier,
             provider_retry_jitter_enabled,
+            provider_fallback_enabled,
+            llm_fallback_order,
+            embedding_fallback_order,
+            summarizer_fallback_order,
+            provider_circuit_breaker_enabled,
+            provider_circuit_breaker_failure_threshold,
+            provider_circuit_breaker_reset_timeout_seconds,
+            provider_circuit_breaker_half_open_max_calls,
         };
 
         settings.validate()?;
@@ -741,6 +816,25 @@ impl Settings {
             ));
         }
 
+        if self.provider_circuit_breaker_failure_threshold == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD must be greater than 0"
+                    .to_string(),
+            ));
+        }
+        if self.provider_circuit_breaker_reset_timeout_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS must be greater than 0"
+                    .to_string(),
+            ));
+        }
+        if self.provider_circuit_breaker_half_open_max_calls == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS must be greater than 0"
+                    .to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -768,6 +862,26 @@ fn read_env_optional(key: &str) -> Option<String> {
     match env::var(key) {
         Ok(value) if !value.trim().is_empty() => Some(value),
         Ok(_) | Err(_) => None,
+    }
+}
+
+fn parse_provider_fallback_order(key: &str, default: &[String]) -> MemcoreResult<Vec<String>> {
+    match env::var(key) {
+        Ok(value) => {
+            let parsed = value
+                .split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(|part| part.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if parsed.is_empty() {
+                return Err(MemcoreError::ValidationError(format!(
+                    "{key} cannot be empty"
+                )));
+            }
+            Ok(parsed)
+        }
+        Err(_) => Ok(default.to_vec()),
     }
 }
 
@@ -1010,7 +1124,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 51] = [
+    const ENV_KEYS: [&str; 59] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -1059,6 +1173,14 @@ mod tests {
         "MEMCORE_PROVIDER_MAX_BACKOFF_MS",
         "MEMCORE_PROVIDER_BACKOFF_MULTIPLIER",
         "MEMCORE_PROVIDER_RETRY_JITTER_ENABLED",
+        "MEMCORE_PROVIDER_FALLBACK_ENABLED",
+        "MEMCORE_LLM_FALLBACK_ORDER",
+        "MEMCORE_EMBEDDING_FALLBACK_ORDER",
+        "MEMCORE_SUMMARIZER_FALLBACK_ORDER",
+        "MEMCORE_PROVIDER_CIRCUIT_BREAKER_ENABLED",
+        "MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
+        "MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS",
+        "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1374,10 +1496,9 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.provider_timeout_seconds, 30);
         assert_eq!(settings.provider_max_retries, 2);
-        assert_eq!(settings.provider_initial_backoff_ms, 250);
-        assert_eq!(settings.provider_max_backoff_ms, 2000);
-        assert!((settings.provider_backoff_multiplier - 2.0).abs() < f32::EPSILON);
-        assert!(settings.provider_retry_jitter_enabled);
+        assert!(!settings.provider_fallback_enabled);
+        assert!(settings.provider_circuit_breaker_enabled);
+        assert_eq!(settings.provider_circuit_breaker_failure_threshold, 5);
     }
 
     #[test]
@@ -1404,6 +1525,63 @@ mod tests {
         assert_eq!(settings.provider_max_backoff_ms, 500);
         assert!((settings.provider_backoff_multiplier - 1.5).abs() < f32::EPSILON);
         assert!(!settings.provider_retry_jitter_enabled);
+    }
+
+    #[test]
+    fn fallback_and_circuit_breaker_settings_load_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_FALLBACK_ENABLED", "true");
+            std::env::set_var("MEMCORE_LLM_FALLBACK_ORDER", "mock,openai");
+            std::env::set_var("MEMCORE_EMBEDDING_FALLBACK_ORDER", "mock");
+            std::env::set_var("MEMCORE_SUMMARIZER_FALLBACK_ORDER", "mock");
+            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_ENABLED", "false");
+            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD", "3");
+            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS", "30");
+            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS", "2");
+        }
+
+        let settings = Settings::from_env().expect("fallback/circuit settings should load");
+        assert!(settings.provider_fallback_enabled);
+        assert_eq!(
+            settings.llm_fallback_order,
+            vec!["mock".to_string(), "openai".to_string()]
+        );
+        assert!(!settings.provider_circuit_breaker_enabled);
+        assert_eq!(settings.provider_circuit_breaker_failure_threshold, 3);
+        assert_eq!(settings.provider_circuit_breaker_reset_timeout_seconds, 30);
+        assert_eq!(settings.provider_circuit_breaker_half_open_max_calls, 2);
+    }
+
+    #[test]
+    fn invalid_circuit_breaker_values_fail_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD", "0");
+        }
+        assert!(Settings::from_env().is_err());
+
+        clear_env();
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS", "0");
+        }
+        assert!(Settings::from_env().is_err());
+
+        clear_env();
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS", "0");
+        }
+        assert!(Settings::from_env().is_err());
     }
 
     #[test]

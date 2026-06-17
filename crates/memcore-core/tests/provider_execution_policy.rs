@@ -211,7 +211,7 @@ fn engine_with_providers(
 async fn retryable_embedding_failure_succeeds_on_retry_for_search() {
     let flaky = Arc::new(FlakyEmbeddingProvider::new(4, 1));
     let flaky_for_count = flaky.clone();
-    let embedding = wrap_embedding_provider(flaky, test_policy());
+    let embedding = wrap_embedding_provider(flaky, test_policy()).expect("wrap");
     let engine = engine_with_providers(
         Arc::new(MockLlmProvider::new()),
         embedding,
@@ -287,7 +287,7 @@ async fn embedding_provider_timeout_is_retried_when_policy_allows() {
         jitter_enabled: false,
         backoff_multiplier: 2.0,
     };
-    let embedding = wrap_embedding_provider(slow, policy);
+    let embedding = wrap_embedding_provider(slow, policy).expect("wrap");
     let engine = engine_with_providers(
         Arc::new(MockLlmProvider::new()),
         embedding,
@@ -337,7 +337,7 @@ async fn context_build_uses_embedding_policy_for_search_path() {
 
     let flaky = Arc::new(FlakyEmbeddingProvider::new(4, 1));
     let flaky_for_count = flaky.clone();
-    let embedding = wrap_embedding_provider(flaky, test_policy());
+    let embedding = wrap_embedding_provider(flaky, test_policy()).expect("wrap");
     let engine = MemoryEngine::new(
         fact_store,
         Arc::new(MockVectorStore::new()),
@@ -410,7 +410,7 @@ async fn lifecycle_classification_uses_embedding_policy_on_update() {
 
     let flaky = Arc::new(FlakyEmbeddingProvider::new(4, 1));
     let flaky_for_count = flaky.clone();
-    let embedding = wrap_embedding_provider(flaky, test_policy());
+    let embedding = wrap_embedding_provider(flaky, test_policy()).expect("wrap");
     let engine = MemoryEngine::new(
         fact_store,
         vector_store,

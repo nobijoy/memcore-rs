@@ -27,6 +27,7 @@ pub enum MemcoreError {
 }
 
 pub const PROVIDER_TIMEOUT_MESSAGE: &str = "provider operation timed out";
+pub const PROVIDER_CIRCUIT_OPEN_MESSAGE: &str = "provider circuit is open";
 
 pub type MemcoreResult<T> = Result<T, MemcoreError>;
 
@@ -39,6 +40,14 @@ impl MemcoreError {
         matches!(self, Self::Timeout(msg) if msg == PROVIDER_TIMEOUT_MESSAGE)
     }
 
+    pub fn provider_circuit_open() -> Self {
+        Self::ProviderError(PROVIDER_CIRCUIT_OPEN_MESSAGE.to_string())
+    }
+
+    pub fn is_provider_circuit_open(&self) -> bool {
+        matches!(self, Self::ProviderError(msg) if msg == PROVIDER_CIRCUIT_OPEN_MESSAGE)
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "unauthorized",
@@ -47,6 +56,9 @@ impl MemcoreError {
             Self::NotFound(_) => "not_found",
             Self::Conflict(_) => "conflict",
             Self::RateLimited => "rate_limited",
+            Self::ProviderError(msg) if msg == PROVIDER_CIRCUIT_OPEN_MESSAGE => {
+                "provider_circuit_open"
+            }
             Self::ProviderError(_) => "provider_error",
             Self::StorageError(_) => "storage_error",
             Self::ValidationError(_) => "validation_error",
@@ -76,6 +88,13 @@ mod tests {
         let error = MemcoreError::provider_timeout();
         assert_eq!(error.code(), "provider_timeout");
         assert!(error.is_provider_timeout());
+    }
+
+    #[test]
+    fn provider_circuit_open_uses_dedicated_error_code() {
+        let error = MemcoreError::provider_circuit_open();
+        assert_eq!(error.code(), "provider_circuit_open");
+        assert!(error.is_provider_circuit_open());
     }
 
     #[test]

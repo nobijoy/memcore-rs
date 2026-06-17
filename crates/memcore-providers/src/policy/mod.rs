@@ -1,16 +1,13 @@
 mod execute;
 mod retry;
 mod timeout;
-mod wrapping;
 
 pub use execute::execute_provider_call;
 pub use retry::{
-    backoff_duration, is_retryable_provider_error, ProviderRetryDecision, retry_decision_for,
+    backoff_duration, is_provider_health_failure, is_retryable_provider_error,
+    ProviderRetryDecision, retry_decision_for,
 };
 pub use timeout::provider_timeout_error;
-pub use wrapping::{
-    wrap_embedding_provider, wrap_llm_provider, PolicyEmbeddingProvider, PolicyLlmProvider,
-};
 
 use std::time::Duration;
 

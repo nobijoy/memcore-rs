@@ -32,6 +32,14 @@ pub fn is_retryable_provider_error(error: &MemcoreError) -> bool {
     }
 }
 
+/// Retry-exhausted provider failures that should count toward circuit breaker health.
+pub fn is_provider_health_failure(error: &MemcoreError) -> bool {
+    if error.is_provider_circuit_open() {
+        return false;
+    }
+    is_retryable_provider_error(error)
+}
+
 fn is_retryable_provider_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
 
