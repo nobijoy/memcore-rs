@@ -44,6 +44,7 @@ impl ErrorBody {
             MemcoreError::StorageError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             MemcoreError::ValidationError(_) => StatusCode::BAD_REQUEST,
             MemcoreError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            MemcoreError::Timeout(_) => StatusCode::GATEWAY_TIMEOUT,
         };
 
         let code = match &error {
@@ -57,6 +58,7 @@ impl ErrorBody {
             MemcoreError::StorageError(_) => "STORAGE_ERROR",
             MemcoreError::ValidationError(_) => "VALIDATION_ERROR",
             MemcoreError::Internal(_) => "INTERNAL_ERROR",
+            MemcoreError::Timeout(_) => "TIMEOUT",
         };
 
         (status, Self::new(code, api_error_message(&error)))
@@ -71,7 +73,8 @@ fn api_error_message(error: &MemcoreError) -> String {
         | MemcoreError::Conflict(message)
         | MemcoreError::ProviderError(message)
         | MemcoreError::StorageError(message)
-        | MemcoreError::Internal(message) => message.clone(),
+        | MemcoreError::Internal(message)
+        | MemcoreError::Timeout(message) => message.clone(),
         MemcoreError::Unauthorized => "unauthorized".to_string(),
         MemcoreError::Forbidden => "forbidden".to_string(),
         MemcoreError::RateLimited => "rate limit exceeded".to_string(),

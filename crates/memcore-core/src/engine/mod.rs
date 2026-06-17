@@ -15,7 +15,7 @@ use crate::import::{
     collect_import_validation, ImportMode, ImportUserDataInput, ImportUserDataOutput,
     ImportValidationSummary, resolve_import_fact_id,
 };
-use crate::{InMemoryContextCache, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES};
+use crate::{InMemoryContextCache, ContextCacheCoordinator, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES};
 use crate::ranking::{
     reciprocal_rank_fusion, weighted_score_for, RankedCandidate, RankingConfig, RankingSource,
     RrfConfig,
@@ -69,6 +69,7 @@ pub struct MemoryEngine {
     rrf_config: RrfConfig,
     context_cache: Arc<dyn ContextCache>,
     context_cache_config: ContextCacheConfig,
+    context_cache_coordinator: ContextCacheCoordinator,
 }
 
 impl MemoryEngine {
@@ -78,6 +79,9 @@ impl MemoryEngine {
         llm_provider: Arc<dyn LlmProvider>,
         embedding_provider: Arc<dyn EmbeddingProvider>,
     ) -> Self {
+        let cache = Arc::new(InMemoryContextCache::new(DEFAULT_CONTEXT_CACHE_MAX_ENTRIES));
+        let cache_config = ContextCacheConfig::default();
+        let coordinator = ContextCacheCoordinator::new(cache.clone(), cache_config);
         Self {
             fact_store,
             vector_store,
@@ -91,8 +95,9 @@ impl MemoryEngine {
             embedding_dedup_config: EmbeddingDeduplicationConfig::default(),
             ranking_config: RankingConfig::default(),
             rrf_config: RrfConfig::default(),
-            context_cache: Arc::new(InMemoryContextCache::new(DEFAULT_CONTEXT_CACHE_MAX_ENTRIES)),
-            context_cache_config: ContextCacheConfig::default(),
+            context_cache: cache,
+            context_cache_config: cache_config,
+            context_cache_coordinator: coordinator,
         }
     }
 
@@ -141,8 +146,9 @@ impl MemoryEngine {
         cache: Arc<dyn ContextCache>,
         config: ContextCacheConfig,
     ) -> Self {
-        self.context_cache = cache;
+        self.context_cache = cache.clone();
         self.context_cache_config = config;
+        self.context_cache_coordinator = ContextCacheCoordinator::new(cache, config);
         self
     }
 
@@ -513,19 +519,35 @@ impl MemoryEngine {
             .validate(input.budget.available_tokens())?;
         self.context_cache_config.validate()?;
 
-        let cache_key = build_context_cache_key(&input);
-        if self.context_cache_config.enabled {
-            if let Some(entry) = self.context_cache.get(&cache_key).await? {
-                return Ok(BuildContextOutput {
-                    context: entry.context,
-                    memories: entry.memories,
-                    budget: entry.budget,
-                    compression: entry.compression,
-                    cache: ContextCacheUsage::hit(&self.context_cache_config),
-                });
-            }
+        if !self.context_cache_config.enabled {
+            return self.build_context_uncached(input).await;
         }
 
+        let cache_key = build_context_cache_key(&input);
+        let (entry, cache_usage) = self
+            .context_cache_coordinator
+            .get_or_compute(cache_key, || async {
+                let output = self.build_context_uncached(input).await?;
+                Ok(cached_entry_from_output(
+                    &output,
+                    self.context_cache_config.ttl_seconds,
+                ))
+            })
+            .await?;
+
+        Ok(BuildContextOutput {
+            context: entry.context,
+            memories: entry.memories,
+            budget: entry.budget,
+            compression: entry.compression,
+            cache: cache_usage,
+        })
+    }
+
+    async fn build_context_uncached(
+        &self,
+        input: BuildContextInput,
+    ) -> MemcoreResult<BuildContextOutput> {
         let max_memories = normalize_context_max_memories(input.max_memories)?;
         let tenant = input.tenant.clone();
         let compression_options = input.compression_options.clone();
@@ -587,26 +609,13 @@ impl MemoryEngine {
             }
         }
 
-        let output = BuildContextOutput {
+        Ok(BuildContextOutput {
             context: assembled.context,
             memories: assembled.memories,
             budget: assembled.budget,
             compression: assembled.compression,
-            cache: if self.context_cache_config.enabled {
-                ContextCacheUsage::miss(&self.context_cache_config)
-            } else {
-                ContextCacheUsage::disabled()
-            },
-        };
-
-        if self.context_cache_config.enabled {
-            let entry = cached_entry_from_output(&output, self.context_cache_config.ttl_seconds);
-            self.context_cache
-                .set(cache_key, entry)
-                .await?;
-        }
-
-        Ok(output)
+            cache: ContextCacheUsage::disabled(),
+        })
     }
 
     pub async fn list_memories(

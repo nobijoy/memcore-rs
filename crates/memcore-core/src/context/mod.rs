@@ -1,6 +1,7 @@
 mod assembler;
 mod budget;
 mod cache;
+mod cache_coordinator;
 mod compression;
 mod compression_options;
 mod format_options;
@@ -16,8 +17,10 @@ pub use assembler::{
 pub use cache::{
     build_context_cache_key, cached_entry_from_output, stable_sha256_hex, CachedContextEntry,
     ContextCache, ContextCacheConfig, ContextCacheKey, ContextCacheUsage,
-    DEFAULT_CONTEXT_CACHE_MAX_ENTRIES, DEFAULT_CONTEXT_CACHE_TTL_SECONDS, InMemoryContextCache,
+    DEFAULT_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES,
+    DEFAULT_CONTEXT_CACHE_TTL_SECONDS, InMemoryContextCache,
 };
+pub use cache_coordinator::{ContextCacheCoordinator, ContextCacheStampedeConfig};
 pub use budget::{
     ContextBudget, ContextBudgetUsage, DEFAULT_CONTEXT_MAX_TOKENS,
     DEFAULT_CONTEXT_RESERVED_TOKENS, MAX_CONTEXT_MAX_TOKENS,

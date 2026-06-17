@@ -40,6 +40,10 @@ const MEMCORE_CONTEXT_CACHE_BACKEND: &str = "MEMCORE_CONTEXT_CACHE_BACKEND";
 const MEMCORE_CONTEXT_CACHE_TTL_SECONDS: &str = "MEMCORE_CONTEXT_CACHE_TTL_SECONDS";
 const MEMCORE_CONTEXT_CACHE_MAX_ENTRIES: &str = "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES";
 const MEMCORE_CONTEXT_CACHE_KEY_PREFIX: &str = "MEMCORE_CONTEXT_CACHE_KEY_PREFIX";
+const MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED: &str =
+    "MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED";
+const MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS: &str =
+    "MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -199,6 +203,10 @@ pub struct Settings {
     pub redis_url: Option<String>,
     /// Namespace prefix for Redis context cache keys.
     pub context_cache_key_prefix: String,
+    /// Coalesce in-process concurrent context cache misses for the same key.
+    pub context_cache_stampede_protection_enabled: bool,
+    /// Maximum seconds to wait for an in-flight context cache computation.
+    pub context_cache_lock_timeout_seconds: u64,
 }
 
 impl Default for Settings {
@@ -244,6 +252,8 @@ impl Default for Settings {
             context_cache_max_entries: 1000,
             redis_url: None,
             context_cache_key_prefix: DEFAULT_CONTEXT_CACHE_KEY_PREFIX.to_string(),
+            context_cache_stampede_protection_enabled: true,
+            context_cache_lock_timeout_seconds: 30,
         }
     }
 }
@@ -329,6 +339,14 @@ impl Settings {
             MEMCORE_CONTEXT_CACHE_KEY_PREFIX,
             &defaults.context_cache_key_prefix,
         );
+        let context_cache_stampede_protection_enabled = parse_bool(
+            MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED,
+            defaults.context_cache_stampede_protection_enabled,
+        )?;
+        let context_cache_lock_timeout_seconds = parse_u64(
+            MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS,
+            defaults.context_cache_lock_timeout_seconds,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -377,6 +395,8 @@ impl Settings {
             context_cache_max_entries,
             redis_url,
             context_cache_key_prefix,
+            context_cache_stampede_protection_enabled,
+            context_cache_lock_timeout_seconds,
         };
 
         settings.validate()?;
@@ -580,6 +600,16 @@ impl Settings {
         if self.context_cache_key_prefix.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_CONTEXT_CACHE_KEY_PREFIX cannot be empty".to_string(),
+            ));
+        }
+
+        if self.context_cache_enabled
+            && self.context_cache_stampede_protection_enabled
+            && self.context_cache_lock_timeout_seconds == 0
+        {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS must be greater than 0 when stampede protection is enabled"
+                    .to_string(),
             ));
         }
 
@@ -866,7 +896,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 40] = [
+    const ENV_KEYS: [&str; 42] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -904,6 +934,8 @@ mod tests {
         "MEMCORE_CONTEXT_CACHE_TTL_SECONDS",
         "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES",
         "MEMCORE_CONTEXT_CACHE_KEY_PREFIX",
+        "MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED",
+        "MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1108,6 +1140,61 @@ mod tests {
         let settings = Settings::from_env().expect("legacy enabled flag should load");
         assert!(settings.context_cache_enabled);
         assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Memory);
+    }
+
+    #[test]
+    fn stampede_protection_defaults_to_enabled_when_cache_configured() {
+        let settings = Settings {
+            context_cache_enabled: true,
+            context_cache_backend: super::ContextCacheBackend::Memory,
+            ..Settings::default()
+        };
+        assert!(settings.context_cache_stampede_protection_enabled);
+        assert_eq!(settings.context_cache_lock_timeout_seconds, 30);
+    }
+
+    #[test]
+    fn loads_stampede_settings_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED", "false");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS", "45");
+        }
+
+        let settings = Settings::from_env().expect("stampede settings should load");
+        assert!(!settings.context_cache_stampede_protection_enabled);
+        assert_eq!(settings.context_cache_lock_timeout_seconds, 45);
+    }
+
+    #[test]
+    fn zero_lock_timeout_with_stampede_enabled_fails_when_cache_enabled() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED", "true");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS", "0");
+        }
+
+        let error = Settings::from_env().expect_err("zero lock timeout should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS must be greater than 0")
+        );
     }
 
     #[test]

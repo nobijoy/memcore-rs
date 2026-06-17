@@ -415,6 +415,16 @@ pub fn create_mock_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEng
     )
 }
 
+fn context_cache_config_from_settings(settings: &Settings) -> ContextCacheConfig {
+    ContextCacheConfig {
+        enabled: settings.context_cache_enabled,
+        ttl_seconds: settings.context_cache_ttl_seconds,
+        max_entries: settings.context_cache_max_entries,
+        stampede_protection_enabled: settings.context_cache_stampede_protection_enabled,
+        stampede_lock_timeout_seconds: settings.context_cache_lock_timeout_seconds,
+    }
+}
+
 fn apply_context_cache(engine: MemoryEngine, settings: &Settings) -> MemcoreResult<MemoryEngine> {
     if settings.context_cache_backend == ContextCacheBackend::Redis {
         return Err(MemcoreError::ValidationError(
@@ -422,11 +432,7 @@ fn apply_context_cache(engine: MemoryEngine, settings: &Settings) -> MemcoreResu
         ));
     }
 
-    let config = ContextCacheConfig {
-        enabled: settings.context_cache_enabled,
-        ttl_seconds: settings.context_cache_ttl_seconds,
-        max_entries: settings.context_cache_max_entries,
-    };
+    let config = context_cache_config_from_settings(settings);
     config.validate()?;
 
     Ok(engine.with_context_cache(
@@ -443,11 +449,7 @@ async fn apply_context_cache_async(
         return apply_context_cache(engine, settings);
     }
 
-    let config = ContextCacheConfig {
-        enabled: settings.context_cache_enabled,
-        ttl_seconds: settings.context_cache_ttl_seconds,
-        max_entries: settings.context_cache_max_entries,
-    };
+    let config = context_cache_config_from_settings(settings);
     config.validate()?;
 
     #[cfg(feature = "redis-cache")]

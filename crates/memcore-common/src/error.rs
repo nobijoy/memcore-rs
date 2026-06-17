@@ -22,6 +22,8 @@ pub enum MemcoreError {
     ValidationError(String),
     #[error("internal error: {0}")]
     Internal(String),
+    #[error("timeout: {0}")]
+    Timeout(String),
 }
 
 pub type MemcoreResult<T> = Result<T, MemcoreError>;
@@ -39,6 +41,7 @@ impl MemcoreError {
             Self::StorageError(_) => "storage_error",
             Self::ValidationError(_) => "validation_error",
             Self::Internal(_) => "internal",
+            Self::Timeout(_) => "timeout",
         }
     }
 

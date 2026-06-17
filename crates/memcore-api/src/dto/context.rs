@@ -87,6 +87,14 @@ pub struct ContextCacheResponse {
     pub enabled: bool,
     pub hit: bool,
     pub ttl_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub stampede_protection_enabled: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub waited_for_inflight: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl ContextCacheResponse {
@@ -101,6 +109,8 @@ impl From<ContextCacheUsage> for ContextCacheResponse {
             enabled: usage.enabled,
             hit: usage.hit,
             ttl_seconds: usage.ttl_seconds,
+            stampede_protection_enabled: usage.stampede_protection_enabled,
+            waited_for_inflight: usage.waited_for_inflight,
         }
     }
 }

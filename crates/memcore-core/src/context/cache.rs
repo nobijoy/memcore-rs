@@ -22,6 +22,9 @@ pub const DEFAULT_CONTEXT_CACHE_TTL_SECONDS: u64 = 300;
 /// Default maximum in-memory context cache entries.
 pub const DEFAULT_CONTEXT_CACHE_MAX_ENTRIES: usize = 1000;
 
+/// Default context cache lock timeout in seconds for stampede protection.
+pub const DEFAULT_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS: u64 = 30;
+
 /// Tenant-scoped cache lookup key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ContextCacheKey {
@@ -48,6 +51,8 @@ pub struct ContextCacheConfig {
     pub enabled: bool,
     pub ttl_seconds: u64,
     pub max_entries: usize,
+    pub stampede_protection_enabled: bool,
+    pub stampede_lock_timeout_seconds: u64,
 }
 
 impl Default for ContextCacheConfig {
@@ -56,11 +61,17 @@ impl Default for ContextCacheConfig {
             enabled: false,
             ttl_seconds: DEFAULT_CONTEXT_CACHE_TTL_SECONDS,
             max_entries: DEFAULT_CONTEXT_CACHE_MAX_ENTRIES,
+            stampede_protection_enabled: true,
+            stampede_lock_timeout_seconds: DEFAULT_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS,
         }
     }
 }
 
 impl ContextCacheConfig {
+    pub fn stampede_protection_active(&self) -> bool {
+        self.enabled && self.stampede_protection_enabled
+    }
+
     pub fn validate(&self) -> MemcoreResult<()> {
         if !self.enabled {
             return Ok(());
@@ -79,6 +90,13 @@ impl ContextCacheConfig {
             ));
         }
 
+        if self.stampede_protection_enabled && self.stampede_lock_timeout_seconds == 0 {
+            return Err(memcore_common::MemcoreError::ValidationError(
+                "context cache stampede lock timeout must be greater than 0 when stampede protection is enabled"
+                    .to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -89,6 +107,8 @@ pub struct ContextCacheUsage {
     pub enabled: bool,
     pub hit: bool,
     pub ttl_seconds: Option<u64>,
+    pub stampede_protection_enabled: bool,
+    pub waited_for_inflight: bool,
 }
 
 impl ContextCacheUsage {
@@ -97,6 +117,8 @@ impl ContextCacheUsage {
             enabled: false,
             hit: false,
             ttl_seconds: None,
+            stampede_protection_enabled: false,
+            waited_for_inflight: false,
         }
     }
 
@@ -105,14 +127,22 @@ impl ContextCacheUsage {
             enabled: true,
             hit: false,
             ttl_seconds: Some(config.ttl_seconds),
+            stampede_protection_enabled: config.stampede_protection_active(),
+            waited_for_inflight: false,
         }
     }
 
     pub fn hit(config: &ContextCacheConfig) -> Self {
+        Self::hit_with_wait(config, false)
+    }
+
+    pub fn hit_with_wait(config: &ContextCacheConfig, waited_for_inflight: bool) -> Self {
         Self {
             enabled: true,
             hit: true,
             ttl_seconds: Some(config.ttl_seconds),
+            stampede_protection_enabled: config.stampede_protection_active(),
+            waited_for_inflight,
         }
     }
 }

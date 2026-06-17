@@ -25,6 +25,7 @@ fn engine_with_cache() -> MemoryEngine {
             enabled: true,
             ttl_seconds: 300,
             max_entries: 100,
+            ..Default::default()
         },
     )
 }

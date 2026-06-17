@@ -26,6 +26,7 @@ fn test_app_with_cache() -> axum::Router {
                     enabled: true,
                     ttl_seconds: 300,
                     max_entries: 100,
+                    ..Default::default()
                 },
             ),
     );
@@ -888,6 +889,12 @@ async fn repeated_context_request_returns_cache_hit_when_enabled() {
     .await;
     assert_eq!(first["cache"]["enabled"], true);
     assert_eq!(first["cache"]["hit"], false);
+    assert_eq!(first["cache"]["stampede_protection_enabled"], true);
+    assert!(
+        !first["cache"]["waited_for_inflight"]
+            .as_bool()
+            .unwrap_or(false)
+    );
 
     let (_, second) = response_parts(
         app,
@@ -895,6 +902,11 @@ async fn repeated_context_request_returns_cache_hit_when_enabled() {
     )
     .await;
     assert_eq!(second["cache"]["hit"], true);
+    assert!(
+        !second["cache"]["waited_for_inflight"]
+            .as_bool()
+            .unwrap_or(false)
+    );
 }
 
 #[tokio::test]
