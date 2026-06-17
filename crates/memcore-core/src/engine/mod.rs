@@ -21,7 +21,10 @@ use crate::ranking::{
     reciprocal_rank_fusion, weighted_score_for, RankedCandidate, RankingConfig, RankingSource,
     RrfConfig,
 };
-use crate::retention::{ApplyRetentionInput, ApplyRetentionOutput};
+use crate::retention::{
+    ApplyProviderUsageRetentionInput, ApplyProviderUsageRetentionOutput, ApplyRetentionInput,
+    ApplyRetentionOutput,
+};
 use crate::admin::{
     ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
     SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
@@ -31,7 +34,7 @@ use crate::pagination::{build_page, parse_optional_cursor, PageCursor};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgUserListQuery,
-    ProviderUsageAttributionSlot, VectorRecord, VectorStore, validate_event_date_range,
+    ProviderUsageAttributionSlot, ProviderUsageStore, VectorRecord, VectorStore, validate_event_date_range,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
 use crate::dedup::{
@@ -73,6 +76,7 @@ pub struct MemoryEngine {
     context_cache_coordinator: ContextCacheCoordinator,
     context_cache_metrics: Arc<dyn ContextCacheMetricsRecorder>,
     usage_attribution: Option<Arc<ProviderUsageAttributionSlot>>,
+    provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
 }
 
 impl MemoryEngine {
@@ -105,6 +109,7 @@ impl MemoryEngine {
             context_cache_coordinator: coordinator,
             context_cache_metrics: metrics,
             usage_attribution: None,
+            provider_usage_store: None,
         }
     }
 
@@ -175,6 +180,14 @@ impl MemoryEngine {
         slot: Arc<ProviderUsageAttributionSlot>,
     ) -> Self {
         self.usage_attribution = Some(slot);
+        self
+    }
+
+    pub fn with_provider_usage_store(
+        mut self,
+        store: Option<Arc<dyn ProviderUsageStore>>,
+    ) -> Self {
+        self.provider_usage_store = store;
         self
     }
 
@@ -811,6 +824,46 @@ impl MemoryEngine {
         }
 
         Ok(output)
+    }
+
+    pub async fn apply_provider_usage_retention(
+        &self,
+        input: ApplyProviderUsageRetentionInput,
+    ) -> MemcoreResult<ApplyProviderUsageRetentionOutput> {
+        validate_org_id(&input.org_id)?;
+
+        if input.retention_days == 0 {
+            return Ok(ApplyProviderUsageRetentionOutput::zero(
+                input.dry_run,
+                Utc::now(),
+            ));
+        }
+
+        let store = self.provider_usage_store.as_ref().ok_or_else(|| {
+            memcore_common::MemcoreError::ValidationError(
+                "provider usage persistence is not configured".to_string(),
+            )
+        })?;
+
+        let cutoff = Utc::now() - Duration::days(i64::from(input.retention_days));
+        let matched = store
+            .delete_usage_events_older_than(&input.org_id, cutoff, true)
+            .await?;
+
+        let deleted = if input.dry_run {
+            0
+        } else {
+            store
+                .delete_usage_events_older_than(&input.org_id, cutoff, false)
+                .await?
+        };
+
+        Ok(ApplyProviderUsageRetentionOutput {
+            dry_run: input.dry_run,
+            matched_events: matched,
+            deleted_events: deleted,
+            cutoff,
+        })
     }
 
     pub async fn get_org_summary(

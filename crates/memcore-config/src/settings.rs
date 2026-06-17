@@ -68,6 +68,7 @@ const MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS: &str =
 const MEMCORE_PROVIDER_USAGE_METRICS_ENABLED: &str = "MEMCORE_PROVIDER_USAGE_METRICS_ENABLED";
 const MEMCORE_PROVIDER_COST_TRACKING_ENABLED: &str = "MEMCORE_PROVIDER_COST_TRACKING_ENABLED";
 const MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED: &str = "MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED";
+const MEMCORE_PROVIDER_USAGE_RETENTION_DAYS: &str = "MEMCORE_PROVIDER_USAGE_RETENTION_DAYS";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -271,6 +272,8 @@ pub struct Settings {
     pub provider_cost_tracking_enabled: bool,
     /// Persist provider usage events to the configured database store.
     pub provider_usage_persistence_enabled: bool,
+    /// Default provider usage event retention window in days (`0` disables cleanup).
+    pub provider_usage_retention_days: u32,
 }
 
 impl Default for Settings {
@@ -338,6 +341,7 @@ impl Default for Settings {
             provider_usage_metrics_enabled: true,
             provider_cost_tracking_enabled: false,
             provider_usage_persistence_enabled: false,
+            provider_usage_retention_days: 180,
         }
     }
 }
@@ -511,6 +515,10 @@ impl Settings {
             MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED,
             defaults.provider_usage_persistence_enabled,
         )?;
+        let provider_usage_retention_days = parse_u32(
+            MEMCORE_PROVIDER_USAGE_RETENTION_DAYS,
+            defaults.provider_usage_retention_days,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -581,6 +589,7 @@ impl Settings {
             provider_usage_metrics_enabled,
             provider_cost_tracking_enabled,
             provider_usage_persistence_enabled,
+            provider_usage_retention_days,
         };
 
         settings.validate()?;
@@ -741,6 +750,12 @@ impl Settings {
         if self.event_retention_days > 365_000 {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_EVENT_RETENTION_DAYS is unreasonably large".to_string(),
+            ));
+        }
+
+        if self.provider_usage_retention_days > 365_000 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_USAGE_RETENTION_DAYS is unreasonably large".to_string(),
             ));
         }
 
@@ -1731,6 +1746,61 @@ mod tests {
             error
                 .to_string()
                 .contains("MEMCORE_FACT_RETENTION_DAYS must be a valid unsigned integer")
+        );
+    }
+
+    #[test]
+    fn provider_usage_retention_days_default_is_180() {
+        let settings = Settings::default();
+        assert_eq!(settings.provider_usage_retention_days, 180);
+    }
+
+    #[test]
+    fn provider_usage_retention_zero_disables_cleanup() {
+        let settings = Settings {
+            provider_usage_retention_days: 0,
+            ..Settings::default()
+        };
+        assert_eq!(settings.provider_usage_retention_days, 0);
+    }
+
+    #[test]
+    fn loads_provider_usage_retention_days_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_USAGE_RETENTION_DAYS", "90");
+        }
+
+        let settings = Settings::from_env().expect("provider usage retention should load");
+        assert_eq!(settings.provider_usage_retention_days, 90);
+    }
+
+    #[test]
+    fn fails_on_negative_provider_usage_retention_days() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_USAGE_RETENTION_DAYS", "-1");
+        }
+
+        let error =
+            Settings::from_env().expect_err("negative provider usage retention days should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error.to_string().contains(
+                "MEMCORE_PROVIDER_USAGE_RETENTION_DAYS must be a valid unsigned integer"
+            )
         );
     }
 

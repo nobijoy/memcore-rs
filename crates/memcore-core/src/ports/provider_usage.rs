@@ -138,6 +138,14 @@ pub trait ProviderUsageStore: Send + Sync {
         &self,
         query: ProviderUsageQuery,
     ) -> MemcoreResult<ProviderUsageQueryResult>;
+
+    /// Count or delete persisted usage events with `created_at` strictly before `cutoff` for `org_id`.
+    async fn delete_usage_events_older_than(
+        &self,
+        org_id: &str,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<usize>;
 }
 
 /// Tenant attribution for provider usage events (org required; user optional).

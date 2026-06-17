@@ -415,6 +415,7 @@ pub async fn create_memory_engine(
         .with_pii_redaction(settings.enable_pii_redaction)
         .with_event_store(event_store)
         .with_usage_attribution(wiring.attribution_slot.clone())
+        .with_provider_usage_store(wiring.usage_store.clone())
         .with_audit_provider_info(
             Some(llm_provider_name(settings)),
             Some(settings.llm_model.clone()),
@@ -769,6 +770,7 @@ pub fn create_mock_memory_engine_with_wiring(
         .with_pii_redaction(settings.enable_pii_redaction)
         .with_event_store(Arc::new(MockMemoryEventStore::new()))
         .with_usage_attribution(wiring.attribution_slot.clone())
+        .with_provider_usage_store(wiring.usage_store.clone())
         .with_audit_provider_info(
             Some(llm_provider_name(settings)),
             Some(settings.llm_model.clone()),

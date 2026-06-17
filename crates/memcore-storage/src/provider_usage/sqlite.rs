@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::pagination::{build_page, PageCursor};
 use memcore_core::ports::{
@@ -372,6 +373,46 @@ impl ProviderUsageStore for SqliteProviderUsageStore {
             summary,
         })
     }
+
+    async fn delete_usage_events_older_than(
+        &self,
+        org_id: &str,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<usize> {
+        let cutoff_str = datetime_to_str(cutoff);
+
+        if dry_run {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM provider_usage_events WHERE org_id = ? AND created_at < ?",
+            )
+            .bind(org_id)
+            .bind(cutoff_str)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| {
+                storage_error("failed to count provider usage events for retention", error)
+            })?;
+
+            let count: i64 = row
+                .try_get("count")
+                .map_err(|error| storage_error("row count", error))?;
+            return Ok(count as usize);
+        }
+
+        let result = sqlx::query(
+            "DELETE FROM provider_usage_events WHERE org_id = ? AND created_at < ?",
+        )
+        .bind(org_id)
+        .bind(cutoff_str)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| {
+            storage_error("failed to delete provider usage events for retention", error)
+        })?;
+
+        Ok(result.rows_affected() as usize)
+    }
 }
 
 #[cfg(test)]
@@ -457,5 +498,96 @@ mod tests {
             .await
             .expect("org_a");
         assert_eq!(org_a.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn dry_run_counts_old_usage_events_without_deleting() {
+        let store = test_store().await;
+        let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let recent = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let cutoff = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        store
+            .record_usage_event(sample_event("org_ret", Some("user_a"), old))
+            .await
+            .expect("record");
+        store
+            .record_usage_event(sample_event("org_ret", Some("user_b"), recent))
+            .await
+            .expect("record");
+
+        let matched = store
+            .delete_usage_events_older_than("org_ret", cutoff, true)
+            .await
+            .expect("dry-run");
+        assert_eq!(matched, 1);
+
+        let result = store
+            .query_usage(ProviderUsageQuery::new("org_ret", 10))
+            .await
+            .expect("query");
+        assert_eq!(result.events.len(), 2);
+        assert_eq!(result.summary.total_requests, 2);
+    }
+
+    #[tokio::test]
+    async fn non_dry_run_deletes_old_events_and_updates_summary() {
+        let store = test_store().await;
+        let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let recent = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let cutoff = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        store
+            .record_usage_event(sample_event("org_del", Some("user_a"), old))
+            .await
+            .expect("record");
+        store
+            .record_usage_event(sample_event("org_del", Some("user_b"), recent))
+            .await
+            .expect("record");
+        store
+            .record_usage_event(sample_event("org_other", Some("user_c"), old))
+            .await
+            .expect("record");
+
+        let deleted = store
+            .delete_usage_events_older_than("org_del", cutoff, false)
+            .await
+            .expect("delete");
+        assert_eq!(deleted, 1);
+
+        let org_del = store
+            .query_usage(ProviderUsageQuery::new("org_del", 10))
+            .await
+            .expect("org_del");
+        assert_eq!(org_del.events.len(), 1);
+        assert_eq!(org_del.summary.total_requests, 1);
+
+        let org_other = store
+            .query_usage(ProviderUsageQuery::new("org_other", 10))
+            .await
+            .expect("org_other");
+        assert_eq!(org_other.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cutoff_uses_created_at_sqlite() {
+        let store = test_store().await;
+        let before = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let at_cutoff = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let after = Utc.with_ymd_and_hms(2026, 6, 2, 0, 0, 0).unwrap();
+
+        for ts in [before, at_cutoff, after] {
+            store
+                .record_usage_event(sample_event("org_cut", None, ts))
+                .await
+                .expect("record");
+        }
+
+        let matched = store
+            .delete_usage_events_older_than("org_cut", at_cutoff, true)
+            .await
+            .expect("count");
+        assert_eq!(matched, 1);
     }
 }

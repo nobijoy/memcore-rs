@@ -1,3 +1,6 @@
 mod types;
 
-pub use types::{ApplyRetentionInput, ApplyRetentionOutput, RetentionPolicy};
+pub use types::{
+    ApplyProviderUsageRetentionInput, ApplyProviderUsageRetentionOutput, ApplyRetentionInput,
+    ApplyRetentionOutput, RetentionPolicy,
+};

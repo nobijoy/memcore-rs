@@ -60,7 +60,8 @@ pub use ranking::{
     weighted_score_for, MemoryRanker, RankedCandidate, RankingConfig, RankingSource, RrfConfig,
 };
 pub use retention::{
-    ApplyRetentionInput, ApplyRetentionOutput, RetentionPolicy,
+    ApplyProviderUsageRetentionInput, ApplyProviderUsageRetentionOutput, ApplyRetentionInput,
+    ApplyRetentionOutput, RetentionPolicy,
 };
 pub use admin::{
     ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,

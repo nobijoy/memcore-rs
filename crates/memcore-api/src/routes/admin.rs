@@ -186,6 +186,25 @@ pub async fn get_provider_usage(
     Ok(Json(provider_usage_memory_response(snapshot)))
 }
 
+pub async fn apply_provider_usage_retention(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Json(body): Json<crate::dto::ApplyProviderUsageRetentionRequest>,
+) -> Result<Json<crate::dto::ApplyProviderUsageRetentionResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite],
+    )?;
+
+    let output = state
+        .memory_engine
+        .apply_provider_usage_retention(body.into_input(organization.org_id, &state.settings))
+        .await?;
+
+    Ok(Json(output.into()))
+}
+
 fn parse_fact_id(value: &str) -> Result<Uuid, MemcoreError> {
     Uuid::parse_str(value.trim())
         .map_err(|_| MemcoreError::ValidationError("invalid fact_id".to_string()))

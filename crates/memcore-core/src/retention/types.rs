@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::TenantContext;
@@ -57,6 +58,32 @@ impl ApplyRetentionOutput {
             facts_deleted: 0,
             events_matched: 0,
             events_deleted: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplyProviderUsageRetentionInput {
+    pub org_id: String,
+    pub retention_days: u32,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApplyProviderUsageRetentionOutput {
+    pub dry_run: bool,
+    pub matched_events: usize,
+    pub deleted_events: usize,
+    pub cutoff: DateTime<Utc>,
+}
+
+impl ApplyProviderUsageRetentionOutput {
+    pub fn zero(dry_run: bool, cutoff: DateTime<Utc>) -> Self {
+        Self {
+            dry_run,
+            matched_events: 0,
+            deleted_events: 0,
+            cutoff,
         }
     }
 }

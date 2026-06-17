@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::pagination::{build_page, PageCursor};
 use memcore_core::ports::{
@@ -316,5 +317,43 @@ impl ProviderUsageStore for PostgresProviderUsageStore {
             next_cursor: page.next_cursor,
             summary,
         })
+    }
+
+    async fn delete_usage_events_older_than(
+        &self,
+        org_id: &str,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<usize> {
+        if dry_run {
+            let row = sqlx::query(
+                "SELECT COUNT(*)::bigint AS count FROM provider_usage_events WHERE org_id = $1 AND created_at < $2",
+            )
+            .bind(org_id)
+            .bind(cutoff)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| {
+                storage_error("failed to count provider usage events for retention", error)
+            })?;
+
+            let count: i64 = row
+                .try_get("count")
+                .map_err(|error| storage_error("row count", error))?;
+            return Ok(count as usize);
+        }
+
+        let result = sqlx::query(
+            "DELETE FROM provider_usage_events WHERE org_id = $1 AND created_at < $2",
+        )
+        .bind(org_id)
+        .bind(cutoff)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| {
+            storage_error("failed to delete provider usage events for retention", error)
+        })?;
+
+        Ok(result.rows_affected() as usize)
     }
 }

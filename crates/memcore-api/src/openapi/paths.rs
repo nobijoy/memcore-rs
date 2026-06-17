@@ -5,7 +5,9 @@
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, BuildContextRequest, BuildContextResponse,
     CreateApiKeyRequest, CreateApiKeyResponse, ContextCacheMetricsResponse, DeleteMemoryResponse, ExportUserResponse,
-    ApplyRetentionRequest, ApplyRetentionResponse, ForgetUserResponse, ImportUserDataRequest,
+    ApplyRetentionRequest, ApplyRetentionResponse, ApplyProviderUsageRetentionRequest,
+    ApplyProviderUsageRetentionResponse,
+    ForgetUserResponse, ImportUserDataRequest,
     ImportUserDataResponse, ListApiKeysResponse, ListOrgUsersResponse, OrgSummaryResponse,
     ProviderUsageResponse, SearchOrgMemoryEventsResponse,
     ListMemoriesResponse, ListMemoryEventsResponse,
@@ -455,3 +457,24 @@ pub fn get_context_cache_metrics() {}
     )
 )]
 pub fn get_provider_usage() {}
+
+/// Apply org-scoped provider usage event retention cleanup. `dry_run` defaults to `true`.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/org/provider-usage/retention/apply",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    request_body = ApplyProviderUsageRetentionRequest,
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Provider usage retention dry-run or apply summary", body = ApplyProviderUsageRetentionResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn apply_provider_usage_retention() {}

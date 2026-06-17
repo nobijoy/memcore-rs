@@ -1,6 +1,7 @@
 use std::sync::RwLock;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_core::pagination::{
     build_page, is_after_cursor_in_desc_order, PageCursor,
@@ -165,12 +166,42 @@ impl ProviderUsageStore for MockProviderUsageStore {
             summary,
         })
     }
+
+    async fn delete_usage_events_older_than(
+        &self,
+        org_id: &str,
+        cutoff: DateTime<Utc>,
+        dry_run: bool,
+    ) -> MemcoreResult<usize> {
+        let mut events = self
+            .events
+            .write()
+            .map_err(|_| storage_error("mock provider usage lock poisoned", "lock"))?;
+
+        let matching_indices: Vec<usize> = events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| event.org_id == org_id && event.created_at < cutoff)
+            .map(|(index, _)| index)
+            .collect();
+
+        let count = matching_indices.len();
+
+        if !dry_run {
+            for index in matching_indices.into_iter().rev() {
+                events.remove(index);
+            }
+        }
+
+        Ok(count)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use memcore_core::ports::{ProviderUsageCapability, ProviderUsageQuery};
     use uuid::Uuid;
 
     fn sample_event(
@@ -358,5 +389,137 @@ mod tests {
             .await
             .expect("page2");
         assert_eq!(page2.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn dry_run_counts_old_events_without_deleting() {
+        let store = MockProviderUsageStore::new();
+        let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let recent = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let cutoff = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        store
+            .record_usage_event(sample_event(
+                "org_a",
+                Some("user_a"),
+                "mock",
+                ProviderUsageCapability::Llm,
+                old,
+                ProviderCallStatus::Success,
+            ))
+            .await
+            .expect("record");
+        store
+            .record_usage_event(sample_event(
+                "org_a",
+                Some("user_b"),
+                "mock",
+                ProviderUsageCapability::Llm,
+                recent,
+                ProviderCallStatus::Success,
+            ))
+            .await
+            .expect("record");
+
+        let matched = store
+            .delete_usage_events_older_than("org_a", cutoff, true)
+            .await
+            .expect("dry-run");
+        assert_eq!(matched, 1);
+
+        let result = store
+            .query_usage(ProviderUsageQuery::new("org_a", 10))
+            .await
+            .expect("query");
+        assert_eq!(result.events.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn non_dry_run_deletes_old_events_preserves_new_and_other_orgs() {
+        let store = MockProviderUsageStore::new();
+        let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let recent = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let cutoff = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        store
+            .record_usage_event(sample_event(
+                "org_a",
+                Some("user_a"),
+                "mock",
+                ProviderUsageCapability::Llm,
+                old,
+                ProviderCallStatus::Success,
+            ))
+            .await
+            .expect("record");
+        store
+            .record_usage_event(sample_event(
+                "org_a",
+                Some("user_b"),
+                "mock",
+                ProviderUsageCapability::Llm,
+                recent,
+                ProviderCallStatus::Success,
+            ))
+            .await
+            .expect("record");
+        store
+            .record_usage_event(sample_event(
+                "org_b",
+                None,
+                "mock",
+                ProviderUsageCapability::Llm,
+                old,
+                ProviderCallStatus::Success,
+            ))
+            .await
+            .expect("record");
+
+        let deleted = store
+            .delete_usage_events_older_than("org_a", cutoff, false)
+            .await
+            .expect("delete");
+        assert_eq!(deleted, 1);
+
+        let org_a = store
+            .query_usage(ProviderUsageQuery::new("org_a", 10))
+            .await
+            .expect("org_a");
+        assert_eq!(org_a.events.len(), 1);
+        assert_eq!(org_a.summary.total_requests, 1);
+
+        let org_b = store
+            .query_usage(ProviderUsageQuery::new("org_b", 10))
+            .await
+            .expect("org_b");
+        assert_eq!(org_b.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cutoff_uses_created_at() {
+        let store = MockProviderUsageStore::new();
+        let before = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let at_cutoff = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let after = Utc.with_ymd_and_hms(2026, 6, 2, 0, 0, 0).unwrap();
+
+        for ts in [before, at_cutoff, after] {
+            store
+                .record_usage_event(sample_event(
+                    "org_cutoff",
+                    None,
+                    "mock",
+                    ProviderUsageCapability::Llm,
+                    ts,
+                    ProviderCallStatus::Success,
+                ))
+                .await
+                .expect("record");
+        }
+
+        let matched = store
+            .delete_usage_events_older_than("org_cutoff", at_cutoff, true)
+            .await
+            .expect("count");
+        assert_eq!(matched, 1);
     }
 }

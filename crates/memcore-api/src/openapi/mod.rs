@@ -19,7 +19,8 @@ use crate::dto::{
     MemoryOperationSummaryResponse, RevokeApiKeyResponse, SearchMemoryFiltersRequest,
     SearchMemoryRequest, SearchMemoryResponse, SearchMemoryResultResponse, UserMemoryExportResponse,
     ProviderUsageEventItemResponse, ProviderUsageQueryParams, ProviderUsageResponse,
-    ProviderUsageSummaryResponse,
+    ProviderUsageSummaryResponse, ApplyProviderUsageRetentionRequest,
+    ApplyProviderUsageRetentionResponse, ApplyProviderUsageRetentionSummaryResponse,
 };
 use crate::dto::memories::MemoryTypeResponse;
 use crate::response::{ErrorBody, ErrorDetail};
@@ -57,6 +58,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         paths::search_org_memory_events,
         paths::get_context_cache_metrics,
         paths::get_provider_usage,
+        paths::apply_provider_usage_retention,
     ),
     components(schemas(
         ErrorBody,
@@ -116,6 +118,9 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         ProviderUsageSummaryResponse,
         ProviderUsageEventItemResponse,
         ProviderUsageQueryParams,
+        ApplyProviderUsageRetentionRequest,
+        ApplyProviderUsageRetentionResponse,
+        ApplyProviderUsageRetentionSummaryResponse,
     )),
     tags(
         (name = "Health", description = "Liveness and readiness probes"),

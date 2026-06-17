@@ -5,6 +5,7 @@ pub mod export;
 pub mod import;
 pub mod keyword_search;
 pub mod memories;
+pub mod provider_usage_retention;
 pub mod retention;
 pub mod memory_events;
 
@@ -38,6 +39,10 @@ pub use export::{
 pub use import::{
     ImportUserDataRequest, ImportUserDataResponse, ImportUserDataSummaryResponse,
     ImportValidationIssueResponse, ImportValidationSummaryResponse,
+};
+pub use provider_usage_retention::{
+    ApplyProviderUsageRetentionRequest, ApplyProviderUsageRetentionResponse,
+    ApplyProviderUsageRetentionSummaryResponse,
 };
 pub use retention::{
     ApplyRetentionRequest, ApplyRetentionResponse, ApplyRetentionSummaryResponse,

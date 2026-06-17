@@ -166,6 +166,17 @@ mod tests {
                     "fail".to_string(),
                 ))
             }
+
+            async fn delete_usage_events_older_than(
+                &self,
+                _org_id: &str,
+                _cutoff: chrono::DateTime<chrono::Utc>,
+                _dry_run: bool,
+            ) -> memcore_common::MemcoreResult<usize> {
+                Err(memcore_common::MemcoreError::StorageError(
+                    "fail".to_string(),
+                ))
+            }
         }
 
         let inner = InMemoryProviderUsageRecorder::new();
