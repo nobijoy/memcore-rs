@@ -48,6 +48,12 @@ const MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED: &str =
     "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED";
 const MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS: &str = "MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS";
 const MEMCORE_CONTEXT_CACHE_METRICS_ENABLED: &str = "MEMCORE_CONTEXT_CACHE_METRICS_ENABLED";
+const MEMCORE_PROVIDER_TIMEOUT_SECONDS: &str = "MEMCORE_PROVIDER_TIMEOUT_SECONDS";
+const MEMCORE_PROVIDER_MAX_RETRIES: &str = "MEMCORE_PROVIDER_MAX_RETRIES";
+const MEMCORE_PROVIDER_INITIAL_BACKOFF_MS: &str = "MEMCORE_PROVIDER_INITIAL_BACKOFF_MS";
+const MEMCORE_PROVIDER_MAX_BACKOFF_MS: &str = "MEMCORE_PROVIDER_MAX_BACKOFF_MS";
+const MEMCORE_PROVIDER_BACKOFF_MULTIPLIER: &str = "MEMCORE_PROVIDER_BACKOFF_MULTIPLIER";
+const MEMCORE_PROVIDER_RETRY_JITTER_ENABLED: &str = "MEMCORE_PROVIDER_RETRY_JITTER_ENABLED";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -217,6 +223,18 @@ pub struct Settings {
     pub context_cache_stale_ttl_seconds: u64,
     /// Record in-process context cache observability counters.
     pub context_cache_metrics_enabled: bool,
+    /// Per-provider-call timeout in seconds.
+    pub provider_timeout_seconds: u64,
+    /// Maximum retries after the initial provider call attempt.
+    pub provider_max_retries: usize,
+    /// Initial retry backoff in milliseconds.
+    pub provider_initial_backoff_ms: u64,
+    /// Maximum retry backoff in milliseconds.
+    pub provider_max_backoff_ms: u64,
+    /// Exponential backoff multiplier between retries.
+    pub provider_backoff_multiplier: f32,
+    /// Apply simple jitter to retry backoff delays.
+    pub provider_retry_jitter_enabled: bool,
 }
 
 impl Default for Settings {
@@ -267,6 +285,12 @@ impl Default for Settings {
             context_cache_stale_while_revalidate_enabled: false,
             context_cache_stale_ttl_seconds: 120,
             context_cache_metrics_enabled: true,
+            provider_timeout_seconds: 30,
+            provider_max_retries: 2,
+            provider_initial_backoff_ms: 250,
+            provider_max_backoff_ms: 2000,
+            provider_backoff_multiplier: 2.0,
+            provider_retry_jitter_enabled: true,
         }
     }
 }
@@ -372,6 +396,30 @@ impl Settings {
             MEMCORE_CONTEXT_CACHE_METRICS_ENABLED,
             defaults.context_cache_metrics_enabled,
         )?;
+        let provider_timeout_seconds = parse_u64(
+            MEMCORE_PROVIDER_TIMEOUT_SECONDS,
+            defaults.provider_timeout_seconds,
+        )?;
+        let provider_max_retries = parse_usize(
+            MEMCORE_PROVIDER_MAX_RETRIES,
+            defaults.provider_max_retries,
+        )?;
+        let provider_initial_backoff_ms = parse_u64(
+            MEMCORE_PROVIDER_INITIAL_BACKOFF_MS,
+            defaults.provider_initial_backoff_ms,
+        )?;
+        let provider_max_backoff_ms = parse_u64(
+            MEMCORE_PROVIDER_MAX_BACKOFF_MS,
+            defaults.provider_max_backoff_ms,
+        )?;
+        let provider_backoff_multiplier = parse_f32(
+            MEMCORE_PROVIDER_BACKOFF_MULTIPLIER,
+            defaults.provider_backoff_multiplier,
+        )?;
+        let provider_retry_jitter_enabled = parse_bool(
+            MEMCORE_PROVIDER_RETRY_JITTER_ENABLED,
+            defaults.provider_retry_jitter_enabled,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -425,6 +473,12 @@ impl Settings {
             context_cache_stale_while_revalidate_enabled,
             context_cache_stale_ttl_seconds,
             context_cache_metrics_enabled,
+            provider_timeout_seconds,
+            provider_max_retries,
+            provider_initial_backoff_ms,
+            provider_max_backoff_ms,
+            provider_backoff_multiplier,
+            provider_retry_jitter_enabled,
         };
 
         settings.validate()?;
@@ -663,6 +717,28 @@ impl Settings {
                         .to_string(),
                 ));
             }
+        }
+
+        if self.provider_timeout_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_TIMEOUT_SECONDS must be greater than 0".to_string(),
+            ));
+        }
+        if self.provider_initial_backoff_ms == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_INITIAL_BACKOFF_MS must be greater than 0".to_string(),
+            ));
+        }
+        if self.provider_max_backoff_ms < self.provider_initial_backoff_ms {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_MAX_BACKOFF_MS must be >= MEMCORE_PROVIDER_INITIAL_BACKOFF_MS"
+                    .to_string(),
+            ));
+        }
+        if self.provider_backoff_multiplier < 1.0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_BACKOFF_MULTIPLIER must be >= 1.0".to_string(),
+            ));
         }
 
         Ok(())
@@ -934,7 +1010,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 45] = [
+    const ENV_KEYS: [&str; 51] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -977,6 +1053,12 @@ mod tests {
         "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED",
         "MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS",
         "MEMCORE_CONTEXT_CACHE_METRICS_ENABLED",
+        "MEMCORE_PROVIDER_TIMEOUT_SECONDS",
+        "MEMCORE_PROVIDER_MAX_RETRIES",
+        "MEMCORE_PROVIDER_INITIAL_BACKOFF_MS",
+        "MEMCORE_PROVIDER_MAX_BACKOFF_MS",
+        "MEMCORE_PROVIDER_BACKOFF_MULTIPLIER",
+        "MEMCORE_PROVIDER_RETRY_JITTER_ENABLED",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1285,6 +1367,76 @@ mod tests {
                 .to_string()
                 .contains("MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS must be greater than 0")
         );
+    }
+
+    #[test]
+    fn provider_policy_defaults_are_expected() {
+        let settings = Settings::default();
+        assert_eq!(settings.provider_timeout_seconds, 30);
+        assert_eq!(settings.provider_max_retries, 2);
+        assert_eq!(settings.provider_initial_backoff_ms, 250);
+        assert_eq!(settings.provider_max_backoff_ms, 2000);
+        assert!((settings.provider_backoff_multiplier - 2.0).abs() < f32::EPSILON);
+        assert!(settings.provider_retry_jitter_enabled);
+    }
+
+    #[test]
+    fn loads_provider_policy_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_TIMEOUT_SECONDS", "45");
+            std::env::set_var("MEMCORE_PROVIDER_MAX_RETRIES", "0");
+            std::env::set_var("MEMCORE_PROVIDER_INITIAL_BACKOFF_MS", "100");
+            std::env::set_var("MEMCORE_PROVIDER_MAX_BACKOFF_MS", "500");
+            std::env::set_var("MEMCORE_PROVIDER_BACKOFF_MULTIPLIER", "1.5");
+            std::env::set_var("MEMCORE_PROVIDER_RETRY_JITTER_ENABLED", "false");
+        }
+
+        let settings = Settings::from_env().expect("provider policy should load");
+        assert_eq!(settings.provider_timeout_seconds, 45);
+        assert_eq!(settings.provider_max_retries, 0);
+        assert_eq!(settings.provider_initial_backoff_ms, 100);
+        assert_eq!(settings.provider_max_backoff_ms, 500);
+        assert!((settings.provider_backoff_multiplier - 1.5).abs() < f32::EPSILON);
+        assert!(!settings.provider_retry_jitter_enabled);
+    }
+
+    #[test]
+    fn invalid_provider_backoff_values_fail_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_TIMEOUT_SECONDS", "0");
+        }
+        assert!(Settings::from_env().is_err());
+
+        clear_env();
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_INITIAL_BACKOFF_MS", "0");
+        }
+        assert!(Settings::from_env().is_err());
+
+        clear_env();
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_INITIAL_BACKOFF_MS", "500");
+            std::env::set_var("MEMCORE_PROVIDER_MAX_BACKOFF_MS", "100");
+        }
+        assert!(Settings::from_env().is_err());
+
+        clear_env();
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_BACKOFF_MULTIPLIER", "0.5");
+        }
+        assert!(Settings::from_env().is_err());
     }
 
     #[test]

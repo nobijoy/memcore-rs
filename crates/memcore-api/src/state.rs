@@ -12,7 +12,8 @@ use memcore_core::{
 };
 use memcore_providers::{
     MockEmbeddingProvider, MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider,
-    OpenAiLlmProvider, default_embedding_dimensions_for_model,
+    OpenAiLlmProvider, ProviderExecutionPolicy, default_embedding_dimensions_for_model,
+    wrap_embedding_provider, wrap_llm_provider,
 };
 use memcore_storage::{
     MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteApiKeyStore,
@@ -273,9 +274,21 @@ fn require_postgres_url(settings: &Settings) -> MemcoreResult<String> {
         })
 }
 
+fn provider_execution_policy(settings: &Settings) -> MemcoreResult<ProviderExecutionPolicy> {
+    ProviderExecutionPolicy::from_config(
+        settings.provider_timeout_seconds,
+        settings.provider_max_retries,
+        settings.provider_initial_backoff_ms,
+        settings.provider_max_backoff_ms,
+        settings.provider_backoff_multiplier,
+        settings.provider_retry_jitter_enabled,
+    )
+}
+
 fn create_llm_provider(settings: &Settings) -> MemcoreResult<Arc<dyn LlmProvider>> {
-    match settings.llm_provider {
-        LlmProviderKind::Mock => Ok(Arc::new(MockLlmProvider::new())),
+    let policy = provider_execution_policy(settings)?;
+    let inner: Arc<dyn LlmProvider> = match settings.llm_provider {
+        LlmProviderKind::Mock => Arc::new(MockLlmProvider::new()),
         LlmProviderKind::OpenAi => {
             let api_key = require_openai_api_key(
                 settings,
@@ -284,24 +297,32 @@ fn create_llm_provider(settings: &Settings) -> MemcoreResult<Arc<dyn LlmProvider
             let client = OpenAiClient::new(&api_key, &settings.openai_base_url).map_err(|err| {
                 provider_init_error("OpenAI LLM", err)
             })?;
-            Ok(Arc::new(OpenAiLlmProvider::new(client, settings.llm_model.clone())))
+            Arc::new(OpenAiLlmProvider::new(client, settings.llm_model.clone()))
         }
-        LlmProviderKind::OpenRouter => Err(MemcoreError::ValidationError(
-            "openrouter LLM provider is not wired into the API yet".to_string(),
-        )),
-        LlmProviderKind::Anthropic => Err(MemcoreError::ValidationError(
-            "anthropic LLM provider is not wired into the API yet".to_string(),
-        )),
-        LlmProviderKind::Groq => Err(MemcoreError::ValidationError(
-            "groq LLM provider is not wired into the API yet".to_string(),
-        )),
-    }
+        LlmProviderKind::OpenRouter => {
+            return Err(MemcoreError::ValidationError(
+                "openrouter LLM provider is not wired into the API yet".to_string(),
+            ))
+        }
+        LlmProviderKind::Anthropic => {
+            return Err(MemcoreError::ValidationError(
+                "anthropic LLM provider is not wired into the API yet".to_string(),
+            ))
+        }
+        LlmProviderKind::Groq => {
+            return Err(MemcoreError::ValidationError(
+                "groq LLM provider is not wired into the API yet".to_string(),
+            ))
+        }
+    };
+    Ok(wrap_llm_provider(inner, policy))
 }
 
 fn create_embedding_provider(settings: &Settings) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
-    match settings.embedding_provider {
+    let policy = provider_execution_policy(settings)?;
+    let inner: Arc<dyn EmbeddingProvider> = match settings.embedding_provider {
         EmbeddingProviderKind::Mock => {
-            Ok(Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS)))
+            Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS))
         }
         EmbeddingProviderKind::OpenAi => {
             let api_key = require_openai_api_key(
@@ -319,9 +340,10 @@ fn create_embedding_provider(settings: &Settings) -> MemcoreResult<Arc<dyn Embed
                 dimensions,
             )
             .map_err(|err| provider_init_error("OpenAI embedding", err))?;
-            Ok(Arc::new(provider))
+            Arc::new(provider)
         }
-    }
+    };
+    Ok(wrap_embedding_provider(inner, policy))
 }
 
 fn require_openai_api_key(settings: &Settings, message: &str) -> MemcoreResult<String> {

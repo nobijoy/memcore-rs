@@ -26,9 +26,19 @@ pub enum MemcoreError {
     Timeout(String),
 }
 
+pub const PROVIDER_TIMEOUT_MESSAGE: &str = "provider operation timed out";
+
 pub type MemcoreResult<T> = Result<T, MemcoreError>;
 
 impl MemcoreError {
+    pub fn provider_timeout() -> Self {
+        Self::Timeout(PROVIDER_TIMEOUT_MESSAGE.to_string())
+    }
+
+    pub fn is_provider_timeout(&self) -> bool {
+        matches!(self, Self::Timeout(msg) if msg == PROVIDER_TIMEOUT_MESSAGE)
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "unauthorized",
@@ -41,6 +51,7 @@ impl MemcoreError {
             Self::StorageError(_) => "storage_error",
             Self::ValidationError(_) => "validation_error",
             Self::Internal(_) => "internal",
+            Self::Timeout(msg) if msg == PROVIDER_TIMEOUT_MESSAGE => "provider_timeout",
             Self::Timeout(_) => "timeout",
         }
     }
@@ -58,6 +69,13 @@ mod tests {
     fn display_message_includes_variant_text() {
         let error = MemcoreError::BadRequest("missing user_id".to_string());
         assert_eq!(error.to_string(), "bad request: missing user_id");
+    }
+
+    #[test]
+    fn provider_timeout_uses_dedicated_error_code() {
+        let error = MemcoreError::provider_timeout();
+        assert_eq!(error.code(), "provider_timeout");
+        assert!(error.is_provider_timeout());
     }
 
     #[test]
