@@ -5,7 +5,8 @@ use utoipa::{Modify, OpenApi};
 
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, ApiKeyItemResponse, ApiKeyScopeResponse,
-    BuildContextRequest, BuildContextResponse, ContextBudgetResponse, ContextCacheResponse,
+    BuildContextRequest, BuildContextResponse, ContextBudgetResponse,
+    ContextCacheMetricsBodyResponse, ContextCacheMetricsResponse, ContextCacheResponse,
     ContextCompressionResponse, ContextMemoryResponse, CreateApiKeyRequest,
     CreateApiKeyResponse, DeleteMemoryResponse, ExportFactItemResponse, ExportMemorySourceResponse,
     ApplyRetentionRequest, ApplyRetentionResponse, ApplyRetentionSummaryResponse, ExportUserResponse,
@@ -52,6 +53,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         paths::get_org_summary,
         paths::list_org_users,
         paths::search_org_memory_events,
+        paths::get_context_cache_metrics,
     ),
     components(schemas(
         ErrorBody,
@@ -105,6 +107,8 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         OrgUserSummaryResponse,
         SearchOrgMemoryEventsResponse,
         AdminOrgMemoryEventItemResponse,
+        ContextCacheMetricsResponse,
+        ContextCacheMetricsBodyResponse,
     )),
     tags(
         (name = "Health", description = "Liveness and readiness probes"),

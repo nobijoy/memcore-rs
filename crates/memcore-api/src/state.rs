@@ -424,6 +424,7 @@ fn context_cache_config_from_settings(settings: &Settings) -> ContextCacheConfig
         stampede_lock_timeout_seconds: settings.context_cache_lock_timeout_seconds,
         stale_while_revalidate_enabled: settings.context_cache_stale_while_revalidate_enabled,
         stale_ttl_seconds: settings.context_cache_stale_ttl_seconds,
+        metrics_enabled: settings.context_cache_metrics_enabled,
     }
 }
 

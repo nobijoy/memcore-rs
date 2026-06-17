@@ -47,6 +47,7 @@ const MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS: &str =
 const MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED: &str =
     "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED";
 const MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS: &str = "MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS";
+const MEMCORE_CONTEXT_CACHE_METRICS_ENABLED: &str = "MEMCORE_CONTEXT_CACHE_METRICS_ENABLED";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -214,6 +215,8 @@ pub struct Settings {
     pub context_cache_stale_while_revalidate_enabled: bool,
     /// Seconds after fresh TTL expires during which stale context may be served.
     pub context_cache_stale_ttl_seconds: u64,
+    /// Record in-process context cache observability counters.
+    pub context_cache_metrics_enabled: bool,
 }
 
 impl Default for Settings {
@@ -263,6 +266,7 @@ impl Default for Settings {
             context_cache_lock_timeout_seconds: 30,
             context_cache_stale_while_revalidate_enabled: false,
             context_cache_stale_ttl_seconds: 120,
+            context_cache_metrics_enabled: true,
         }
     }
 }
@@ -364,6 +368,10 @@ impl Settings {
             MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS,
             defaults.context_cache_stale_ttl_seconds,
         )?;
+        let context_cache_metrics_enabled = parse_bool(
+            MEMCORE_CONTEXT_CACHE_METRICS_ENABLED,
+            defaults.context_cache_metrics_enabled,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -416,6 +424,7 @@ impl Settings {
             context_cache_lock_timeout_seconds,
             context_cache_stale_while_revalidate_enabled,
             context_cache_stale_ttl_seconds,
+            context_cache_metrics_enabled,
         };
 
         settings.validate()?;
@@ -925,7 +934,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 44] = [
+    const ENV_KEYS: [&str; 45] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -967,6 +976,7 @@ mod tests {
         "MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS",
         "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED",
         "MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS",
+        "MEMCORE_CONTEXT_CACHE_METRICS_ENABLED",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",

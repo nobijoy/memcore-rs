@@ -16,6 +16,7 @@ use crate::import::{
     ImportValidationSummary, resolve_import_fact_id,
 };
 use crate::{InMemoryContextCache, ContextCacheCoordinator, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES};
+use crate::context_cache_metrics_recorder;
 use crate::ranking::{
     reciprocal_rank_fusion, weighted_score_for, RankedCandidate, RankingConfig, RankingSource,
     RrfConfig,
@@ -41,7 +42,7 @@ use crate::importance::ImportanceScorer;
 use crate::lifecycle::{
     apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
 };
-use crate::{assemble_context_with_budget, apply_provider_compression_summary, build_context_cache_key, cached_entry_from_output, BuildContextInput, BuildContextOutput, ContextCache, ContextCacheConfig, ContextCacheUsage, Fact, FactOperation,
+use crate::{assemble_context_with_budget, apply_provider_compression_summary, build_context_cache_key, cached_entry_from_output, BuildContextInput, BuildContextOutput, ContextCache, ContextCacheConfig, ContextCacheMetricsRecorder, ContextCacheMetricsSnapshot, ContextCacheUsage, Fact, FactOperation,
     FactOperationDecision, MemoryEvent, MemorySearchResult, SimpleTokenEstimator, TenantContext};
 use uuid::Uuid;
 
@@ -70,6 +71,7 @@ pub struct MemoryEngine {
     context_cache: Arc<dyn ContextCache>,
     context_cache_config: ContextCacheConfig,
     context_cache_coordinator: ContextCacheCoordinator,
+    context_cache_metrics: Arc<dyn ContextCacheMetricsRecorder>,
 }
 
 impl MemoryEngine {
@@ -81,7 +83,9 @@ impl MemoryEngine {
     ) -> Self {
         let cache = Arc::new(InMemoryContextCache::new(DEFAULT_CONTEXT_CACHE_MAX_ENTRIES));
         let cache_config = ContextCacheConfig::default();
-        let coordinator = ContextCacheCoordinator::new(cache.clone(), cache_config);
+        let metrics = context_cache_metrics_recorder(&cache_config);
+        let coordinator =
+            ContextCacheCoordinator::new(cache.clone(), cache_config, metrics.clone());
         Self {
             fact_store,
             vector_store,
@@ -98,6 +102,7 @@ impl MemoryEngine {
             context_cache: cache,
             context_cache_config: cache_config,
             context_cache_coordinator: coordinator,
+            context_cache_metrics: metrics,
         }
     }
 
@@ -146,14 +151,21 @@ impl MemoryEngine {
         cache: Arc<dyn ContextCache>,
         config: ContextCacheConfig,
     ) -> Self {
+        let metrics = context_cache_metrics_recorder(&config);
         self.context_cache = cache.clone();
         self.context_cache_config = config;
-        self.context_cache_coordinator = ContextCacheCoordinator::new(cache, config);
+        self.context_cache_metrics = metrics.clone();
+        self.context_cache_coordinator =
+            ContextCacheCoordinator::new(cache, config, metrics);
         self
     }
 
     pub fn context_cache_config(&self) -> ContextCacheConfig {
         self.context_cache_config
+    }
+
+    pub fn context_cache_metrics_snapshot(&self) -> ContextCacheMetricsSnapshot {
+        self.context_cache_metrics.snapshot()
     }
 
     pub fn pii_redaction_enabled(&self) -> bool {
@@ -1099,10 +1111,32 @@ impl MemoryEngine {
 
     async fn invalidate_user_context_cache(&self, tenant: &TenantContext) {
         if self.context_cache_config.enabled {
-            let _ = self
+            match self
                 .context_cache
                 .invalidate_user(&tenant.org_id, &tenant.user_id)
-                .await;
+                .await
+            {
+                Ok(removed) => {
+                    self.context_cache_metrics
+                        .record_invalidation(removed);
+                    tracing::debug!(
+                        event = "context_cache_invalidated",
+                        org_id = %tenant.org_id,
+                        user_id = %tenant.user_id,
+                        removed_entries = removed,
+                        "context cache invalidated for user"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        event = "context_cache_invalidation_failed",
+                        org_id = %tenant.org_id,
+                        user_id = %tenant.user_id,
+                        error_code = %error.code(),
+                        "context cache invalidation failed"
+                    );
+                }
+            }
         }
     }
 }

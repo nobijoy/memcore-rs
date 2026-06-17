@@ -2,6 +2,7 @@ mod assembler;
 mod budget;
 mod cache;
 mod cache_coordinator;
+mod cache_metrics;
 mod compression;
 mod compression_options;
 mod format_options;
@@ -21,6 +22,10 @@ pub use cache::{
     DEFAULT_CONTEXT_CACHE_TTL_SECONDS, InMemoryContextCache,
 };
 pub use cache_coordinator::{ContextCacheCoordinator, ContextCacheStampedeConfig};
+pub use cache_metrics::{
+    context_cache_metrics_recorder, ContextCacheMetricsRecorder, ContextCacheMetricsSnapshot,
+    InMemoryContextCacheMetrics, NoopContextCacheMetrics,
+};
 pub use budget::{
     ContextBudget, ContextBudgetUsage, DEFAULT_CONTEXT_MAX_TOKENS,
     DEFAULT_CONTEXT_RESERVED_TOKENS, MAX_CONTEXT_MAX_TOKENS,

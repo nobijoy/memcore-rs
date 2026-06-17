@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use memcore_core::{
-    ListOrgUsersInput, ListOrgUsersOutput, MemoryEvent, OrgSummaryInput, OrgSummaryOutput,
-    OrgUserSummary, SearchOrgMemoryEventsOutput, DEFAULT_LIST_ORG_USERS_LIMIT,
-    DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MAX_LIST_ORG_USERS_LIMIT,
-    MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
+    ContextCacheMetricsSnapshot, ListOrgUsersInput, ListOrgUsersOutput, MemoryEvent,
+    OrgSummaryInput, OrgSummaryOutput, OrgUserSummary, SearchOrgMemoryEventsOutput,
+    DEFAULT_LIST_ORG_USERS_LIMIT, DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
+    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -59,6 +59,57 @@ pub struct AdminOrgMemoryEventItemResponse {
     pub model_name: Option<String>,
     pub metadata: Value,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ContextCacheMetricsResponse {
+    pub status: &'static str,
+    /// Metrics are aggregate counters for this API process only.
+    pub scope: &'static str,
+    pub metrics: ContextCacheMetricsBodyResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ContextCacheMetricsBodyResponse {
+    pub hits: u64,
+    pub misses: u64,
+    pub sets: u64,
+    pub invalidations: u64,
+    pub invalidated_entries: u64,
+    pub stale_served: u64,
+    pub refresh_started: u64,
+    pub refresh_succeeded: u64,
+    pub refresh_failed: u64,
+    pub stampede_waits: u64,
+    pub stampede_timeouts: u64,
+    pub compute_errors: u64,
+}
+
+impl From<ContextCacheMetricsSnapshot> for ContextCacheMetricsBodyResponse {
+    fn from(snapshot: ContextCacheMetricsSnapshot) -> Self {
+        Self {
+            hits: snapshot.hits,
+            misses: snapshot.misses,
+            sets: snapshot.sets,
+            invalidations: snapshot.invalidations,
+            invalidated_entries: snapshot.invalidated_entries,
+            stale_served: snapshot.stale_served,
+            refresh_started: snapshot.refresh_started,
+            refresh_succeeded: snapshot.refresh_succeeded,
+            refresh_failed: snapshot.refresh_failed,
+            stampede_waits: snapshot.stampede_waits,
+            stampede_timeouts: snapshot.stampede_timeouts,
+            compute_errors: snapshot.compute_errors,
+        }
+    }
+}
+
+pub fn context_cache_metrics_response(snapshot: ContextCacheMetricsSnapshot) -> ContextCacheMetricsResponse {
+    ContextCacheMetricsResponse {
+        status: "success",
+        scope: "process_local",
+        metrics: snapshot.into(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

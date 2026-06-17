@@ -4,7 +4,7 @@
 
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, BuildContextRequest, BuildContextResponse,
-    CreateApiKeyRequest, CreateApiKeyResponse, DeleteMemoryResponse, ExportUserResponse,
+    CreateApiKeyRequest, CreateApiKeyResponse, ContextCacheMetricsResponse, DeleteMemoryResponse, ExportUserResponse,
     ApplyRetentionRequest, ApplyRetentionResponse, ForgetUserResponse, ImportUserDataRequest,
     ImportUserDataResponse, ListApiKeysResponse, ListOrgUsersResponse, OrgSummaryResponse,
     SearchOrgMemoryEventsResponse,
@@ -407,3 +407,22 @@ pub fn list_org_users() {}
     )
 )]
 pub fn search_org_memory_events() {}
+
+/// Process-local aggregate context cache counters for debugging and operations.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/cache/context/metrics",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Process-local context cache metrics", body = ContextCacheMetricsResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_context_cache_metrics() {}

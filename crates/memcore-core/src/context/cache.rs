@@ -79,6 +79,7 @@ pub struct ContextCacheConfig {
     pub stampede_lock_timeout_seconds: u64,
     pub stale_while_revalidate_enabled: bool,
     pub stale_ttl_seconds: u64,
+    pub metrics_enabled: bool,
 }
 
 impl Default for ContextCacheConfig {
@@ -91,6 +92,7 @@ impl Default for ContextCacheConfig {
             stampede_lock_timeout_seconds: DEFAULT_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS,
             stale_while_revalidate_enabled: false,
             stale_ttl_seconds: DEFAULT_CONTEXT_CACHE_STALE_TTL_SECONDS,
+            metrics_enabled: true,
         }
     }
 }
@@ -102,6 +104,10 @@ impl ContextCacheConfig {
 
     pub fn stale_while_revalidate_active(&self) -> bool {
         self.enabled && self.stale_while_revalidate_enabled
+    }
+
+    pub fn metrics_active(&self) -> bool {
+        self.enabled && self.metrics_enabled
     }
 
     pub fn validate(&self) -> MemcoreResult<()> {
