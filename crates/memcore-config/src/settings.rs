@@ -65,6 +65,8 @@ const MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS: &str =
     "MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS";
 const MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS: &str =
     "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS";
+const MEMCORE_PROVIDER_USAGE_METRICS_ENABLED: &str = "MEMCORE_PROVIDER_USAGE_METRICS_ENABLED";
+const MEMCORE_PROVIDER_COST_TRACKING_ENABLED: &str = "MEMCORE_PROVIDER_COST_TRACKING_ENABLED";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -262,6 +264,10 @@ pub struct Settings {
     pub provider_circuit_breaker_reset_timeout_seconds: u64,
     /// Maximum probe calls allowed while a circuit is half-open.
     pub provider_circuit_breaker_half_open_max_calls: usize,
+    /// Record process-local provider usage counters.
+    pub provider_usage_metrics_enabled: bool,
+    /// Estimate provider cost from static pricing hints when token usage is available.
+    pub provider_cost_tracking_enabled: bool,
 }
 
 impl Default for Settings {
@@ -326,6 +332,8 @@ impl Default for Settings {
             provider_circuit_breaker_failure_threshold: 5,
             provider_circuit_breaker_reset_timeout_seconds: 60,
             provider_circuit_breaker_half_open_max_calls: 1,
+            provider_usage_metrics_enabled: true,
+            provider_cost_tracking_enabled: false,
         }
     }
 }
@@ -487,6 +495,14 @@ impl Settings {
             MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS,
             defaults.provider_circuit_breaker_half_open_max_calls,
         )?;
+        let provider_usage_metrics_enabled = parse_bool(
+            MEMCORE_PROVIDER_USAGE_METRICS_ENABLED,
+            defaults.provider_usage_metrics_enabled,
+        )?;
+        let provider_cost_tracking_enabled = parse_bool(
+            MEMCORE_PROVIDER_COST_TRACKING_ENABLED,
+            defaults.provider_cost_tracking_enabled,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -554,6 +570,8 @@ impl Settings {
             provider_circuit_breaker_failure_threshold,
             provider_circuit_breaker_reset_timeout_seconds,
             provider_circuit_breaker_half_open_max_calls,
+            provider_usage_metrics_enabled,
+            provider_cost_tracking_enabled,
         };
 
         settings.validate()?;
@@ -1124,7 +1142,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 59] = [
+    const ENV_KEYS: [&str; 61] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -1181,6 +1199,8 @@ mod tests {
         "MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
         "MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS",
         "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS",
+        "MEMCORE_PROVIDER_USAGE_METRICS_ENABLED",
+        "MEMCORE_PROVIDER_COST_TRACKING_ENABLED",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1498,6 +1518,8 @@ mod tests {
         assert_eq!(settings.provider_max_retries, 2);
         assert!(!settings.provider_fallback_enabled);
         assert!(settings.provider_circuit_breaker_enabled);
+        assert!(settings.provider_usage_metrics_enabled);
+        assert!(!settings.provider_cost_tracking_enabled);
         assert_eq!(settings.provider_circuit_breaker_failure_threshold, 5);
     }
 

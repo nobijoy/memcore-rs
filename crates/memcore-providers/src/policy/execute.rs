@@ -7,11 +7,29 @@ use super::retry::{backoff_duration, retry_decision_for, ProviderRetryDecision};
 use super::timeout::provider_timeout_error;
 use super::ProviderExecutionPolicy;
 
+/// Result of a provider call including retry attempt metadata.
+#[derive(Debug, Clone)]
+pub struct ProviderExecutionOutcome<T> {
+    pub value: T,
+    pub attempts: usize,
+    pub retries: usize,
+    pub timed_out: bool,
+}
+
+/// Provider call failure with retry attempt metadata.
+#[derive(Debug, Clone)]
+pub struct ProviderExecutionFailure {
+    pub error: MemcoreError,
+    pub attempts: usize,
+    pub retries: usize,
+    pub timed_out: bool,
+}
+
 pub async fn execute_provider_call<F, Fut, T>(
     operation_name: &'static str,
     policy: &ProviderExecutionPolicy,
     mut operation: F,
-) -> MemcoreResult<T>
+) -> Result<ProviderExecutionOutcome<T>, ProviderExecutionFailure>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = MemcoreResult<T>>,
@@ -19,9 +37,12 @@ where
     let max_attempts = policy.total_attempts();
     let timeout_ms = policy.timeout.as_millis();
     let mut last_error: Option<MemcoreError> = None;
+    let mut any_timed_out = false;
+    let mut attempts_made = 0_usize;
 
     for attempt in 0..max_attempts {
         let attempt_number = attempt + 1;
+        attempts_made = attempt_number;
         let started = Instant::now();
 
         match tokio::time::timeout(policy.timeout, operation()).await {
@@ -35,7 +56,12 @@ where
                     duration_ms = started.elapsed().as_millis(),
                     "provider call succeeded"
                 );
-                return Ok(result);
+                return Ok(ProviderExecutionOutcome {
+                    value: result,
+                    attempts: attempt_number,
+                    retries: attempt,
+                    timed_out: any_timed_out,
+                });
             }
             Ok(Err(error)) => {
                 let retryable = matches!(
@@ -63,6 +89,7 @@ where
                 tokio::time::sleep(backoff_duration(policy, retry_number)).await;
             }
             Err(_elapsed) => {
+                any_timed_out = true;
                 let error = provider_timeout_error();
                 let retryable = matches!(
                     retry_decision_for(&error),
@@ -92,15 +119,37 @@ where
     }
 
     match last_error {
-        Some(error) if error.is_provider_timeout() => Err(error),
-        Some(error) if !super::retry::is_retryable_provider_error(&error) => Err(error),
-        Some(error) => Err(MemcoreError::ProviderError(format!(
-            "{operation_name} failed after {max_attempts} attempts: {}",
-            error.message()
-        ))),
-        None => Err(MemcoreError::Internal(format!(
-            "{operation_name} failed without an error"
-        ))),
+        Some(error) if error.is_provider_timeout() => Err(ProviderExecutionFailure {
+            error,
+            attempts: attempts_made,
+            retries: attempts_made.saturating_sub(1),
+            timed_out: true,
+        }),
+        Some(error) if !super::retry::is_retryable_provider_error(&error) => {
+            Err(ProviderExecutionFailure {
+                error,
+                attempts: attempts_made,
+                retries: attempts_made.saturating_sub(1),
+                timed_out: any_timed_out,
+            })
+        }
+        Some(error) => Err(ProviderExecutionFailure {
+            error: MemcoreError::ProviderError(format!(
+                "{operation_name} failed after {max_attempts} attempts: {}",
+                error.message()
+            )),
+            attempts: attempts_made,
+            retries: attempts_made.saturating_sub(1),
+            timed_out: any_timed_out,
+        }),
+        None => Err(ProviderExecutionFailure {
+            error: MemcoreError::Internal(format!(
+                "{operation_name} failed without an error"
+            )),
+            attempts: attempts_made,
+            retries: attempts_made.saturating_sub(1),
+            timed_out: any_timed_out,
+        }),
     }
 }
 
@@ -142,7 +191,8 @@ mod tests {
         .await
         .expect("success");
 
-        assert_eq!(result, 42);
+        assert_eq!(result.value, 42);
+        assert_eq!(result.retries, 0);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
@@ -152,7 +202,7 @@ mod tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_for_closure = calls.clone();
 
-        let error = execute_provider_call("test_non_retryable", &policy, || {
+        let failure = execute_provider_call("test_non_retryable", &policy, || {
             let calls = calls_for_closure.clone();
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
@@ -162,7 +212,7 @@ mod tests {
         .await
         .expect_err("should fail");
 
-        assert!(matches!(error, MemcoreError::ValidationError(_)));
+        assert!(matches!(failure.error, MemcoreError::ValidationError(_)));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
@@ -188,7 +238,8 @@ mod tests {
         .await
         .expect("should eventually succeed");
 
-        assert_eq!(result, "ok");
+        assert_eq!(result.value, "ok");
+        assert_eq!(result.retries, 2);
         assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 
@@ -198,7 +249,7 @@ mod tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_for_closure = calls.clone();
 
-        let error = execute_provider_call("test_retry_exhausted", &policy, || {
+        let failure = execute_provider_call("test_retry_exhausted", &policy, || {
             let calls = calls_for_closure.clone();
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
@@ -210,7 +261,8 @@ mod tests {
         .await
         .expect_err("should fail");
 
-        assert!(matches!(error, MemcoreError::ProviderError(_)));
+        assert!(matches!(failure.error, MemcoreError::ProviderError(_)));
+        assert_eq!(failure.retries, 2);
         assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 
@@ -244,15 +296,16 @@ mod tests {
             ..ProviderExecutionPolicy::default()
         };
 
-        let error = execute_provider_call("test_timeout", &policy, || async {
+        let failure = execute_provider_call("test_timeout", &policy, || async {
             tokio::time::sleep(Duration::from_millis(100)).await;
             Ok(())
         })
         .await
         .expect_err("should time out");
 
-        assert!(error.is_provider_timeout());
-        assert_eq!(error.code(), "provider_timeout");
+        assert!(failure.error.is_provider_timeout());
+        assert_eq!(failure.error.code(), "provider_timeout");
+        assert!(failure.timed_out);
     }
 
     #[tokio::test]
@@ -283,7 +336,9 @@ mod tests {
         .await
         .expect("second attempt should succeed");
 
-        assert_eq!(result, "fast");
+        assert_eq!(result.value, "fast");
+        assert_eq!(result.retries, 1);
+        assert!(result.timed_out);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

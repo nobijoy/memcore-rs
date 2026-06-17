@@ -6,9 +6,10 @@ use memcore_core::{
 };
 use memcore_providers::{
     build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
-    CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, ProviderCandidate,
-    ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
-    ProviderRoutingMetrics,
+    provider_usage_recorder, CircuitBreakerConfig, InMemoryProviderUsageRecorder,
+    MockEmbeddingProvider, MockLlmProvider, ProviderCandidate, ProviderCapability,
+    ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId, ProviderRoutingMetrics,
+    ProviderUsageRecorder,
 };
 use memcore_storage::{MockFactStore, MockVectorStore};
 use serde_json::json;
@@ -32,28 +33,43 @@ fn test_circuit_breaker() -> Arc<ProviderCircuitBreaker> {
     Arc::new(ProviderCircuitBreaker::new(CircuitBreakerConfig::for_tests()))
 }
 
+fn llm_candidate(name: &str, provider: Arc<MockLlmProvider>) -> ProviderCandidate<Arc<dyn memcore_core::LlmProvider>> {
+    ProviderCandidate::new(
+        ProviderId::new(name, ProviderCapability::Llm),
+        provider as Arc<dyn memcore_core::LlmProvider>,
+        Some("mock-llm".to_string()),
+        None,
+    )
+}
+
+fn embedding_candidate(
+    name: &str,
+    provider: Arc<MockEmbeddingProvider>,
+) -> ProviderCandidate<Arc<dyn memcore_core::EmbeddingProvider>> {
+    ProviderCandidate::new(
+        ProviderId::new(name, ProviderCapability::Embedding),
+        provider as Arc<dyn memcore_core::EmbeddingProvider>,
+        Some("mock-embedding".to_string()),
+        None,
+    )
+}
+
 #[tokio::test]
 async fn llm_extraction_falls_back_to_healthy_mock_provider() {
     let failing = Arc::new(MockLlmProvider::new().with_fail_error(MemcoreError::ProviderError(
         "OpenAI API error (503): unavailable".to_string(),
     )));
     let healthy = Arc::new(MockLlmProvider::new());
+    let usage = InMemoryProviderUsageRecorder::new();
     let llm = build_resilient_llm_from_candidates(
-        vec![
-            ProviderCandidate {
-                provider_id: ProviderId::new("primary", ProviderCapability::Llm),
-                provider: failing,
-            },
-            ProviderCandidate {
-                provider_id: ProviderId::new("secondary", ProviderCapability::Llm),
-                provider: healthy,
-            },
-        ],
+        vec![llm_candidate("primary", failing), llm_candidate("secondary", healthy)],
         vec![],
         test_circuit_breaker(),
         fast_policy(),
         true,
         Some(ProviderRoutingMetrics::new()),
+        Some(usage.clone()),
+        false,
     );
 
     let engine = MemoryEngine::new(
@@ -76,6 +92,10 @@ async fn llm_extraction_falls_back_to_healthy_mock_provider() {
         .expect("fallback add should succeed");
 
     assert_eq!(output.added, 1);
+    let snapshot = usage.snapshot();
+    assert!(snapshot.total_requests >= 2);
+    assert!(snapshot.total_successes >= 1);
+    assert!(snapshot.total_fallbacks >= 1);
 }
 
 #[tokio::test]
@@ -86,21 +106,18 @@ async fn embedding_search_falls_back_to_healthy_mock_provider() {
         )),
     );
     let healthy = Arc::new(MockEmbeddingProvider::new(4));
+    let usage = provider_usage_recorder(true);
     let embedding = build_resilient_embedding_from_candidates(
         vec![
-            ProviderCandidate {
-                provider_id: ProviderId::new("primary", ProviderCapability::Embedding),
-                provider: failing,
-            },
-            ProviderCandidate {
-                provider_id: ProviderId::new("secondary", ProviderCapability::Embedding),
-                provider: healthy,
-            },
+            embedding_candidate("primary", failing),
+            embedding_candidate("secondary", healthy),
         ],
         test_circuit_breaker(),
         fast_policy(),
         true,
         Some(ProviderRoutingMetrics::new()),
+        Some(usage.clone()),
+        false,
     )
     .expect("embedding provider");
 
@@ -121,4 +138,6 @@ async fn embedding_search_falls_back_to_healthy_mock_provider() {
         })
         .await
         .expect("search should succeed via fallback embedding");
+
+    assert!(usage.snapshot().total_requests >= 1);
 }

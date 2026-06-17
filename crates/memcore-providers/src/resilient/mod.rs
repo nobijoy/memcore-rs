@@ -16,8 +16,13 @@ use crate::routing::{
     ProviderRoutingMetrics,
 };
 use crate::traits::{EmbeddingProvider, LlmProvider};
+use crate::usage::{
+    estimate_embedding_batch_tokens, estimate_embedding_tokens, estimate_llm_classification_tokens,
+    estimate_llm_extraction_tokens, estimate_llm_summarization_tokens, store_token_usage,
+    ProviderUsageRecorder, TokenUsageSlot,
+};
 
-/// LLM provider with timeout/retry, circuit breaker, and optional fallback routing.
+/// LLM provider with timeout/retry, circuit breaker, optional fallback routing, and usage recording.
 pub struct ResilientLlmProvider {
     providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
     summarizer_providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
@@ -33,11 +38,19 @@ impl ResilientLlmProvider {
         policy: ProviderExecutionPolicy,
         fallback_enabled: bool,
         metrics: Option<Arc<ProviderRoutingMetrics>>,
+        usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        cost_tracking_enabled: bool,
     ) -> Self {
         Self {
             providers,
             summarizer_providers,
-            router: ProviderFallbackRouter::new(circuit_breaker, policy, metrics),
+            router: ProviderFallbackRouter::new(
+                circuit_breaker,
+                policy,
+                metrics,
+                usage_recorder,
+                cost_tracking_enabled,
+            ),
             fallback_enabled,
         }
     }
@@ -50,6 +63,8 @@ pub fn build_resilient_llm_provider(
     policy: ProviderExecutionPolicy,
     fallback_enabled: bool,
     metrics: Option<Arc<ProviderRoutingMetrics>>,
+    usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    cost_tracking_enabled: bool,
 ) -> Arc<dyn LlmProvider> {
     Arc::new(ResilientLlmProvider::new(
         providers,
@@ -58,7 +73,15 @@ pub fn build_resilient_llm_provider(
         policy,
         fallback_enabled,
         metrics,
+        usage_recorder,
+        cost_tracking_enabled,
     ))
+}
+
+fn store_estimated_usage(slot: Option<TokenUsageSlot>, usage: crate::usage::ProviderTokenUsage) {
+    if let Some(slot) = slot {
+        store_token_usage(&slot, usage);
+    }
 }
 
 #[async_trait]
@@ -73,9 +96,13 @@ impl LlmProvider for ResilientLlmProvider {
                 "llm_extract_facts",
                 self.fallback_enabled,
                 &self.providers,
-                |provider| {
+                |provider, slot| {
                     let input = input.clone();
-                    async move { provider.extract_facts(input).await }
+                    async move {
+                        let facts = provider.extract_facts(input.clone()).await?;
+                        store_estimated_usage(slot, estimate_llm_extraction_tokens(&input));
+                        Ok(facts)
+                    }
                 },
             )
             .await
@@ -91,9 +118,19 @@ impl LlmProvider for ResilientLlmProvider {
                 "llm_classify_fact_operation",
                 self.fallback_enabled,
                 &self.providers,
-                |provider| {
+                |provider, slot| {
                     let input = input.clone();
-                    async move { provider.classify_fact_operation(input).await }
+                    async move {
+                        let decision = provider.classify_fact_operation(input.clone()).await?;
+                        store_estimated_usage(
+                            slot,
+                            estimate_llm_classification_tokens(
+                                &input.candidate_fact.content,
+                                input.existing_facts.len(),
+                            ),
+                        );
+                        Ok(decision)
+                    }
                 },
             )
             .await
@@ -111,16 +148,20 @@ impl LlmProvider for ResilientLlmProvider {
                 "llm_summarize_memory",
                 self.fallback_enabled,
                 providers,
-                |provider| {
+                |provider, slot| {
                     let input = input.clone();
-                    async move { provider.summarize_memory(input).await }
+                    async move {
+                        let summary = provider.summarize_memory(input.clone()).await?;
+                        store_estimated_usage(slot, estimate_llm_summarization_tokens(&input));
+                        Ok(summary)
+                    }
                 },
             )
             .await
     }
 }
 
-/// Embedding provider with timeout/retry, circuit breaker, and optional fallback routing.
+/// Embedding provider with timeout/retry, circuit breaker, optional fallback routing, and usage recording.
 pub struct ResilientEmbeddingProvider {
     providers: Vec<ProviderCandidate<Arc<dyn EmbeddingProvider>>>,
     router: ProviderFallbackRouter,
@@ -135,6 +176,8 @@ impl ResilientEmbeddingProvider {
         policy: ProviderExecutionPolicy,
         fallback_enabled: bool,
         metrics: Option<Arc<ProviderRoutingMetrics>>,
+        usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        cost_tracking_enabled: bool,
     ) -> MemcoreResult<Self> {
         let dimensions = providers
             .first()
@@ -156,7 +199,13 @@ impl ResilientEmbeddingProvider {
 
         Ok(Self {
             providers,
-            router: ProviderFallbackRouter::new(circuit_breaker, policy, metrics),
+            router: ProviderFallbackRouter::new(
+                circuit_breaker,
+                policy,
+                metrics,
+                usage_recorder,
+                cost_tracking_enabled,
+            ),
             fallback_enabled,
             dimensions,
         })
@@ -169,6 +218,8 @@ pub fn build_resilient_embedding_provider(
     policy: ProviderExecutionPolicy,
     fallback_enabled: bool,
     metrics: Option<Arc<ProviderRoutingMetrics>>,
+    usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    cost_tracking_enabled: bool,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
     Ok(Arc::new(ResilientEmbeddingProvider::new(
         providers,
@@ -176,6 +227,8 @@ pub fn build_resilient_embedding_provider(
         policy,
         fallback_enabled,
         metrics,
+        usage_recorder,
+        cost_tracking_enabled,
     )?))
 }
 
@@ -189,9 +242,13 @@ impl EmbeddingProvider for ResilientEmbeddingProvider {
                 "embedding_embed_text",
                 self.fallback_enabled,
                 &self.providers,
-                |provider| {
+                |provider, slot| {
                     let text = text.clone();
-                    async move { provider.embed_text(&text).await }
+                    async move {
+                        let embedding = provider.embed_text(&text).await?;
+                        store_estimated_usage(slot, estimate_embedding_tokens(&text));
+                        Ok(embedding)
+                    }
                 },
             )
             .await
@@ -204,9 +261,13 @@ impl EmbeddingProvider for ResilientEmbeddingProvider {
                 "embedding_embed_batch",
                 self.fallback_enabled,
                 &self.providers,
-                |provider| {
+                |provider, slot| {
                     let texts = texts.clone();
-                    async move { provider.embed_batch(texts).await }
+                    async move {
+                        let embeddings = provider.embed_batch(texts.clone()).await?;
+                        store_estimated_usage(slot, estimate_embedding_batch_tokens(&texts));
+                        Ok(embeddings)
+                    }
                 },
             )
             .await

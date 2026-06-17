@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::dto::{
     context_cache_metrics_response, parse_event_date_filters, parse_memory_event_operation_label,
-    ContextCacheMetricsResponse, ListOrgUsersQuery,
-    ListOrgUsersResponse, OrgSummaryResponse, SearchOrgMemoryEventsQuery,
+    provider_usage_response, ContextCacheMetricsResponse, ListOrgUsersQuery,
+    ProviderUsageResponse, ListOrgUsersResponse, OrgSummaryResponse, SearchOrgMemoryEventsQuery,
     SearchOrgMemoryEventsResponse, org_summary_input, parse_keyword_query,
     validate_list_org_users_limit,
     validate_search_org_memory_events_limit,
@@ -121,6 +121,21 @@ pub async fn get_context_cache_metrics(
     let _ = organization.org_id;
     let snapshot = state.memory_engine.context_cache_metrics_snapshot();
     Ok(Json(context_cache_metrics_response(snapshot)))
+}
+
+pub async fn get_provider_usage(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+) -> Result<Json<ProviderUsageResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    let _ = organization.org_id;
+    let snapshot = state.provider_usage.snapshot();
+    Ok(Json(provider_usage_response(snapshot)))
 }
 
 fn parse_fact_id(value: &str) -> Result<Uuid, MemcoreError> {

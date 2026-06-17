@@ -113,6 +113,94 @@ pub fn context_cache_metrics_response(snapshot: ContextCacheMetricsSnapshot) -> 
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageResponse {
+    pub status: &'static str,
+    /// Usage metrics are aggregate counters for this API process only (not per-org billing).
+    pub scope: &'static str,
+    pub usage: ProviderUsageBodyResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageBodyResponse {
+    pub total_requests: u64,
+    pub total_successes: u64,
+    pub total_errors: u64,
+    pub total_retries: u64,
+    pub total_fallbacks: u64,
+    pub total_circuit_blocks: u64,
+    pub total_timeouts: u64,
+    pub total_estimated_cost_usd: Option<f64>,
+    pub records: Vec<ProviderUsageRecordResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageRecordResponse {
+    pub provider_name: String,
+    pub model_name: Option<String>,
+    pub capability: String,
+    pub operation_name: String,
+    pub request_count: u64,
+    pub success_count: u64,
+    pub error_count: u64,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub retry_count: u64,
+    pub fallback_count: u64,
+    pub circuit_blocked_count: u64,
+    pub timeout_count: u64,
+    pub estimated_cost_usd: Option<f64>,
+}
+
+pub fn provider_usage_response(
+    snapshot: memcore_providers::ProviderUsageSnapshot,
+) -> ProviderUsageResponse {
+    ProviderUsageResponse {
+        status: "success",
+        scope: "process",
+        usage: ProviderUsageBodyResponse {
+            total_requests: snapshot.total_requests,
+            total_successes: snapshot.total_successes,
+            total_errors: snapshot.total_errors,
+            total_retries: snapshot.total_retries,
+            total_fallbacks: snapshot.total_fallbacks,
+            total_circuit_blocks: snapshot.total_circuit_blocks,
+            total_timeouts: snapshot.total_timeouts,
+            total_estimated_cost_usd: snapshot.total_estimated_cost_usd,
+            records: snapshot
+                .records
+                .into_iter()
+                .map(|record| ProviderUsageRecordResponse {
+                    provider_name: record.provider_name,
+                    model_name: record.model_name,
+                    capability: match record.capability {
+                        memcore_providers::ProviderUsageCapability::Llm => "Llm".to_string(),
+                        memcore_providers::ProviderUsageCapability::Embedding => {
+                            "Embedding".to_string()
+                        }
+                        memcore_providers::ProviderUsageCapability::Summarization => {
+                            "Summarization".to_string()
+                        }
+                    },
+                    operation_name: record.operation_name,
+                    request_count: record.request_count,
+                    success_count: record.success_count,
+                    error_count: record.error_count,
+                    input_tokens: record.input_tokens,
+                    output_tokens: record.output_tokens,
+                    total_tokens: record.total_tokens,
+                    retry_count: record.retry_count,
+                    fallback_count: record.fallback_count,
+                    circuit_blocked_count: record.circuit_blocked_count,
+                    timeout_count: record.timeout_count,
+                    estimated_cost_usd: record.estimated_cost_usd,
+                })
+                .collect(),
+        },
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct OrgSummaryResponse {
     pub status: &'static str,
     pub summary: OrgSummaryBodyResponse,

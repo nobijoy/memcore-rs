@@ -7,7 +7,7 @@ use crate::dto::{
     CreateApiKeyRequest, CreateApiKeyResponse, ContextCacheMetricsResponse, DeleteMemoryResponse, ExportUserResponse,
     ApplyRetentionRequest, ApplyRetentionResponse, ForgetUserResponse, ImportUserDataRequest,
     ImportUserDataResponse, ListApiKeysResponse, ListOrgUsersResponse, OrgSummaryResponse,
-    SearchOrgMemoryEventsResponse,
+    ProviderUsageResponse, SearchOrgMemoryEventsResponse,
     ListMemoriesResponse, ListMemoryEventsResponse,
     RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
 };
@@ -426,3 +426,22 @@ pub fn search_org_memory_events() {}
     )
 )]
 pub fn get_context_cache_metrics() {}
+
+/// Process-local aggregate provider usage counters (not per-org billing).
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/provider-usage",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Process-local provider usage metrics", body = ProviderUsageResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_provider_usage() {}

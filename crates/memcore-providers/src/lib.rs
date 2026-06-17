@@ -7,6 +7,7 @@ pub mod policy;
 pub mod resilient;
 pub mod routing;
 pub mod traits;
+pub mod usage;
 
 pub use circuit_breaker::{
     validate_circuit_breaker_config, CircuitBreakerConfig, CircuitBreakerSnapshot, CircuitState,
@@ -26,7 +27,7 @@ pub use openai::{
 pub use policy::{
     backoff_duration, execute_provider_call, is_provider_health_failure,
     is_retryable_provider_error, provider_timeout_error, validate_provider_execution_config,
-    ProviderExecutionPolicy, ProviderRetryDecision,
+    ProviderExecutionOutcome, ProviderExecutionPolicy, ProviderRetryDecision,
 };
 pub use resilient::{
     build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
@@ -36,5 +37,11 @@ pub use resilient::{
 pub use routing::{
     circuit_key, ProviderCallContext, ProviderCandidate, ProviderCapability, ProviderFallbackRouter,
     ProviderId, ProviderRoutingMetrics, ProviderRoutingMetricsSnapshot,
+};
+pub use usage::{
+    estimate_event_cost, lookup_pricing, new_token_usage_slot, provider_usage_recorder,
+    InMemoryProviderUsageRecorder, NoopProviderUsageRecorder, ProviderCallStatus,
+    ProviderCostCalculator, ProviderPricing, ProviderTokenUsage, ProviderUsageCapability,
+    ProviderUsageEvent, ProviderUsageRecord, ProviderUsageRecorder, ProviderUsageSnapshot,
 };
 pub use traits::{EmbeddingProvider, LlmProvider};

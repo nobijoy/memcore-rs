@@ -12,4 +12,7 @@ pub use app::{create_app, run};
 pub use middleware::OrganizationContext;
 pub use observability::RequestId;
 pub use security::AuthContext;
-pub use state::{create_memory_engine, create_mock_memory_engine, AppState};
+pub use state::{
+    create_memory_engine, create_mock_memory_engine, create_mock_memory_engine_with_usage,
+    AppState,
+};
