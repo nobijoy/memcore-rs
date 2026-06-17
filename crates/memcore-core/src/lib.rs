@@ -35,7 +35,8 @@ pub use context::{
     DEFAULT_SUMMARY_MAX_TOKENS, EMPTY_CONTEXT_MESSAGE, FormattedContext, InMemoryContextCache,
     LlmContextSummarizer, MAX_CONTEXT_MAX_MEMORIES, MAX_CONTEXT_MAX_TOKENS, MAX_SUMMARY_MAX_TOKENS,
     SimpleContextCompressor, SimpleContextSummarizer, SimpleTokenEstimator, TokenEstimator,
-    build_context_cache_key, cached_entry_from_output, effective_summary_budget,
+    build_context_cache_key, cached_entry_from_output, cached_entry_with_ttl,
+    effective_summary_budget,
     stable_sha256_hex, summarize_skipped_memories,
 };
 pub use engine::{

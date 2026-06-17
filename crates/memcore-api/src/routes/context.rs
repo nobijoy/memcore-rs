@@ -29,19 +29,25 @@ pub async fn build_context(
     let tenant = organization.tenant_with_user_id(request.user_id)?;
     let memory_types = request.filters.parse_memory_types()?;
 
-    let output = state
-        .memory_engine
-        .build_context(BuildContextInput {
-            tenant,
-            query: request.query,
-            max_memories: request.max_memories,
-            memory_types,
-            include_metadata: request.include_metadata,
-            budget,
-            format_options,
-            compression_options,
-        })
-        .await?;
+    let build_input = BuildContextInput {
+        tenant,
+        query: request.query.clone(),
+        max_memories: request.max_memories,
+        memory_types,
+        include_metadata: request.include_metadata,
+        budget,
+        format_options,
+        compression_options,
+    };
+
+    let output = state.memory_engine.build_context(build_input.clone()).await?;
+
+    if output.cache.refresh_started {
+        let engine = state.memory_engine.clone();
+        tokio::spawn(async move {
+            let _ = engine.refresh_stale_context(build_input).await;
+        });
+    }
 
     Ok(Json(BuildContextResponse::from(output)))
 }

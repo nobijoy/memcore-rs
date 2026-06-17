@@ -55,11 +55,48 @@ impl ContextCache for RedisContextCache {
             MemcoreError::StorageError(format!("context cache deserialization failed: {err}"))
         })?;
 
-        if entry.expires_at <= Utc::now() {
+        let now = Utc::now();
+        if entry.is_fully_expired(now) {
             let _: () = conn
                 .del(&redis_key)
                 .await
-                .map_err(|err| map_redis_command_error("context cache delete stale entry failed", err))?;
+                .map_err(|err| {
+                    map_redis_command_error("context cache delete stale entry failed", err)
+                })?;
+            return Ok(None);
+        }
+
+        if !entry.is_fresh(now) {
+            return Ok(None);
+        }
+
+        Ok(Some(entry))
+    }
+
+    async fn get_any(&self, key: &ContextCacheKey) -> MemcoreResult<Option<CachedContextEntry>> {
+        let redis_key = redis_context_cache_key(&self.key_prefix, key);
+        let mut conn = self.manager.clone();
+        let payload: Option<String> = conn
+            .get(&redis_key)
+            .await
+            .map_err(|err| map_redis_command_error("context cache get failed", err))?;
+
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+
+        let entry: CachedContextEntry = serde_json::from_str(&payload).map_err(|err| {
+            MemcoreError::StorageError(format!("context cache deserialization failed: {err}"))
+        })?;
+
+        let now = Utc::now();
+        if entry.is_fully_expired(now) {
+            let _: () = conn
+                .del(&redis_key)
+                .await
+                .map_err(|err| {
+                    map_redis_command_error("context cache delete stale entry failed", err)
+                })?;
             return Ok(None);
         }
 
@@ -72,15 +109,16 @@ impl ContextCache for RedisContextCache {
         let payload = serde_json::to_string(&entry).map_err(|err| {
             MemcoreError::StorageError(format!("context cache serialization failed: {err}"))
         })?;
+        let redis_ttl = redis_entry_ttl_seconds(&entry, self.ttl_seconds);
 
         let mut conn = self.manager.clone();
-        conn.set_ex::<_, _, ()>(&redis_key, payload, self.ttl_seconds)
+        conn.set_ex::<_, _, ()>(&redis_key, payload, redis_ttl)
             .await
             .map_err(|err| map_redis_command_error("context cache set failed", err))?;
         conn.sadd::<_, _, ()>(&index_key, &redis_key)
             .await
             .map_err(|err| map_redis_command_error("context cache index update failed", err))?;
-        conn.expire::<_, ()>(&index_key, self.ttl_seconds as i64)
+        conn.expire::<_, ()>(&index_key, redis_ttl as i64)
             .await
             .map_err(|err| map_redis_command_error("context cache index ttl failed", err))?;
 
@@ -120,6 +158,16 @@ fn map_redis_command_error(context: &str, err: redis::RedisError) -> MemcoreErro
     MemcoreError::StorageError(format!("{context}: {err}"))
 }
 
+fn redis_entry_ttl_seconds(entry: &CachedContextEntry, default_ttl_seconds: u64) -> u64 {
+    let now = Utc::now();
+    let until = entry.effective_stale_until();
+    if until > now {
+        (until - now).num_seconds().max(1) as u64
+    } else {
+        default_ttl_seconds.max(1)
+    }
+}
+
 fn map_redis_error(context: &str, err: redis::RedisError, redis_url: &str) -> MemcoreError {
     MemcoreError::StorageError(format!(
         "{context} (redis_url={}): {err}",
@@ -152,6 +200,7 @@ mod serde_tests {
             }],
             created_at: Utc::now(),
             expires_at: Utc::now() + Duration::seconds(300),
+            stale_until: None,
             budget: ContextBudgetUsage {
                 max_tokens: 2000,
                 reserved_tokens: 300,

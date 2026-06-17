@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::Utc;
 use memcore_common::{MemcoreError, MemcoreResult};
 use tokio::sync::Mutex;
 use tokio::time;
@@ -37,11 +38,13 @@ impl ContextCacheStampedeConfig {
 }
 
 /// Coordinates cache lookups with optional in-process request coalescing.
+#[derive(Clone)]
 pub struct ContextCacheCoordinator {
     cache: Arc<dyn ContextCache>,
     cache_config: ContextCacheConfig,
     stampede_config: ContextCacheStampedeConfig,
     inflight: Arc<Mutex<HashMap<ContextCacheKey, Arc<Mutex<()>>>>>,
+    refresh_inflight: Arc<Mutex<HashSet<ContextCacheKey>>>,
 }
 
 impl ContextCacheCoordinator {
@@ -52,7 +55,26 @@ impl ContextCacheCoordinator {
             cache_config,
             stampede_config,
             inflight: Arc::new(Mutex::new(HashMap::new())),
+            refresh_inflight: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn refresh_inflight_count(&self) -> usize {
+        self.refresh_inflight
+            .try_lock()
+            .map(|set| set.len())
+            .unwrap_or(0)
+    }
+
+    /// Marks a background refresh as in-flight for the given key. Returns `true` when started.
+    pub async fn try_start_refresh(&self, key: &ContextCacheKey) -> bool {
+        let mut set = self.refresh_inflight.lock().await;
+        set.insert(key.clone())
+    }
+
+    pub async fn finish_refresh(&self, key: &ContextCacheKey) {
+        self.refresh_inflight.lock().await.remove(key);
     }
 
     pub fn cache_config(&self) -> &ContextCacheConfig {
@@ -83,10 +105,61 @@ impl ContextCacheCoordinator {
             return Ok((entry, ContextCacheUsage::hit(&self.cache_config)));
         }
 
+        if self.cache_config.stale_while_revalidate_active() {
+            let now = Utc::now();
+            if let Some(entry) = self.cache.get_any(&key).await? {
+                if entry.is_stale_servable(now) {
+                    let refresh_started = self.try_start_refresh(&key).await;
+                    return Ok((
+                        entry,
+                        ContextCacheUsage::stale_hit(&self.cache_config, refresh_started),
+                    ));
+                }
+            }
+        }
+
+        self.compute_with_stampede(key, compute, false).await
+    }
+
+    /// Recomputes and stores a cache entry, coalescing with stampede protection.
+    pub async fn refresh_entry<F, Fut>(
+        &self,
+        key: ContextCacheKey,
+        compute: F,
+    ) -> MemcoreResult<()>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = MemcoreResult<CachedContextEntry>>,
+    {
+        let result = self.compute_with_stampede(key.clone(), compute, true).await;
+        self.finish_refresh(&key).await;
+        match result {
+            Ok(_) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn compute_with_stampede<F, Fut>(
+        &self,
+        key: ContextCacheKey,
+        compute: F,
+        is_refresh: bool,
+    ) -> MemcoreResult<(CachedContextEntry, ContextCacheUsage)>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = MemcoreResult<CachedContextEntry>>,
+    {
         if !self.stampede_config.enabled {
             let entry = compute().await?;
             self.cache.set(key, entry.clone()).await?;
-            return Ok((entry, ContextCacheUsage::miss(&self.cache_config)));
+            return Ok((
+                entry,
+                if is_refresh {
+                    ContextCacheUsage::hit(&self.cache_config)
+                } else {
+                    ContextCacheUsage::miss(&self.cache_config)
+                },
+            ));
         }
 
         let lock_arc = self.lock_for_key(&key).await;
@@ -117,7 +190,14 @@ impl ContextCacheCoordinator {
             Ok(entry) => {
                 self.cache.set(key.clone(), entry.clone()).await?;
                 self.cleanup_inflight_lock(&key, &lock_arc).await;
-                Ok((entry, ContextCacheUsage::miss(&self.cache_config)))
+                Ok((
+                    entry,
+                    if is_refresh {
+                        ContextCacheUsage::hit(&self.cache_config)
+                    } else {
+                        ContextCacheUsage::miss(&self.cache_config)
+                    },
+                ))
             }
             Err(error) => {
                 self.cleanup_inflight_lock(&key, &lock_arc).await;
@@ -165,6 +245,37 @@ mod tests {
             max_entries: 100,
             stampede_protection_enabled: stampede_enabled,
             stampede_lock_timeout_seconds: 30,
+            stale_while_revalidate_enabled: false,
+            stale_ttl_seconds: 120,
+        }
+    }
+
+    fn swr_cache_config() -> ContextCacheConfig {
+        ContextCacheConfig {
+            stale_while_revalidate_enabled: true,
+            stale_ttl_seconds: 120,
+            ..cache_config(true)
+        }
+    }
+
+    fn stale_entry(context: &str) -> CachedContextEntry {
+        let now = Utc::now();
+        let expires_at = now - ChronoDuration::seconds(10);
+        CachedContextEntry {
+            context: context.to_string(),
+            memories: Vec::new(),
+            created_at: now - ChronoDuration::seconds(310),
+            expires_at,
+            stale_until: Some(expires_at + ChronoDuration::seconds(120)),
+            budget: ContextBudgetUsage {
+                max_tokens: 2000,
+                reserved_tokens: 300,
+                available_tokens: 1700,
+                used_tokens: 10,
+                included_memories: 0,
+                skipped_memories: 0,
+            },
+            compression: ContextCompressionUsage::disabled(),
         }
     }
 
@@ -183,6 +294,7 @@ mod tests {
             memories: Vec::new(),
             created_at: now,
             expires_at: now + ChronoDuration::seconds(300),
+            stale_until: None,
             budget: ContextBudgetUsage {
                 max_tokens: 2000,
                 reserved_tokens: 300,
@@ -430,6 +542,8 @@ mod tests {
             max_entries: 100,
             stampede_protection_enabled: true,
             stampede_lock_timeout_seconds: 1,
+            stale_while_revalidate_enabled: false,
+            stale_ttl_seconds: 120,
         };
         let coordinator = Arc::new(ContextCacheCoordinator::new(
             Arc::new(InMemoryContextCache::new(100)),
@@ -549,5 +663,127 @@ mod tests {
         }
 
         assert_eq!(compute_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn stale_entry_returned_when_swr_enabled() {
+        let config = swr_cache_config();
+        let cache = Arc::new(InMemoryContextCache::new(100));
+        let key = build_context_cache_key(&sample_input("org_a", "user_a", "stale serve"));
+        cache
+            .set(key.clone(), stale_entry("stale context"))
+            .await
+            .expect("seed stale");
+        let coordinator = ContextCacheCoordinator::new(cache, config);
+        let compute_count = Arc::new(AtomicUsize::new(0));
+        let count = compute_count.clone();
+
+        let (entry, usage) = coordinator
+            .get_or_compute(key, || async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                Ok(sample_entry("should not run"))
+            })
+            .await
+            .expect("stale hit");
+
+        assert_eq!(entry.context, "stale context");
+        assert!(usage.hit);
+        assert!(usage.served_stale);
+        assert!(usage.refresh_started);
+        assert_eq!(compute_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn stale_entry_not_returned_when_swr_disabled() {
+        let cache = Arc::new(InMemoryContextCache::new(100));
+        let key = build_context_cache_key(&sample_input("org_a", "user_a", "no swr"));
+        cache
+            .set(key.clone(), stale_entry("stale context"))
+            .await
+            .expect("seed stale");
+        let coordinator = ContextCacheCoordinator::new(cache, cache_config(true));
+        let compute_count = Arc::new(AtomicUsize::new(0));
+        let count = compute_count.clone();
+
+        let (entry, usage) = coordinator
+            .get_or_compute(key, || async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                Ok(sample_entry("fresh compute"))
+            })
+            .await
+            .expect("compute");
+
+        assert_eq!(entry.context, "fresh compute");
+        assert!(!usage.hit);
+        assert_eq!(compute_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn duplicate_stale_requests_start_only_one_refresh() {
+        let config = swr_cache_config();
+        let cache = Arc::new(InMemoryContextCache::new(100));
+        let key = build_context_cache_key(&sample_input("org_a", "user_a", "dup refresh"));
+        cache
+            .set(key.clone(), stale_entry("stale"))
+            .await
+            .expect("seed");
+
+        let coordinator = Arc::new(ContextCacheCoordinator::new(cache, config));
+        let first = coordinator
+            .get_or_compute(key.clone(), || async { Ok(sample_entry("nope")) })
+            .await
+            .expect("first stale");
+        let second = coordinator
+            .get_or_compute(key, || async { Ok(sample_entry("nope")) })
+            .await
+            .expect("second stale");
+
+        assert!(first.1.refresh_started);
+        assert!(!second.1.refresh_started);
+        assert_eq!(coordinator.refresh_inflight_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_success_updates_cache() {
+        let config = swr_cache_config();
+        let cache = Arc::new(InMemoryContextCache::new(100));
+        let key = build_context_cache_key(&sample_input("org_a", "user_a", "refresh ok"));
+        cache
+            .set(key.clone(), stale_entry("old"))
+            .await
+            .expect("seed");
+
+        let coordinator = ContextCacheCoordinator::new(cache.clone(), config);
+        coordinator
+            .refresh_entry(key.clone(), || async { Ok(sample_entry("refreshed")) })
+            .await
+            .expect("refresh");
+
+        let fresh = cache.get(&key).await.expect("get").expect("hit");
+        assert_eq!(fresh.context, "refreshed");
+        assert!(fresh.is_fresh(Utc::now()));
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_keeps_stale_entry() {
+        let config = swr_cache_config();
+        let cache = Arc::new(InMemoryContextCache::new(100));
+        let key = build_context_cache_key(&sample_input("org_a", "user_a", "refresh fail"));
+        cache
+            .set(key.clone(), stale_entry("keep me"))
+            .await
+            .expect("seed");
+
+        let coordinator = ContextCacheCoordinator::new(cache.clone(), config);
+        let error = coordinator
+            .refresh_entry(key.clone(), || async {
+                Err(MemcoreError::Internal("refresh failed".to_string()))
+            })
+            .await
+            .expect_err("refresh error");
+        assert_eq!(error.code(), "internal");
+
+        let stale = cache.get_any(&key).await.expect("get").expect("stale");
+        assert_eq!(stale.context, "keep me");
     }
 }

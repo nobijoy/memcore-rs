@@ -15,7 +15,7 @@ pub use assembler::{
     AssembledContext,
 };
 pub use cache::{
-    build_context_cache_key, cached_entry_from_output, stable_sha256_hex, CachedContextEntry,
+    build_context_cache_key, cached_entry_from_output, cached_entry_with_ttl, stable_sha256_hex, CachedContextEntry,
     ContextCache, ContextCacheConfig, ContextCacheKey, ContextCacheUsage,
     DEFAULT_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES,
     DEFAULT_CONTEXT_CACHE_TTL_SECONDS, InMemoryContextCache,

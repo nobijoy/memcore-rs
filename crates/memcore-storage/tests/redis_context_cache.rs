@@ -4,7 +4,7 @@ use std::env;
 
 use chrono::{Duration, Utc};
 use memcore_core::{
-    build_context_cache_key, cached_entry_from_output, BuildContextInput, BuildContextOutput,
+    build_context_cache_key, cached_entry_with_ttl, BuildContextInput, BuildContextOutput,
     ContextBudgetUsage, ContextCache, ContextCompressionUsage, TenantContext,
 };
 use memcore_storage::RedisContextCache;
@@ -51,7 +51,7 @@ async fn redis_context_cache_set_and_get_works() {
         .await
         .expect("connect redis");
     let key = build_context_cache_key(&sample_input("org_a", "user_a", "redis get set"));
-    let entry = cached_entry_from_output(&sample_output("cached via redis"), 60);
+    let entry = cached_entry_with_ttl(&sample_output("cached via redis"), 60);
 
     cache.set(key.clone(), entry).await.expect("set");
     let loaded = cache.get(&key).await.expect("get").expect("cache hit");
@@ -71,7 +71,7 @@ async fn redis_context_cache_ttl_expiration_works() {
         .await
         .expect("connect redis");
     let key = build_context_cache_key(&sample_input("org_a", "user_a", "redis ttl"));
-    let mut entry = cached_entry_from_output(&sample_output("ttl entry"), 1);
+    let mut entry = cached_entry_with_ttl(&sample_output("ttl entry"), 1);
     entry.expires_at = Utc::now() + Duration::seconds(1);
 
     cache.set(key.clone(), entry).await.expect("set");
@@ -96,11 +96,11 @@ async fn redis_invalidate_user_removes_only_matching_user_keys() {
     let key_b = build_context_cache_key(&sample_input("org_b", "user_a", "invalidate b"));
 
     cache
-        .set(key_a.clone(), cached_entry_from_output(&sample_output("a"), 120))
+        .set(key_a.clone(), cached_entry_with_ttl(&sample_output("a"), 120))
         .await
         .expect("set a");
     cache
-        .set(key_b.clone(), cached_entry_from_output(&sample_output("b"), 120))
+        .set(key_b.clone(), cached_entry_with_ttl(&sample_output("b"), 120))
         .await
         .expect("set b");
 
@@ -126,7 +126,7 @@ async fn redis_invalidate_user_handles_expired_indexed_keys() {
     cache
         .set(
             key,
-            cached_entry_from_output(&sample_output("stale indexed"), 1),
+            cached_entry_with_ttl(&sample_output("stale indexed"), 1),
         )
         .await
         .expect("set");

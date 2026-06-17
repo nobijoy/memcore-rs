@@ -44,6 +44,9 @@ const MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED: &str =
     "MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED";
 const MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS: &str =
     "MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS";
+const MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED: &str =
+    "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED";
+const MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS: &str = "MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -207,6 +210,10 @@ pub struct Settings {
     pub context_cache_stampede_protection_enabled: bool,
     /// Maximum seconds to wait for an in-flight context cache computation.
     pub context_cache_lock_timeout_seconds: u64,
+    /// Serve slightly expired context while refreshing in the background.
+    pub context_cache_stale_while_revalidate_enabled: bool,
+    /// Seconds after fresh TTL expires during which stale context may be served.
+    pub context_cache_stale_ttl_seconds: u64,
 }
 
 impl Default for Settings {
@@ -254,6 +261,8 @@ impl Default for Settings {
             context_cache_key_prefix: DEFAULT_CONTEXT_CACHE_KEY_PREFIX.to_string(),
             context_cache_stampede_protection_enabled: true,
             context_cache_lock_timeout_seconds: 30,
+            context_cache_stale_while_revalidate_enabled: false,
+            context_cache_stale_ttl_seconds: 120,
         }
     }
 }
@@ -347,6 +356,14 @@ impl Settings {
             MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS,
             defaults.context_cache_lock_timeout_seconds,
         )?;
+        let context_cache_stale_while_revalidate_enabled = parse_bool(
+            MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED,
+            defaults.context_cache_stale_while_revalidate_enabled,
+        )?;
+        let context_cache_stale_ttl_seconds = parse_u64(
+            MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS,
+            defaults.context_cache_stale_ttl_seconds,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -397,6 +414,8 @@ impl Settings {
             context_cache_key_prefix,
             context_cache_stampede_protection_enabled,
             context_cache_lock_timeout_seconds,
+            context_cache_stale_while_revalidate_enabled,
+            context_cache_stale_ttl_seconds,
         };
 
         settings.validate()?;
@@ -609,6 +628,16 @@ impl Settings {
         {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS must be greater than 0 when stampede protection is enabled"
+                    .to_string(),
+            ));
+        }
+
+        if self.context_cache_enabled
+            && self.context_cache_stale_while_revalidate_enabled
+            && self.context_cache_stale_ttl_seconds == 0
+        {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS must be greater than 0 when stale-while-revalidate is enabled"
                     .to_string(),
             ));
         }
@@ -896,7 +925,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 42] = [
+    const ENV_KEYS: [&str; 44] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -936,6 +965,8 @@ mod tests {
         "MEMCORE_CONTEXT_CACHE_KEY_PREFIX",
         "MEMCORE_CONTEXT_CACHE_STAMPEDE_PROTECTION_ENABLED",
         "MEMCORE_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS",
+        "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED",
+        "MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1171,6 +1202,55 @@ mod tests {
         let settings = Settings::from_env().expect("stampede settings should load");
         assert!(!settings.context_cache_stampede_protection_enabled);
         assert_eq!(settings.context_cache_lock_timeout_seconds, 45);
+    }
+
+    #[test]
+    fn stale_while_revalidate_disabled_by_default() {
+        let settings = Settings::default();
+        assert!(!settings.context_cache_stale_while_revalidate_enabled);
+        assert_eq!(settings.context_cache_stale_ttl_seconds, 120);
+    }
+
+    #[test]
+    fn loads_swr_settings_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED", "true");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS", "90");
+        }
+
+        let settings = Settings::from_env().expect("swr settings should load");
+        assert!(settings.context_cache_stale_while_revalidate_enabled);
+        assert_eq!(settings.context_cache_stale_ttl_seconds, 90);
+    }
+
+    #[test]
+    fn zero_stale_ttl_with_swr_enabled_fails_when_cache_enabled() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED", "true");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS", "0");
+        }
+
+        let error = Settings::from_env().expect_err("zero stale ttl should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS must be greater than 0")
+        );
     }
 
     #[test]

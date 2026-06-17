@@ -422,6 +422,8 @@ fn context_cache_config_from_settings(settings: &Settings) -> ContextCacheConfig
         max_entries: settings.context_cache_max_entries,
         stampede_protection_enabled: settings.context_cache_stampede_protection_enabled,
         stampede_lock_timeout_seconds: settings.context_cache_lock_timeout_seconds,
+        stale_while_revalidate_enabled: settings.context_cache_stale_while_revalidate_enabled,
+        stale_ttl_seconds: settings.context_cache_stale_ttl_seconds,
     }
 }
 

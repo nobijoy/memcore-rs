@@ -25,6 +25,9 @@ pub const DEFAULT_CONTEXT_CACHE_MAX_ENTRIES: usize = 1000;
 /// Default context cache lock timeout in seconds for stampede protection.
 pub const DEFAULT_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS: u64 = 30;
 
+/// Default stale-while-revalidate extension in seconds after fresh TTL expires.
+pub const DEFAULT_CONTEXT_CACHE_STALE_TTL_SECONDS: u64 = 120;
+
 /// Tenant-scoped cache lookup key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ContextCacheKey {
@@ -41,8 +44,29 @@ pub struct CachedContextEntry {
     pub memories: Vec<MemorySearchResult>,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    /// When set, entry may be served stale until this time after `expires_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_until: Option<DateTime<Utc>>,
     pub budget: ContextBudgetUsage,
     pub compression: ContextCompressionUsage,
+}
+
+impl CachedContextEntry {
+    pub fn is_fresh(&self, now: DateTime<Utc>) -> bool {
+        self.expires_at > now
+    }
+
+    pub fn effective_stale_until(&self) -> DateTime<Utc> {
+        self.stale_until.unwrap_or(self.expires_at)
+    }
+
+    pub fn is_stale_servable(&self, now: DateTime<Utc>) -> bool {
+        !self.is_fresh(now) && now <= self.effective_stale_until()
+    }
+
+    pub fn is_fully_expired(&self, now: DateTime<Utc>) -> bool {
+        now > self.effective_stale_until()
+    }
 }
 
 /// Context cache configuration.
@@ -53,6 +77,8 @@ pub struct ContextCacheConfig {
     pub max_entries: usize,
     pub stampede_protection_enabled: bool,
     pub stampede_lock_timeout_seconds: u64,
+    pub stale_while_revalidate_enabled: bool,
+    pub stale_ttl_seconds: u64,
 }
 
 impl Default for ContextCacheConfig {
@@ -63,6 +89,8 @@ impl Default for ContextCacheConfig {
             max_entries: DEFAULT_CONTEXT_CACHE_MAX_ENTRIES,
             stampede_protection_enabled: true,
             stampede_lock_timeout_seconds: DEFAULT_CONTEXT_CACHE_LOCK_TIMEOUT_SECONDS,
+            stale_while_revalidate_enabled: false,
+            stale_ttl_seconds: DEFAULT_CONTEXT_CACHE_STALE_TTL_SECONDS,
         }
     }
 }
@@ -70,6 +98,10 @@ impl Default for ContextCacheConfig {
 impl ContextCacheConfig {
     pub fn stampede_protection_active(&self) -> bool {
         self.enabled && self.stampede_protection_enabled
+    }
+
+    pub fn stale_while_revalidate_active(&self) -> bool {
+        self.enabled && self.stale_while_revalidate_enabled
     }
 
     pub fn validate(&self) -> MemcoreResult<()> {
@@ -97,6 +129,13 @@ impl ContextCacheConfig {
             ));
         }
 
+        if self.stale_while_revalidate_enabled && self.stale_ttl_seconds == 0 {
+            return Err(memcore_common::MemcoreError::ValidationError(
+                "context cache stale_ttl_seconds must be greater than 0 when stale-while-revalidate is enabled"
+                    .to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -109,6 +148,9 @@ pub struct ContextCacheUsage {
     pub ttl_seconds: Option<u64>,
     pub stampede_protection_enabled: bool,
     pub waited_for_inflight: bool,
+    pub stale_while_revalidate_enabled: bool,
+    pub served_stale: bool,
+    pub refresh_started: bool,
 }
 
 impl ContextCacheUsage {
@@ -119,17 +161,27 @@ impl ContextCacheUsage {
             ttl_seconds: None,
             stampede_protection_enabled: false,
             waited_for_inflight: false,
+            stale_while_revalidate_enabled: false,
+            served_stale: false,
+            refresh_started: false,
         }
     }
 
-    pub fn miss(config: &ContextCacheConfig) -> Self {
+    fn base(config: &ContextCacheConfig) -> Self {
         Self {
             enabled: true,
             hit: false,
             ttl_seconds: Some(config.ttl_seconds),
             stampede_protection_enabled: config.stampede_protection_active(),
             waited_for_inflight: false,
+            stale_while_revalidate_enabled: config.stale_while_revalidate_active(),
+            served_stale: false,
+            refresh_started: false,
         }
+    }
+
+    pub fn miss(config: &ContextCacheConfig) -> Self {
+        Self::base(config)
     }
 
     pub fn hit(config: &ContextCacheConfig) -> Self {
@@ -138,11 +190,18 @@ impl ContextCacheUsage {
 
     pub fn hit_with_wait(config: &ContextCacheConfig, waited_for_inflight: bool) -> Self {
         Self {
-            enabled: true,
             hit: true,
-            ttl_seconds: Some(config.ttl_seconds),
-            stampede_protection_enabled: config.stampede_protection_active(),
             waited_for_inflight,
+            ..Self::base(config)
+        }
+    }
+
+    pub fn stale_hit(config: &ContextCacheConfig, refresh_started: bool) -> Self {
+        Self {
+            hit: true,
+            served_stale: true,
+            refresh_started,
+            ..Self::base(config)
         }
     }
 }
@@ -151,6 +210,9 @@ impl ContextCacheUsage {
 #[async_trait]
 pub trait ContextCache: Send + Sync {
     async fn get(&self, key: &ContextCacheKey) -> MemcoreResult<Option<CachedContextEntry>>;
+
+    /// Returns a fresh or stale entry still within its stale window, if present.
+    async fn get_any(&self, key: &ContextCacheKey) -> MemcoreResult<Option<CachedContextEntry>>;
 
     async fn set(&self, key: ContextCacheKey, entry: CachedContextEntry) -> MemcoreResult<()>;
 
@@ -172,7 +234,7 @@ impl InMemoryContextCache {
     }
 
     fn purge_expired(map: &mut HashMap<ContextCacheKey, CachedContextEntry>, now: DateTime<Utc>) {
-        map.retain(|_, entry| entry.expires_at > now);
+        map.retain(|_, entry| !entry.is_fully_expired(now));
     }
 
     fn evict_oldest(map: &mut HashMap<ContextCacheKey, CachedContextEntry>, max_entries: usize) {
@@ -200,7 +262,28 @@ impl ContextCache for InMemoryContextCache {
             .map_err(|_| lock_poisoned_error())?;
 
         if let Some(entry) = map.get(key) {
-            if entry.expires_at <= now {
+            if entry.is_fully_expired(now) {
+                map.remove(key);
+                return Ok(None);
+            }
+            if entry.is_fresh(now) {
+                return Ok(Some(entry.clone()));
+            }
+            return Ok(None);
+        }
+
+        Ok(None)
+    }
+
+    async fn get_any(&self, key: &ContextCacheKey) -> MemcoreResult<Option<CachedContextEntry>> {
+        let now = Utc::now();
+        let mut map = self
+            .entries
+            .write()
+            .map_err(|_| lock_poisoned_error())?;
+
+        if let Some(entry) = map.get(key) {
+            if entry.is_fully_expired(now) {
                 map.remove(key);
                 return Ok(None);
             }
@@ -246,17 +329,36 @@ pub fn build_context_cache_key(input: &BuildContextInput) -> ContextCacheKey {
 
 pub fn cached_entry_from_output(
     output: &BuildContextOutput,
-    ttl_seconds: u64,
+    config: &ContextCacheConfig,
 ) -> CachedContextEntry {
     let now = Utc::now();
+    let expires_at = now + Duration::seconds(config.ttl_seconds as i64);
+    let stale_until = if config.stale_while_revalidate_active() {
+        Some(expires_at + Duration::seconds(config.stale_ttl_seconds as i64))
+    } else {
+        None
+    };
     CachedContextEntry {
         context: output.context.clone(),
         memories: output.memories.clone(),
         budget: output.budget,
         compression: output.compression,
         created_at: now,
-        expires_at: now + Duration::seconds(ttl_seconds as i64),
+        expires_at,
+        stale_until,
     }
+}
+
+/// Builds a cache entry with an explicit TTL (stale window disabled). Useful in tests.
+pub fn cached_entry_with_ttl(output: &BuildContextOutput, ttl_seconds: u64) -> CachedContextEntry {
+    cached_entry_from_output(
+        output,
+        &ContextCacheConfig {
+            enabled: true,
+            ttl_seconds,
+            ..Default::default()
+        },
+    )
 }
 
 fn options_fingerprint_json(input: &BuildContextInput) -> String {
@@ -296,8 +398,8 @@ fn lock_poisoned_error() -> memcore_common::MemcoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::budget::ContextBudget;
-    use crate::context::compression_options::ContextCompressionMode;
+    use crate::context::budget::{ContextBudget, ContextBudgetUsage};
+    use crate::context::compression_options::{ContextCompressionMode, ContextCompressionUsage};
     use crate::context::format_options::ContextFormat;
     use crate::TenantContext;
 
@@ -330,7 +432,7 @@ mod tests {
     async fn cache_set_and_get_works() {
         let cache = InMemoryContextCache::new(10);
         let key = build_context_cache_key(&sample_input("hello"));
-        let entry = cached_entry_from_output(&sample_output("cached context"), 300);
+        let entry = cached_entry_with_ttl(&sample_output("cached context"), 300);
 
         cache.set(key.clone(), entry.clone()).await.unwrap();
         let loaded = cache.get(&key).await.unwrap().expect("cache hit");
@@ -341,7 +443,7 @@ mod tests {
     async fn expired_entry_returns_none_and_is_removed() {
         let cache = InMemoryContextCache::new(10);
         let key = build_context_cache_key(&sample_input("expired"));
-        let mut entry = cached_entry_from_output(&sample_output("stale"), 300);
+        let mut entry = cached_entry_with_ttl(&sample_output("stale"), 300);
         entry.expires_at = Utc::now() - Duration::seconds(1);
 
         cache.set(key.clone(), entry).await.unwrap();
@@ -403,7 +505,7 @@ mod tests {
             cache
                 .set(
                     key,
-                    cached_entry_from_output(&sample_output(&format!("ctx {index}")), 300),
+                    cached_entry_with_ttl(&sample_output(&format!("ctx {index}")), 300),
                 )
                 .await
                 .unwrap();
@@ -425,11 +527,11 @@ mod tests {
         };
 
         cache
-            .set(key_a.clone(), cached_entry_from_output(&sample_output("a"), 300))
+            .set(key_a.clone(), cached_entry_with_ttl(&sample_output("a"), 300))
             .await
             .unwrap();
         cache
-            .set(key_b.clone(), cached_entry_from_output(&sample_output("b"), 300))
+            .set(key_b.clone(), cached_entry_with_ttl(&sample_output("b"), 300))
             .await
             .unwrap();
 
@@ -445,5 +547,91 @@ mod tests {
         assert!(!config.enabled);
         assert_eq!(config.ttl_seconds, 300);
         assert_eq!(config.max_entries, 1000);
+        assert!(!config.stale_while_revalidate_enabled);
+        assert_eq!(config.stale_ttl_seconds, 120);
+    }
+
+    #[test]
+    fn entry_freshness_states() {
+        let now = Utc::now();
+        let fresh = CachedContextEntry {
+            expires_at: now + Duration::seconds(60),
+            stale_until: Some(now + Duration::seconds(180)),
+            ..sample_output_entry("fresh")
+        };
+        assert!(fresh.is_fresh(now));
+        assert!(!fresh.is_stale_servable(now));
+
+        let stale = CachedContextEntry {
+            expires_at: now - Duration::seconds(10),
+            stale_until: Some(now + Duration::seconds(60)),
+            ..sample_output_entry("stale")
+        };
+        assert!(!stale.is_fresh(now));
+        assert!(stale.is_stale_servable(now));
+
+        let expired = CachedContextEntry {
+            expires_at: now - Duration::seconds(120),
+            stale_until: Some(now - Duration::seconds(10)),
+            ..sample_output_entry("expired")
+        };
+        assert!(expired.is_fully_expired(now));
+        assert!(!expired.is_stale_servable(now));
+
+        let legacy = CachedContextEntry {
+            expires_at: now - Duration::seconds(10),
+            stale_until: None,
+            ..sample_output_entry("legacy")
+        };
+        assert!(!legacy.is_stale_servable(now));
+    }
+
+    #[tokio::test]
+    async fn get_any_returns_stale_entry_within_window() {
+        let cache = InMemoryContextCache::new(10);
+        let key = build_context_cache_key(&sample_input("stale get_any"));
+        let now = Utc::now();
+        let mut entry = cached_entry_with_ttl(&sample_output("stale body"), 300);
+        entry.expires_at = now - Duration::seconds(5);
+        entry.stale_until = Some(now + Duration::seconds(60));
+
+        cache.set(key.clone(), entry).await.unwrap();
+        assert!(cache.get(&key).await.unwrap().is_none());
+        let loaded = cache.get_any(&key).await.unwrap().expect("stale");
+        assert_eq!(loaded.context, "stale body");
+    }
+
+    #[tokio::test]
+    async fn get_any_removes_entry_beyond_stale_until() {
+        let cache = InMemoryContextCache::new(10);
+        let key = build_context_cache_key(&sample_input("expired get_any"));
+        let now = Utc::now();
+        let mut entry = cached_entry_with_ttl(&sample_output("gone"), 300);
+        entry.expires_at = now - Duration::seconds(120);
+        entry.stale_until = Some(now - Duration::seconds(10));
+
+        cache.set(key.clone(), entry).await.unwrap();
+        assert!(cache.get_any(&key).await.unwrap().is_none());
+        assert!(cache.get_any(&key).await.unwrap().is_none());
+    }
+
+    fn sample_output_entry(context: &str) -> CachedContextEntry {
+        let now = Utc::now();
+        CachedContextEntry {
+            context: context.to_string(),
+            memories: Vec::new(),
+            created_at: now,
+            expires_at: now + Duration::seconds(300),
+            stale_until: None,
+            budget: ContextBudgetUsage {
+                max_tokens: 2000,
+                reserved_tokens: 300,
+                available_tokens: 1700,
+                used_tokens: 10,
+                included_memories: 0,
+                skipped_memories: 0,
+            },
+            compression: ContextCompressionUsage::disabled(),
+        }
     }
 }

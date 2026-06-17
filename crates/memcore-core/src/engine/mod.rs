@@ -530,7 +530,7 @@ impl MemoryEngine {
                 let output = self.build_context_uncached(input).await?;
                 Ok(cached_entry_from_output(
                     &output,
-                    self.context_cache_config.ttl_seconds,
+                    &self.context_cache_config,
                 ))
             })
             .await?;
@@ -542,6 +542,32 @@ impl MemoryEngine {
             compression: entry.compression,
             cache: cache_usage,
         })
+    }
+
+    /// Recomputes and stores a stale context cache entry (background refresh).
+    pub async fn refresh_stale_context(&self, input: BuildContextInput) -> MemcoreResult<()> {
+        validate_tenant(&input.tenant)?;
+        validate_query(&input.query)?;
+        input.budget.validate()?;
+        input
+            .compression_options
+            .validate(input.budget.available_tokens())?;
+        self.context_cache_config.validate()?;
+
+        if !self.context_cache_config.enabled {
+            return Ok(());
+        }
+
+        let cache_key = build_context_cache_key(&input);
+        self.context_cache_coordinator
+            .refresh_entry(cache_key, || async {
+                let output = self.build_context_uncached(input).await?;
+                Ok(cached_entry_from_output(
+                    &output,
+                    &self.context_cache_config,
+                ))
+            })
+            .await
     }
 
     async fn build_context_uncached(

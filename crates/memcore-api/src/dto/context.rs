@@ -91,6 +91,12 @@ pub struct ContextCacheResponse {
     pub stampede_protection_enabled: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub waited_for_inflight: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub stale_while_revalidate_enabled: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub served_stale: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub refresh_started: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -111,6 +117,9 @@ impl From<ContextCacheUsage> for ContextCacheResponse {
             ttl_seconds: usage.ttl_seconds,
             stampede_protection_enabled: usage.stampede_protection_enabled,
             waited_for_inflight: usage.waited_for_inflight,
+            stale_while_revalidate_enabled: usage.stale_while_revalidate_enabled,
+            served_stale: usage.served_stale,
+            refresh_started: usage.refresh_started,
         }
     }
 }
