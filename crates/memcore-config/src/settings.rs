@@ -36,13 +36,24 @@ const MEMCORE_RETENTION_ENABLED: &str = "MEMCORE_RETENTION_ENABLED";
 const MEMCORE_FACT_RETENTION_DAYS: &str = "MEMCORE_FACT_RETENTION_DAYS";
 const MEMCORE_EVENT_RETENTION_DAYS: &str = "MEMCORE_EVENT_RETENTION_DAYS";
 const MEMCORE_CONTEXT_CACHE_ENABLED: &str = "MEMCORE_CONTEXT_CACHE_ENABLED";
+const MEMCORE_CONTEXT_CACHE_BACKEND: &str = "MEMCORE_CONTEXT_CACHE_BACKEND";
 const MEMCORE_CONTEXT_CACHE_TTL_SECONDS: &str = "MEMCORE_CONTEXT_CACHE_TTL_SECONDS";
 const MEMCORE_CONTEXT_CACHE_MAX_ENTRIES: &str = "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES";
+const MEMCORE_CONTEXT_CACHE_KEY_PREFIX: &str = "MEMCORE_CONTEXT_CACHE_KEY_PREFIX";
+const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_REQUEST_ID_HEADER: &str = "X-Request-ID";
+pub const DEFAULT_CONTEXT_CACHE_KEY_PREFIX: &str = "memcore";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextCacheBackend {
+    Disabled,
+    Memory,
+    Redis,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMode {
@@ -176,12 +187,18 @@ pub struct Settings {
     pub fact_retention_days: u32,
     /// Default event retention window in days (`0` disables event retention).
     pub event_retention_days: u32,
-    /// In-memory context response cache toggle.
+    /// In-memory context response cache toggle (derived from `context_cache_backend`).
     pub context_cache_enabled: bool,
+    /// Context cache storage backend.
+    pub context_cache_backend: ContextCacheBackend,
     /// Context cache entry TTL in seconds.
     pub context_cache_ttl_seconds: u64,
     /// Maximum in-memory context cache entries per process.
     pub context_cache_max_entries: usize,
+    /// Redis URL for context cache when backend is `redis`.
+    pub redis_url: Option<String>,
+    /// Namespace prefix for Redis context cache keys.
+    pub context_cache_key_prefix: String,
 }
 
 impl Default for Settings {
@@ -222,8 +239,11 @@ impl Default for Settings {
             fact_retention_days: 0,
             event_retention_days: 0,
             context_cache_enabled: false,
+            context_cache_backend: ContextCacheBackend::Disabled,
             context_cache_ttl_seconds: 300,
             context_cache_max_entries: 1000,
+            redis_url: None,
+            context_cache_key_prefix: DEFAULT_CONTEXT_CACHE_KEY_PREFIX.to_string(),
         }
     }
 }
@@ -285,8 +305,17 @@ impl Settings {
             parse_u32(MEMCORE_FACT_RETENTION_DAYS, defaults.fact_retention_days)?;
         let event_retention_days =
             parse_u32(MEMCORE_EVENT_RETENTION_DAYS, defaults.event_retention_days)?;
-        let context_cache_enabled =
-            parse_bool(MEMCORE_CONTEXT_CACHE_ENABLED, defaults.context_cache_enabled)?;
+        let context_cache_backend = match read_env_optional(MEMCORE_CONTEXT_CACHE_BACKEND) {
+            Some(value) => ContextCacheBackend::from_str(&value)?,
+            None => {
+                if parse_bool(MEMCORE_CONTEXT_CACHE_ENABLED, defaults.context_cache_enabled)? {
+                    ContextCacheBackend::Memory
+                } else {
+                    ContextCacheBackend::Disabled
+                }
+            }
+        };
+        let context_cache_enabled = context_cache_backend != ContextCacheBackend::Disabled;
         let context_cache_ttl_seconds = parse_u64(
             MEMCORE_CONTEXT_CACHE_TTL_SECONDS,
             defaults.context_cache_ttl_seconds,
@@ -295,6 +324,11 @@ impl Settings {
             MEMCORE_CONTEXT_CACHE_MAX_ENTRIES,
             defaults.context_cache_max_entries,
         )?;
+        let redis_url = read_env_optional(MEMCORE_REDIS_URL);
+        let context_cache_key_prefix = read_env_or(
+            MEMCORE_CONTEXT_CACHE_KEY_PREFIX,
+            &defaults.context_cache_key_prefix,
+        );
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -338,8 +372,11 @@ impl Settings {
             fact_retention_days,
             event_retention_days,
             context_cache_enabled,
+            context_cache_backend,
             context_cache_ttl_seconds,
             context_cache_max_entries,
+            redis_url,
+            context_cache_key_prefix,
         };
 
         settings.validate()?;
@@ -503,19 +540,47 @@ impl Settings {
             ));
         }
 
-        if self.context_cache_enabled {
-            if self.context_cache_ttl_seconds == 0 {
-                return Err(MemcoreError::ValidationError(
-                    "MEMCORE_CONTEXT_CACHE_TTL_SECONDS must be greater than 0 when context cache is enabled"
-                        .to_string(),
-                ));
+        match self.context_cache_backend {
+            ContextCacheBackend::Disabled => {}
+            ContextCacheBackend::Memory => {
+                if self.context_cache_ttl_seconds == 0 {
+                    return Err(MemcoreError::ValidationError(
+                        "MEMCORE_CONTEXT_CACHE_TTL_SECONDS must be greater than 0 when context cache backend is memory"
+                            .to_string(),
+                    ));
+                }
+                if self.context_cache_max_entries == 0 {
+                    return Err(MemcoreError::ValidationError(
+                        "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES must be greater than 0 when context cache backend is memory"
+                            .to_string(),
+                    ));
+                }
             }
-            if self.context_cache_max_entries == 0 {
-                return Err(MemcoreError::ValidationError(
-                    "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES must be greater than 0 when context cache is enabled"
-                        .to_string(),
-                ));
+            ContextCacheBackend::Redis => {
+                if self.context_cache_ttl_seconds == 0 {
+                    return Err(MemcoreError::ValidationError(
+                        "MEMCORE_CONTEXT_CACHE_TTL_SECONDS must be greater than 0 when context cache backend is redis"
+                            .to_string(),
+                    ));
+                }
+                if self
+                    .redis_url
+                    .as_ref()
+                    .map(|v| v.trim().is_empty())
+                    .unwrap_or(true)
+                {
+                    return Err(MemcoreError::ValidationError(
+                        "MEMCORE_REDIS_URL is required when MEMCORE_CONTEXT_CACHE_BACKEND=redis"
+                            .to_string(),
+                    ));
+                }
             }
+        }
+
+        if self.context_cache_key_prefix.trim().is_empty() {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_CONTEXT_CACHE_KEY_PREFIX cannot be empty".to_string(),
+            ));
         }
 
         if self.vector_backend == VectorBackend::Qdrant {
@@ -734,6 +799,21 @@ impl FromStr for EmbeddingProviderKind {
     }
 }
 
+impl FromStr for ContextCacheBackend {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "disabled" => Ok(Self::Disabled),
+            "memory" => Ok(Self::Memory),
+            "redis" => Ok(Self::Redis),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_CONTEXT_CACHE_BACKEND value: {value}"
+            ))),
+        }
+    }
+}
+
 impl FromStr for AuthMode {
     type Err = MemcoreError;
 
@@ -786,7 +866,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 37] = [
+    const ENV_KEYS: [&str; 40] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -820,8 +900,11 @@ mod tests {
         "MEMCORE_FACT_RETENTION_DAYS",
         "MEMCORE_EVENT_RETENTION_DAYS",
         "MEMCORE_CONTEXT_CACHE_ENABLED",
+        "MEMCORE_CONTEXT_CACHE_BACKEND",
         "MEMCORE_CONTEXT_CACHE_TTL_SECONDS",
         "MEMCORE_CONTEXT_CACHE_MAX_ENTRIES",
+        "MEMCORE_CONTEXT_CACHE_KEY_PREFIX",
+        "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     ];
@@ -900,8 +983,141 @@ mod tests {
     fn context_cache_disabled_by_default() {
         let settings = Settings::default();
         assert!(!settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Disabled);
         assert_eq!(settings.context_cache_ttl_seconds, 300);
         assert_eq!(settings.context_cache_max_entries, 1000);
+        assert_eq!(
+            settings.context_cache_key_prefix,
+            super::DEFAULT_CONTEXT_CACHE_KEY_PREFIX
+        );
+    }
+
+    #[test]
+    fn context_cache_memory_backend_parses_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
+        }
+
+        let settings = Settings::from_env().expect("memory backend should load");
+        assert!(settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Memory);
+    }
+
+    #[test]
+    fn context_cache_disabled_backend_parses_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "disabled");
+        }
+
+        let settings = Settings::from_env().expect("disabled backend should load");
+        assert!(!settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Disabled);
+    }
+
+    #[test]
+    fn context_cache_redis_backend_parses_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "redis");
+            std::env::set_var("MEMCORE_REDIS_URL", "redis://localhost:6379");
+        }
+
+        let settings = Settings::from_env().expect("redis backend should load");
+        assert!(settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Redis);
+        assert_eq!(settings.redis_url.as_deref(), Some("redis://localhost:6379"));
+    }
+
+    #[test]
+    fn context_cache_redis_backend_requires_redis_url() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "redis");
+        }
+
+        let error = Settings::from_env().expect_err("redis without url should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_REDIS_URL is required when MEMCORE_CONTEXT_CACHE_BACKEND=redis")
+        );
+    }
+
+    #[test]
+    fn fails_on_invalid_context_cache_backend() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "not-a-backend");
+        }
+
+        let error = Settings::from_env().expect_err("invalid backend should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid MEMCORE_CONTEXT_CACHE_BACKEND value")
+        );
+    }
+
+    #[test]
+    fn legacy_context_cache_enabled_env_selects_memory_backend() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_ENABLED", "true");
+        }
+
+        let settings = Settings::from_env().expect("legacy enabled flag should load");
+        assert!(settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Memory);
+    }
+
+    #[test]
+    fn redis_password_not_exposed_in_sanitized_url_output() {
+        use memcore_common::sanitize_redis_url_for_display;
+
+        let sanitized =
+            sanitize_redis_url_for_display("redis://:super_secret@localhost:6379/0");
+        assert!(!sanitized.contains("super_secret"));
+        assert!(sanitized.contains("***@"));
     }
 
     #[test]
@@ -914,15 +1130,18 @@ mod tests {
 
         // SAFETY: tests mutate env only while holding the process-wide mutex.
         unsafe {
-            std::env::set_var("MEMCORE_CONTEXT_CACHE_ENABLED", "true");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
             std::env::set_var("MEMCORE_CONTEXT_CACHE_TTL_SECONDS", "120");
             std::env::set_var("MEMCORE_CONTEXT_CACHE_MAX_ENTRIES", "50");
+            std::env::set_var("MEMCORE_CONTEXT_CACHE_KEY_PREFIX", "custom");
         }
 
         let settings = Settings::from_env().expect("context cache settings should load");
         assert!(settings.context_cache_enabled);
+        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Memory);
         assert_eq!(settings.context_cache_ttl_seconds, 120);
         assert_eq!(settings.context_cache_max_entries, 50);
+        assert_eq!(settings.context_cache_key_prefix, "custom");
     }
 
     #[test]

@@ -18,14 +18,16 @@ const MEMORY_CONTENT: &str = "I am learning Rust and building a memory engine.";
 fn test_app_with_cache() -> axum::Router {
     let settings = Settings::default();
     let engine = Arc::new(
-        create_mock_memory_engine(&settings).with_context_cache(
-            Arc::new(InMemoryContextCache::new(100)),
-            ContextCacheConfig {
-                enabled: true,
-                ttl_seconds: 300,
-                max_entries: 100,
-            },
-        ),
+        create_mock_memory_engine(&settings)
+            .expect("mock engine")
+            .with_context_cache(
+                Arc::new(InMemoryContextCache::new(100)),
+                ContextCacheConfig {
+                    enabled: true,
+                    ttl_seconds: 300,
+                    max_entries: 100,
+                },
+            ),
     );
     create_app(AppState::with_memory_engine(settings, engine))
 }

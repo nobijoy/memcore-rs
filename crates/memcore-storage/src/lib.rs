@@ -1,3 +1,4 @@
+pub mod context_cache;
 #[cfg(feature = "lancedb")]
 pub mod lancedb;
 #[cfg(feature = "qdrant")]
@@ -17,6 +18,11 @@ pub mod vector;
 pub use lancedb::LanceDbVectorStore;
 #[cfg(feature = "qdrant")]
 pub use qdrant::QdrantVectorStore;
+pub use context_cache::{
+    redis_context_cache_key, redis_context_index_key, sanitize_redis_url_for_display,
+};
+#[cfg(feature = "redis-cache")]
+pub use context_cache::RedisContextCache;
 pub use mocks::{MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore};
 pub use queries::{FactSearchQuery, MemoryEventQuery};
 #[cfg(feature = "postgres")]

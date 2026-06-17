@@ -32,7 +32,7 @@ pub struct ContextCacheKey {
 }
 
 /// Cached assembled context payload.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CachedContextEntry {
     pub context: String,
     pub memories: Vec<MemorySearchResult>,

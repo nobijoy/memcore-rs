@@ -15,6 +15,7 @@ lancedb = [
     "dep:protoc-bin-vendored",
 ]
 qdrant = ["dep:qdrant-client"]
+redis-cache = ["dep:redis"]
 
 [dependencies]
 arrow-array = { version = "54", optional = true }
@@ -24,6 +25,7 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = { version = "0.3", optional = true }
 lancedb = { version = "0.18.2", optional = true }
 qdrant-client = { version = "1.18", optional = true }
+redis = { version = "0.28", optional = true, features = ["tokio-comp", "connection-manager"] }
 memcore-common = { path = "../memcore-common" }
 memcore-core = { path = "../memcore-core" }
 serde = { version = "1", features = ["derive"] }
@@ -36,7 +38,7 @@ protoc-bin-vendored = { version = "3.2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [[test]]
 name = "lancedb_vector_store"
@@ -57,3 +59,7 @@ required-features = ["postgres"]
 [[test]]
 name = "qdrant_vector_store"
 required-features = ["qdrant"]
+
+[[test]]
+name = "redis_context_cache"
+required-features = ["redis-cache"]

@@ -15,6 +15,10 @@
 #   build.args.CARGO_FEATURES: "postgres"
 #   MEMCORE_VECTOR_BACKEND: mock
 #
+# Enable Redis context cache (optional, requires redis-cache feature in build):
+#   build.args.CARGO_FEATURES: "postgres,qdrant,redis-cache"
+#   Uncomment the redis service and memcore env vars below
+#
 # Enable LanceDB vector backend instead (optional, heavier image build — not recommended here):
 #   build.args.CARGO_FEATURES: "postgres,lancedb"
 #   MEMCORE_VECTOR_BACKEND: lancedb
@@ -44,6 +48,17 @@ services:
       - qdrant_data:/qdrant/storage
     # The official Qdrant image does not include curl/wget; health is checked via
     # host: curl http://localhost:6333/healthz (see docs/DEPLOYMENT.md).
+
+  # Optional Redis for shared context cache (disabled by default):
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 5
 
   memcore:
     build:
@@ -95,6 +110,10 @@ services:
       MEMCORE_LOG_FORMAT: json
       MEMCORE_LOG_LEVEL: info
       MEMCORE_METRICS_ENABLED: "true"
+      # Optional Redis context cache (requires CARGO_FEATURES=redis-cache):
+      # MEMCORE_CONTEXT_CACHE_BACKEND: redis
+      # MEMCORE_REDIS_URL: redis://redis:6379
+      # MEMCORE_CONTEXT_CACHE_TTL_SECONDS: "300"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s

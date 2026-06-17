@@ -12,6 +12,7 @@ default = []
 postgres = ["memcore-storage/postgres"]
 lancedb = ["memcore-storage/lancedb", "memcore-storage/sqlite"]
 qdrant = ["memcore-storage/qdrant"]
+redis-cache = ["memcore-storage/redis-cache"]
 
 [[bin]]
 name = "memcore-api"

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
-    AuthMode, EmbeddingProviderKind, EventBackend, FactBackend, LlmProviderKind, Settings,
-    VectorBackend,
+    AuthMode, ContextCacheBackend, EmbeddingProviderKind, EventBackend, FactBackend,
+    LlmProviderKind, Settings, VectorBackend,
 };
 use memcore_core::{
     ApiKeyStore, ContextCacheConfig, EmbeddingProvider, FactStore, InMemoryContextCache,
@@ -26,6 +26,8 @@ use crate::observability::Metrics;
 use memcore_storage::LanceDbVectorStore;
 #[cfg(feature = "qdrant")]
 use memcore_storage::QdrantVectorStore;
+#[cfg(feature = "redis-cache")]
+use memcore_storage::RedisContextCache;
 
 /// Default embedding dimensions for the mock embedding provider.
 const MOCK_EMBEDDING_DIMENSIONS: usize = 8;
@@ -65,7 +67,10 @@ impl AppState {
         {
             Self {
                 started_at: Utc::now(),
-                memory_engine: Arc::new(create_mock_memory_engine(&settings)),
+                memory_engine: Arc::new(
+                    create_mock_memory_engine(&settings)
+                        .expect("failed to create mock memory engine"),
+                ),
                 api_key_store: Arc::new(MockApiKeyStore::new()),
                 settings: settings.clone(),
                 rate_limiter: create_rate_limiter(&settings),
@@ -107,7 +112,7 @@ pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEn
     let vector_store =
         create_vector_store(settings, embedding_provider.dimensions()).await?;
 
-    Ok(apply_context_cache(
+    Ok(apply_context_cache_async(
         MemoryEngine::new(
             fact_store,
             vector_store,
@@ -121,7 +126,8 @@ pub async fn create_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEn
             Some(settings.llm_model.clone()),
         ),
         settings,
-    )?)
+    )
+    .await?)
 }
 
 async fn create_api_key_store(settings: &Settings) -> MemcoreResult<Arc<dyn ApiKeyStore>> {
@@ -391,7 +397,7 @@ fn require_qdrant_url(settings: &Settings) -> MemcoreResult<String> {
 }
 
 /// In-memory mock fact and vector stores for fast API tests.
-pub fn create_mock_memory_engine(settings: &Settings) -> MemoryEngine {
+pub fn create_mock_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEngine> {
     apply_context_cache(
         MemoryEngine::new(
             Arc::new(MockFactStore::new()),
@@ -407,20 +413,76 @@ pub fn create_mock_memory_engine(settings: &Settings) -> MemoryEngine {
         ),
         settings,
     )
-    .expect("mock context cache config should be valid")
 }
 
 fn apply_context_cache(engine: MemoryEngine, settings: &Settings) -> MemcoreResult<MemoryEngine> {
+    if settings.context_cache_backend == ContextCacheBackend::Redis {
+        return Err(MemcoreError::ValidationError(
+            "Redis context cache backend requires async AppState::initialize".to_string(),
+        ));
+    }
+
     let config = ContextCacheConfig {
         enabled: settings.context_cache_enabled,
         ttl_seconds: settings.context_cache_ttl_seconds,
         max_entries: settings.context_cache_max_entries,
     };
     config.validate()?;
+
     Ok(engine.with_context_cache(
         Arc::new(InMemoryContextCache::new(settings.context_cache_max_entries)),
         config,
     ))
+}
+
+async fn apply_context_cache_async(
+    engine: MemoryEngine,
+    settings: &Settings,
+) -> MemcoreResult<MemoryEngine> {
+    if settings.context_cache_backend != ContextCacheBackend::Redis {
+        return apply_context_cache(engine, settings);
+    }
+
+    let config = ContextCacheConfig {
+        enabled: settings.context_cache_enabled,
+        ttl_seconds: settings.context_cache_ttl_seconds,
+        max_entries: settings.context_cache_max_entries,
+    };
+    config.validate()?;
+
+    #[cfg(feature = "redis-cache")]
+    {
+        let redis_url = require_redis_url(settings)?;
+        let cache = RedisContextCache::connect(
+            &redis_url,
+            settings.context_cache_key_prefix.clone(),
+            settings.context_cache_ttl_seconds,
+        )
+        .await?;
+        return Ok(engine.with_context_cache(Arc::new(cache), config));
+    }
+
+    #[cfg(not(feature = "redis-cache"))]
+    {
+        Err(MemcoreError::ValidationError(
+            "Redis context cache backend requires the `redis-cache` cargo feature".to_string(),
+        ))
+    }
+}
+
+#[cfg(feature = "redis-cache")]
+fn require_redis_url(settings: &Settings) -> MemcoreResult<String> {
+    settings
+        .redis_url
+        .as_ref()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| {
+            MemcoreError::ValidationError(
+                "MEMCORE_REDIS_URL is required when MEMCORE_CONTEXT_CACHE_BACKEND=redis"
+                    .to_string(),
+            )
+        })
 }
 
 fn llm_provider_name(settings: &Settings) -> String {
