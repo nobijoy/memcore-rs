@@ -427,7 +427,7 @@ pub fn search_org_memory_events() {}
 )]
 pub fn get_context_cache_metrics() {}
 
-/// Process-local aggregate provider usage counters (not per-org billing).
+/// Provider usage events (persistent store) or process-local aggregates (`source=memory`).
 #[utoipa::path(
     get,
     path = "/api/v1/admin/org/provider-usage",
@@ -435,10 +435,20 @@ pub fn get_context_cache_metrics() {}
     params(
         ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
         ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+        ("user_id" = Option<String>, Query, description = "Filter by user id"),
+        ("provider_name" = Option<String>, Query, description = "Filter by provider name"),
+        ("model_name" = Option<String>, Query, description = "Filter by model name"),
+        ("capability" = Option<String>, Query, description = "Filter by capability: llm, embedding, summarization"),
+        ("operation_name" = Option<String>, Query, description = "Filter by operation name"),
+        ("created_after" = Option<String>, Query, description = "Inclusive lower bound (RFC3339)"),
+        ("created_before" = Option<String>, Query, description = "Exclusive upper bound (RFC3339)"),
+        ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
+        ("cursor" = Option<String>, Query, description = "Pagination cursor"),
+        ("source" = Option<String>, Query, description = "persistent (default when store configured) or memory"),
     ),
     security(("BearerAuth" = [])),
     responses(
-        (status = 200, description = "Process-local provider usage metrics", body = ProviderUsageResponse),
+        (status = 200, description = "Organization provider usage", body = ProviderUsageResponse),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
         (status = 429, description = "Rate limit exceeded", body = ErrorBody),

@@ -49,6 +49,7 @@ pub fn wrap_llm_provider(
         false,
         None,
         Some(noop_usage_recorder()),
+        None,
         false,
     )
 }
@@ -71,6 +72,7 @@ pub fn wrap_embedding_provider(
         false,
         None,
         Some(noop_usage_recorder()),
+        None,
         false,
     )
 }
@@ -83,6 +85,7 @@ pub fn build_resilient_llm_from_candidates(
     fallback_enabled: bool,
     metrics: Option<Arc<ProviderRoutingMetrics>>,
     usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<crate::usage::ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> Arc<dyn LlmProvider> {
     build_resilient_llm_provider(
@@ -93,6 +96,7 @@ pub fn build_resilient_llm_from_candidates(
         fallback_enabled,
         metrics,
         usage_recorder,
+        attribution_slot,
         cost_tracking_enabled,
     )
 }
@@ -104,6 +108,7 @@ pub fn build_resilient_embedding_from_candidates(
     fallback_enabled: bool,
     metrics: Option<Arc<ProviderRoutingMetrics>>,
     usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<crate::usage::ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
     build_resilient_embedding_provider(
@@ -113,6 +118,7 @@ pub fn build_resilient_embedding_from_candidates(
         fallback_enabled,
         metrics,
         usage_recorder,
+        attribution_slot,
         cost_tracking_enabled,
     )
 }

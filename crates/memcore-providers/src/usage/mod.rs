@@ -1,8 +1,12 @@
+mod attribution;
+mod persistent;
 mod pricing;
 mod recorder;
 mod tokens;
 mod types;
 
+pub use attribution::{ProviderUsageAttribution, ProviderUsageAttributionSlot};
+pub use persistent::PersistentProviderUsageRecorder;
 pub use pricing::{lookup_pricing, ProviderCostCalculator, ProviderPricing};
 pub use recorder::{
     estimate_event_cost, provider_usage_recorder, InMemoryProviderUsageRecorder,

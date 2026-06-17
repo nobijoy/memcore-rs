@@ -44,6 +44,7 @@ async fn successful_mock_llm_call_records_usage() {
         false,
         None,
         Some(usage.clone()),
+        None,
         false,
     );
 
@@ -89,6 +90,7 @@ async fn failed_mock_llm_call_records_error_without_prompt_content() {
         false,
         None,
         Some(usage.clone()),
+        None,
         false,
     );
 

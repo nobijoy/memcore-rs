@@ -67,6 +67,7 @@ const MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS: &str =
     "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS";
 const MEMCORE_PROVIDER_USAGE_METRICS_ENABLED: &str = "MEMCORE_PROVIDER_USAGE_METRICS_ENABLED";
 const MEMCORE_PROVIDER_COST_TRACKING_ENABLED: &str = "MEMCORE_PROVIDER_COST_TRACKING_ENABLED";
+const MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED: &str = "MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -268,6 +269,8 @@ pub struct Settings {
     pub provider_usage_metrics_enabled: bool,
     /// Estimate provider cost from static pricing hints when token usage is available.
     pub provider_cost_tracking_enabled: bool,
+    /// Persist provider usage events to the configured database store.
+    pub provider_usage_persistence_enabled: bool,
 }
 
 impl Default for Settings {
@@ -334,6 +337,7 @@ impl Default for Settings {
             provider_circuit_breaker_half_open_max_calls: 1,
             provider_usage_metrics_enabled: true,
             provider_cost_tracking_enabled: false,
+            provider_usage_persistence_enabled: false,
         }
     }
 }
@@ -503,6 +507,10 @@ impl Settings {
             MEMCORE_PROVIDER_COST_TRACKING_ENABLED,
             defaults.provider_cost_tracking_enabled,
         )?;
+        let provider_usage_persistence_enabled = parse_bool(
+            MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED,
+            defaults.provider_usage_persistence_enabled,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -572,6 +580,7 @@ impl Settings {
             provider_circuit_breaker_half_open_max_calls,
             provider_usage_metrics_enabled,
             provider_cost_tracking_enabled,
+            provider_usage_persistence_enabled,
         };
 
         settings.validate()?;
@@ -1142,7 +1151,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 61] = [
+    const ENV_KEYS: [&str; 62] = [
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -1201,6 +1210,7 @@ mod tests {
         "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS",
         "MEMCORE_PROVIDER_USAGE_METRICS_ENABLED",
         "MEMCORE_PROVIDER_COST_TRACKING_ENABLED",
+        "MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",

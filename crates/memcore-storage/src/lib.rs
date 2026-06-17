@@ -1,6 +1,7 @@
 pub mod context_cache;
 #[cfg(feature = "lancedb")]
 pub mod lancedb;
+pub mod provider_usage;
 #[cfg(feature = "qdrant")]
 pub mod qdrant;
 pub mod keyword_search;
@@ -24,10 +25,15 @@ pub use context_cache::{
 #[cfg(feature = "redis-cache")]
 pub use context_cache::RedisContextCache;
 pub use mocks::{MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore};
+pub use provider_usage::MockProviderUsageStore;
 pub use queries::{FactSearchQuery, MemoryEventQuery};
+#[cfg(feature = "sqlite")]
+pub use provider_usage::SqliteProviderUsageStore;
+#[cfg(feature = "postgres")]
+pub use provider_usage::PostgresProviderUsageStore;
 #[cfg(feature = "postgres")]
 pub use postgres::{PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore};
-pub use traits::{ApiKeyStore, FactStore, MemoryEventStore, VectorStore};
+pub use traits::{ApiKeyStore, FactStore, MemoryEventStore, ProviderUsageStore, VectorStore};
 pub use vector::{VectorRecord, VectorSearchQuery, VectorSearchResult};

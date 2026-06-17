@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use memcore_common::MemcoreError;
 use memcore_core::{
     ContextCacheMetricsSnapshot, ListOrgUsersInput, ListOrgUsersOutput, MemoryEvent,
     OrgSummaryInput, OrgSummaryOutput, OrgUserSummary, SearchOrgMemoryEventsOutput,
@@ -115,13 +116,181 @@ pub fn context_cache_metrics_response(snapshot: ContextCacheMetricsSnapshot) -> 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProviderUsageResponse {
     pub status: &'static str,
-    /// Usage metrics are aggregate counters for this API process only (not per-org billing).
-    pub scope: &'static str,
-    pub usage: ProviderUsageBodyResponse,
+    /// `persistent` reads stored events; `memory` returns process-local aggregates only.
+    pub source: String,
+    pub summary: ProviderUsageSummaryResponse,
+    pub events: Vec<ProviderUsageEventItemResponse>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ProviderUsageBodyResponse {
+pub struct ProviderUsageSummaryResponse {
+    pub total_requests: u64,
+    pub total_successes: u64,
+    pub total_errors: u64,
+    pub total_retries: u64,
+    pub total_fallbacks: u64,
+    pub total_circuit_blocks: u64,
+    pub total_timeouts: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_tokens: u64,
+    pub total_estimated_cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageEventItemResponse {
+    pub id: Uuid,
+    pub provider_name: String,
+    pub model_name: Option<String>,
+    pub capability: String,
+    pub operation_name: String,
+    pub status: String,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub retry_count: u64,
+    pub fallback_used: bool,
+    pub circuit_blocked: bool,
+    pub timed_out: bool,
+    pub estimated_cost_usd: Option<f64>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ProviderUsageQueryParams {
+    pub user_id: Option<String>,
+    pub provider_name: Option<String>,
+    pub model_name: Option<String>,
+    pub capability: Option<String>,
+    pub operation_name: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    #[serde(default = "default_provider_usage_query_limit")]
+    pub limit: usize,
+    pub cursor: Option<String>,
+    pub source: Option<String>,
+}
+
+pub fn default_provider_usage_query_limit() -> usize {
+    memcore_core::DEFAULT_PROVIDER_USAGE_LIMIT
+}
+
+pub fn parse_provider_usage_capability(
+    value: &str,
+) -> Result<memcore_core::ProviderUsageCapability, MemcoreError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "llm" => Ok(memcore_core::ProviderUsageCapability::Llm),
+        "embedding" => Ok(memcore_core::ProviderUsageCapability::Embedding),
+        "summarization" => Ok(memcore_core::ProviderUsageCapability::Summarization),
+        _ => Err(MemcoreError::ValidationError(format!(
+            "invalid capability: {value}"
+        ))),
+    }
+}
+
+fn capability_label(capability: memcore_core::ProviderUsageCapability) -> String {
+    match capability {
+        memcore_core::ProviderUsageCapability::Llm => "Llm".to_string(),
+        memcore_core::ProviderUsageCapability::Embedding => "Embedding".to_string(),
+        memcore_core::ProviderUsageCapability::Summarization => "Summarization".to_string(),
+    }
+}
+
+fn status_label(status: memcore_core::ProviderCallStatus) -> String {
+    match status {
+        memcore_core::ProviderCallStatus::Success => "Success".to_string(),
+        memcore_core::ProviderCallStatus::Error => "Error".to_string(),
+    }
+}
+
+impl From<memcore_core::ProviderUsagePersistedSummary> for ProviderUsageSummaryResponse {
+    fn from(summary: memcore_core::ProviderUsagePersistedSummary) -> Self {
+        Self {
+            total_requests: summary.total_requests,
+            total_successes: summary.total_successes,
+            total_errors: summary.total_errors,
+            total_retries: summary.total_retries,
+            total_fallbacks: summary.total_fallbacks,
+            total_circuit_blocks: summary.total_circuit_blocks,
+            total_timeouts: summary.total_timeouts,
+            total_input_tokens: summary.total_input_tokens,
+            total_output_tokens: summary.total_output_tokens,
+            total_tokens: summary.total_tokens,
+            total_estimated_cost_usd: summary.total_estimated_cost_usd,
+        }
+    }
+}
+
+pub fn provider_usage_persisted_response(
+    source: &str,
+    result: memcore_core::ProviderUsageQueryResult,
+) -> ProviderUsageResponse {
+    ProviderUsageResponse {
+        status: "success",
+        source: source.to_string(),
+        summary: result.summary.into(),
+        events: result
+            .events
+            .into_iter()
+            .map(|event| ProviderUsageEventItemResponse {
+                id: event.id,
+                provider_name: event.provider_name,
+                model_name: event.model_name,
+                capability: capability_label(event.capability),
+                operation_name: event.operation_name,
+                status: status_label(event.status),
+                input_tokens: event.input_tokens,
+                output_tokens: event.output_tokens,
+                total_tokens: event.total_tokens,
+                retry_count: event.retry_count,
+                fallback_used: event.fallback_used,
+                circuit_blocked: event.circuit_blocked,
+                timed_out: event.timed_out,
+                estimated_cost_usd: event.estimated_cost_usd,
+                created_at: event.created_at,
+            })
+            .collect(),
+        next_cursor: result.next_cursor,
+    }
+}
+
+pub fn provider_usage_memory_response(
+    snapshot: memcore_providers::ProviderUsageSnapshot,
+) -> ProviderUsageResponse {
+    let mut total_input_tokens = 0_u64;
+    let mut total_output_tokens = 0_u64;
+    let mut total_tokens = 0_u64;
+    for record in &snapshot.records {
+        total_input_tokens = total_input_tokens.saturating_add(record.input_tokens.unwrap_or(0));
+        total_output_tokens = total_output_tokens.saturating_add(record.output_tokens.unwrap_or(0));
+        total_tokens = total_tokens.saturating_add(record.total_tokens.unwrap_or(0));
+    }
+
+    ProviderUsageResponse {
+        status: "success",
+        source: "memory".to_string(),
+        summary: ProviderUsageSummaryResponse {
+            total_requests: snapshot.total_requests,
+            total_successes: snapshot.total_successes,
+            total_errors: snapshot.total_errors,
+            total_retries: snapshot.total_retries,
+            total_fallbacks: snapshot.total_fallbacks,
+            total_circuit_blocks: snapshot.total_circuit_blocks,
+            total_timeouts: snapshot.total_timeouts,
+            total_input_tokens,
+            total_output_tokens,
+            total_tokens,
+            total_estimated_cost_usd: snapshot.total_estimated_cost_usd,
+        },
+        events: Vec::new(),
+        next_cursor: None,
+    }
+}
+
+/// Legacy aggregate response shape (process-local counters by provider key).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageLegacyBodyResponse {
     pub total_requests: u64,
     pub total_successes: u64,
     pub total_errors: u64,
@@ -150,54 +319,6 @@ pub struct ProviderUsageRecordResponse {
     pub circuit_blocked_count: u64,
     pub timeout_count: u64,
     pub estimated_cost_usd: Option<f64>,
-}
-
-pub fn provider_usage_response(
-    snapshot: memcore_providers::ProviderUsageSnapshot,
-) -> ProviderUsageResponse {
-    ProviderUsageResponse {
-        status: "success",
-        scope: "process",
-        usage: ProviderUsageBodyResponse {
-            total_requests: snapshot.total_requests,
-            total_successes: snapshot.total_successes,
-            total_errors: snapshot.total_errors,
-            total_retries: snapshot.total_retries,
-            total_fallbacks: snapshot.total_fallbacks,
-            total_circuit_blocks: snapshot.total_circuit_blocks,
-            total_timeouts: snapshot.total_timeouts,
-            total_estimated_cost_usd: snapshot.total_estimated_cost_usd,
-            records: snapshot
-                .records
-                .into_iter()
-                .map(|record| ProviderUsageRecordResponse {
-                    provider_name: record.provider_name,
-                    model_name: record.model_name,
-                    capability: match record.capability {
-                        memcore_providers::ProviderUsageCapability::Llm => "Llm".to_string(),
-                        memcore_providers::ProviderUsageCapability::Embedding => {
-                            "Embedding".to_string()
-                        }
-                        memcore_providers::ProviderUsageCapability::Summarization => {
-                            "Summarization".to_string()
-                        }
-                    },
-                    operation_name: record.operation_name,
-                    request_count: record.request_count,
-                    success_count: record.success_count,
-                    error_count: record.error_count,
-                    input_tokens: record.input_tokens,
-                    output_tokens: record.output_tokens,
-                    total_tokens: record.total_tokens,
-                    retry_count: record.retry_count,
-                    fallback_count: record.fallback_count,
-                    circuit_blocked_count: record.circuit_blocked_count,
-                    timeout_count: record.timeout_count,
-                    estimated_cost_usd: record.estimated_cost_usd,
-                })
-                .collect(),
-        },
-    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

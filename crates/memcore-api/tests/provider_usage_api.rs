@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use memcore_api::{
-    create_app, create_mock_memory_engine_with_usage, AppState,
+    create_app, create_mock_memory_engine_with_wiring, AppState, ProviderWiring,
 };
 use memcore_config::Settings;
 use memcore_core::{AddMemoryInput, MemoryMessage, MessageRole, TenantContext};
@@ -34,8 +34,9 @@ fn get_request(path: &str, org_id: Option<&str>) -> Request<Body> {
 async fn provider_usage_requires_authorization() {
     let settings = Settings::default();
     let usage = InMemoryProviderUsageRecorder::new();
+    let wiring = ProviderWiring::for_tests(usage.clone());
     let engine = Arc::new(
-        create_mock_memory_engine_with_usage(&settings, usage.clone()).expect("engine"),
+        create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"),
     );
     let app = create_app(AppState::with_memory_engine_and_provider_usage(
         settings,
@@ -61,8 +62,9 @@ async fn provider_usage_requires_authorization() {
 async fn provider_usage_requires_organization_header() {
     let settings = Settings::default();
     let usage = InMemoryProviderUsageRecorder::new();
+    let wiring = ProviderWiring::for_tests(usage.clone());
     let engine = Arc::new(
-        create_mock_memory_engine_with_usage(&settings, usage.clone()).expect("engine"),
+        create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"),
     );
     let app = create_app(AppState::with_memory_engine_and_provider_usage(
         settings,
@@ -78,11 +80,12 @@ async fn provider_usage_requires_organization_header() {
 }
 
 #[tokio::test]
-async fn provider_usage_returns_aggregate_counters() {
+async fn provider_usage_returns_memory_source_counters() {
     let settings = Settings::default();
     let usage = InMemoryProviderUsageRecorder::new();
+    let wiring = ProviderWiring::for_tests(usage.clone());
     let engine = Arc::new(
-        create_mock_memory_engine_with_usage(&settings, usage.clone()).expect("engine"),
+        create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"),
     );
 
     let tenant = TenantContext::new(ORG_ID, USER_ID).expect("tenant");
@@ -106,7 +109,7 @@ async fn provider_usage_returns_aggregate_counters() {
 
     let response = app
         .oneshot(get_request(
-            "/api/v1/admin/org/provider-usage",
+            "/api/v1/admin/org/provider-usage?source=memory",
             Some(ORG_ID),
         ))
         .await
@@ -122,10 +125,90 @@ async fn provider_usage_returns_aggregate_counters() {
     let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
 
     assert_eq!(json["status"], "success");
-    assert_eq!(json["scope"], "process");
-    assert!(json["usage"]["total_requests"].as_u64().unwrap_or(0) >= 1);
+    assert_eq!(json["source"], "memory");
+    assert!(json["summary"]["total_requests"].as_u64().unwrap_or(0) >= 1);
     assert!(json.get("prompt").is_none());
     assert!(json.get("messages").is_none());
     let body_text = String::from_utf8_lossy(&body);
     assert!(!body_text.contains("metrics provider usage test"));
+}
+
+#[tokio::test]
+async fn provider_usage_persistent_source_returns_stored_events() {
+    let mut settings = Settings::default();
+    settings.provider_usage_persistence_enabled = true;
+    let wiring = ProviderWiring::for_mock_tests(&settings);
+    let usage = wiring.usage_recorder.clone();
+    let store = wiring.usage_store.clone().expect("mock store");
+    let engine = Arc::new(
+        create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"),
+    );
+
+    let tenant = TenantContext::new(ORG_ID, USER_ID).expect("tenant");
+    let _ = engine
+        .add_memory(AddMemoryInput {
+            tenant,
+            messages: vec![MemoryMessage {
+                role: MessageRole::User,
+                content: "persist provider usage".to_string(),
+            }],
+            metadata: json!({}),
+        })
+        .await
+        .expect("add memory");
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let app = create_app(AppState::with_memory_engine_provider_usage_and_store(
+        settings,
+        engine,
+        usage,
+        Some(store),
+    ));
+
+    let response = app
+        .oneshot(get_request(
+            "/api/v1/admin/org/provider-usage?source=persistent",
+            Some(ORG_ID),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["source"], "persistent");
+    assert!(json["events"].as_array().map(|events| !events.is_empty()).unwrap_or(false));
+    assert!(json["summary"]["total_requests"].as_u64().unwrap_or(0) >= 1);
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(!body_text.contains("persist provider usage"));
+}
+
+#[tokio::test]
+async fn provider_usage_invalid_capability_returns_validation_error() {
+    let settings = Settings::default();
+    let usage = InMemoryProviderUsageRecorder::new();
+    let wiring = ProviderWiring::for_tests(usage.clone());
+    let engine = Arc::new(
+        create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"),
+    );
+    let app = create_app(AppState::with_memory_engine_and_provider_usage(
+        settings,
+        engine,
+        usage,
+    ));
+
+    let response = app
+        .oneshot(get_request(
+            "/api/v1/admin/org/provider-usage?capability=invalid",
+            Some(ORG_ID),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

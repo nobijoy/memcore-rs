@@ -19,7 +19,7 @@ use crate::traits::{EmbeddingProvider, LlmProvider};
 use crate::usage::{
     estimate_embedding_batch_tokens, estimate_embedding_tokens, estimate_llm_classification_tokens,
     estimate_llm_extraction_tokens, estimate_llm_summarization_tokens, store_token_usage,
-    ProviderUsageRecorder, TokenUsageSlot,
+    ProviderUsageAttributionSlot, ProviderUsageRecorder, TokenUsageSlot,
 };
 
 /// LLM provider with timeout/retry, circuit breaker, optional fallback routing, and usage recording.
@@ -39,6 +39,7 @@ impl ResilientLlmProvider {
         fallback_enabled: bool,
         metrics: Option<Arc<ProviderRoutingMetrics>>,
         usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
         cost_tracking_enabled: bool,
     ) -> Self {
         Self {
@@ -49,6 +50,7 @@ impl ResilientLlmProvider {
                 policy,
                 metrics,
                 usage_recorder,
+                attribution_slot,
                 cost_tracking_enabled,
             ),
             fallback_enabled,
@@ -64,6 +66,7 @@ pub fn build_resilient_llm_provider(
     fallback_enabled: bool,
     metrics: Option<Arc<ProviderRoutingMetrics>>,
     usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> Arc<dyn LlmProvider> {
     Arc::new(ResilientLlmProvider::new(
@@ -74,6 +77,7 @@ pub fn build_resilient_llm_provider(
         fallback_enabled,
         metrics,
         usage_recorder,
+        attribution_slot,
         cost_tracking_enabled,
     ))
 }
@@ -177,6 +181,7 @@ impl ResilientEmbeddingProvider {
         fallback_enabled: bool,
         metrics: Option<Arc<ProviderRoutingMetrics>>,
         usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
         cost_tracking_enabled: bool,
     ) -> MemcoreResult<Self> {
         let dimensions = providers
@@ -204,6 +209,7 @@ impl ResilientEmbeddingProvider {
                 policy,
                 metrics,
                 usage_recorder,
+                attribution_slot,
                 cost_tracking_enabled,
             ),
             fallback_enabled,
@@ -219,6 +225,7 @@ pub fn build_resilient_embedding_provider(
     fallback_enabled: bool,
     metrics: Option<Arc<ProviderRoutingMetrics>>,
     usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
     Ok(Arc::new(ResilientEmbeddingProvider::new(
@@ -228,6 +235,7 @@ pub fn build_resilient_embedding_provider(
         fallback_enabled,
         metrics,
         usage_recorder,
+        attribution_slot,
         cost_tracking_enabled,
     )?))
 }

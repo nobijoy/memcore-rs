@@ -228,6 +228,8 @@ mod tests {
 
     fn sample_event(status: ProviderCallStatus) -> ProviderUsageEvent {
         ProviderUsageEvent {
+            org_id: Some("org_test".to_string()),
+            user_id: Some("user_test".to_string()),
             provider_name: "mock".to_string(),
             model_name: Some("mock-llm".to_string()),
             capability: ProviderUsageCapability::Llm,

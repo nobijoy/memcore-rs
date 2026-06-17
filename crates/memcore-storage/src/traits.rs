@@ -1,2 +1,3 @@
-pub use memcore_core::ports::{FactStore, MemoryEventStore, VectorStore};
-pub use memcore_core::ports::ApiKeyStore;
+pub use memcore_core::ports::{
+    ApiKeyStore, FactStore, MemoryEventStore, ProviderUsageStore, VectorStore,
+};

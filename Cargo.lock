@@ -3692,6 +3692,7 @@ dependencies = [
  "chrono",
  "memcore-common",
  "memcore-core",
+ "memcore-storage",
  "reqwest",
  "serde",
  "serde_json",

@@ -40,8 +40,9 @@ pub use routing::{
 };
 pub use usage::{
     estimate_event_cost, lookup_pricing, new_token_usage_slot, provider_usage_recorder,
-    InMemoryProviderUsageRecorder, NoopProviderUsageRecorder, ProviderCallStatus,
-    ProviderCostCalculator, ProviderPricing, ProviderTokenUsage, ProviderUsageCapability,
+    InMemoryProviderUsageRecorder, NoopProviderUsageRecorder, PersistentProviderUsageRecorder,
+    ProviderCallStatus, ProviderCostCalculator, ProviderPricing, ProviderTokenUsage,
+    ProviderUsageAttribution, ProviderUsageAttributionSlot, ProviderUsageCapability,
     ProviderUsageEvent, ProviderUsageRecord, ProviderUsageRecorder, ProviderUsageSnapshot,
 };
 pub use traits::{EmbeddingProvider, LlmProvider};

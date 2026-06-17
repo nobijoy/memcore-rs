@@ -1,30 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Provider capability for usage aggregation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderUsageCapability {
-    Llm,
-    Embedding,
-    Summarization,
-}
-
-impl std::fmt::Display for ProviderUsageCapability {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Llm => write!(f, "llm"),
-            Self::Embedding => write!(f, "embedding"),
-            Self::Summarization => write!(f, "summarization"),
-        }
-    }
-}
-
-/// Outcome of a single provider call for usage recording.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProviderCallStatus {
-    Success,
-    Error,
-}
+pub use memcore_core::{ProviderCallStatus, ProviderUsageCapability};
 
 /// Token usage reported by a provider when available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -56,6 +32,8 @@ impl ProviderTokenUsage {
 /// Single provider usage event (no prompts, memory content, or secrets).
 #[derive(Debug, Clone)]
 pub struct ProviderUsageEvent {
+    pub org_id: Option<String>,
+    pub user_id: Option<String>,
     pub provider_name: String,
     pub model_name: Option<String>,
     pub capability: ProviderUsageCapability,

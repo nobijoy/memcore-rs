@@ -7,8 +7,8 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use crate::circuit_breaker::{CircuitState, ProviderCircuitBreaker};
 use crate::policy::{execute_provider_call, is_provider_health_failure, ProviderExecutionPolicy};
 use crate::usage::{
-    estimate_event_cost, take_token_usage, ProviderCallStatus, ProviderUsageCapability,
-    ProviderUsageEvent, ProviderUsageRecorder, TokenUsageSlot,
+    estimate_event_cost, take_token_usage, ProviderCallStatus, ProviderUsageAttributionSlot,
+    ProviderUsageCapability, ProviderUsageEvent, ProviderUsageRecorder, TokenUsageSlot,
 };
 
 use super::metrics::ProviderRoutingMetrics;
@@ -43,6 +43,7 @@ pub struct ProviderFallbackRouter {
     policy: ProviderExecutionPolicy,
     metrics: Option<Arc<ProviderRoutingMetrics>>,
     usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 }
 
@@ -52,6 +53,7 @@ impl ProviderFallbackRouter {
         policy: ProviderExecutionPolicy,
         metrics: Option<Arc<ProviderRoutingMetrics>>,
         usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
         cost_tracking_enabled: bool,
     ) -> Self {
         Self {
@@ -59,6 +61,7 @@ impl ProviderFallbackRouter {
             policy,
             metrics,
             usage_recorder,
+            attribution_slot,
             cost_tracking_enabled,
         }
     }
@@ -92,7 +95,14 @@ impl ProviderFallbackRouter {
             output_tokens,
         );
 
+        let attribution = self
+            .attribution_slot
+            .as_ref()
+            .and_then(|slot| slot.snapshot());
+
         recorder.record_request(ProviderUsageEvent {
+            org_id: attribution.as_ref().map(|value| value.org_id.clone()),
+            user_id: attribution.and_then(|value| value.user_id.clone()),
             provider_name: provider_name.to_string(),
             model_name: model_name.map(str::to_string),
             capability,
@@ -342,6 +352,7 @@ mod tests {
             ProviderExecutionPolicy::for_tests(),
             Some(ProviderRoutingMetrics::new()),
             usage,
+            None,
             false,
         )
     }
@@ -455,6 +466,7 @@ mod tests {
             },
             Some(ProviderRoutingMetrics::new()),
             Some(usage.clone()),
+            None,
             false,
         );
         let primary = ProviderCandidate::new(

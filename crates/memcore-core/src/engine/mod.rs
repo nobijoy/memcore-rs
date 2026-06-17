@@ -31,7 +31,7 @@ use crate::pagination::{build_page, parse_optional_cursor, PageCursor};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgUserListQuery,
-    VectorRecord, VectorStore, validate_event_date_range,
+    ProviderUsageAttributionSlot, VectorRecord, VectorStore, validate_event_date_range,
 };
 use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
 use crate::dedup::{
@@ -72,6 +72,7 @@ pub struct MemoryEngine {
     context_cache_config: ContextCacheConfig,
     context_cache_coordinator: ContextCacheCoordinator,
     context_cache_metrics: Arc<dyn ContextCacheMetricsRecorder>,
+    usage_attribution: Option<Arc<ProviderUsageAttributionSlot>>,
 }
 
 impl MemoryEngine {
@@ -103,6 +104,7 @@ impl MemoryEngine {
             context_cache_config: cache_config,
             context_cache_coordinator: coordinator,
             context_cache_metrics: metrics,
+            usage_attribution: None,
         }
     }
 
@@ -168,6 +170,20 @@ impl MemoryEngine {
         self.context_cache_metrics.snapshot()
     }
 
+    pub fn with_usage_attribution(
+        mut self,
+        slot: Arc<ProviderUsageAttributionSlot>,
+    ) -> Self {
+        self.usage_attribution = Some(slot);
+        self
+    }
+
+    fn bind_usage_attribution(&self, tenant: &TenantContext) {
+        if let Some(slot) = &self.usage_attribution {
+            slot.set(tenant.org_id.clone(), Some(tenant.user_id.clone()));
+        }
+    }
+
     pub fn pii_redaction_enabled(&self) -> bool {
         self.enable_pii_redaction
     }
@@ -175,6 +191,7 @@ impl MemoryEngine {
     pub async fn add_memory(&self, input: AddMemoryInput) -> MemcoreResult<AddMemoryOutput> {
         validate_tenant(&input.tenant)?;
         validate_messages(&input.messages)?;
+        self.bind_usage_attribution(&input.tenant);
 
         let messages_for_extraction =
             messages_for_llm_extraction(&input.messages, self.enable_pii_redaction);
@@ -381,6 +398,7 @@ impl MemoryEngine {
 
         validate_tenant(&input.tenant)?;
         validate_query(&input.query)?;
+        self.bind_usage_attribution(&input.tenant);
         let limit = normalize_search_limit(input.limit)?;
         let internal_limit = internal_search_limit(limit);
 
@@ -525,6 +543,7 @@ impl MemoryEngine {
     ) -> MemcoreResult<BuildContextOutput> {
         validate_tenant(&input.tenant)?;
         validate_query(&input.query)?;
+        self.bind_usage_attribution(&input.tenant);
         input.budget.validate()?;
         input
             .compression_options
@@ -560,6 +579,7 @@ impl MemoryEngine {
     pub async fn refresh_stale_context(&self, input: BuildContextInput) -> MemcoreResult<()> {
         validate_tenant(&input.tenant)?;
         validate_query(&input.query)?;
+        self.bind_usage_attribution(&input.tenant);
         input.budget.validate()?;
         input
             .compression_options

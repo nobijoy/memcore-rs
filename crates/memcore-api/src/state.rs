@@ -8,23 +8,25 @@ use memcore_config::{
 };
 use memcore_core::{
     ApiKeyStore, ContextCacheConfig, EmbeddingProvider, FactStore, InMemoryContextCache,
-    LlmProvider, MemoryEngine, MemoryEventStore, VectorStore,
+    LlmProvider, MemoryEngine, MemoryEventStore, ProviderUsageAttributionSlot, ProviderUsageStore,
+    VectorStore,
 };
 use memcore_providers::{
     build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
     validate_embedding_provider_name, validate_llm_provider_name, validate_provider_fallback_order,
     validate_summarizer_provider_name, CircuitBreakerConfig, MockEmbeddingProvider,
-    MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider, ProviderCandidate,
-    ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
+    MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider, PersistentProviderUsageRecorder,
+    ProviderCandidate, ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
     ProviderRoutingMetrics, ProviderUsageRecorder, default_embedding_dimensions_for_model,
     new_token_usage_slot, provider_usage_recorder,
 };
 use memcore_storage::{
-    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore, SqliteApiKeyStore,
-    SqliteFactStore, SqliteMemoryEventStore,
+    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockProviderUsageStore, MockVectorStore,
+    SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore,
 };
 #[cfg(feature = "postgres")]
-use memcore_storage::{PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore};
+use memcore_storage::{PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore, PostgresProviderUsageStore};
+use memcore_storage::SqliteProviderUsageStore;
 use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
 #[cfg(feature = "lancedb")]
@@ -41,6 +43,86 @@ struct ProviderRuntime {
     circuit_breaker: Arc<ProviderCircuitBreaker>,
     metrics: Arc<ProviderRoutingMetrics>,
     policy: ProviderExecutionPolicy,
+}
+
+/// Wires provider usage recording, optional persistence, and tenant attribution.
+pub struct ProviderWiring {
+    pub usage_recorder: Arc<dyn ProviderUsageRecorder>,
+    pub usage_store: Option<Arc<dyn ProviderUsageStore>>,
+    pub attribution_slot: Arc<ProviderUsageAttributionSlot>,
+}
+
+impl ProviderWiring {
+    pub async fn from_settings(settings: &Settings) -> MemcoreResult<Self> {
+        let inner = provider_usage_recorder(settings.provider_usage_metrics_enabled);
+        let usage_store = if settings.provider_usage_persistence_enabled {
+            Some(create_provider_usage_store(settings).await?)
+        } else {
+            None
+        };
+        let usage_recorder: Arc<dyn ProviderUsageRecorder> =
+            if settings.provider_usage_persistence_enabled {
+                PersistentProviderUsageRecorder::new(inner, usage_store.clone())
+            } else {
+                inner
+            };
+
+        Ok(Self {
+            usage_recorder,
+            usage_store,
+            attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
+        })
+    }
+
+    pub fn for_tests(usage_recorder: Arc<dyn ProviderUsageRecorder>) -> Self {
+        Self {
+            usage_recorder,
+            usage_store: None,
+            attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
+        }
+    }
+
+    /// Synchronous wiring for mock-backend tests (no database I/O).
+    pub fn for_mock_tests(settings: &Settings) -> Self {
+        let inner = provider_usage_recorder(settings.provider_usage_metrics_enabled);
+        if settings.provider_usage_persistence_enabled {
+            let store = Arc::new(MockProviderUsageStore::new());
+            Self {
+                usage_recorder: PersistentProviderUsageRecorder::new(inner, Some(store.clone())),
+                usage_store: Some(store),
+                attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
+            }
+        } else {
+            Self::for_tests(inner)
+        }
+    }
+}
+
+async fn create_provider_usage_store(
+    settings: &Settings,
+) -> MemcoreResult<Arc<dyn ProviderUsageStore>> {
+    if settings.fact_backend == FactBackend::Postgres {
+        #[cfg(feature = "postgres")]
+        {
+            let url = require_postgres_url(settings)?;
+            let store = PostgresProviderUsageStore::connect(&url).await?;
+            return Ok(Arc::new(store));
+        }
+        #[cfg(not(feature = "postgres"))]
+        {
+            return Err(MemcoreError::ValidationError(
+                "provider usage persistence with postgres requires the `postgres` cargo feature"
+                    .to_string(),
+            ));
+        }
+    }
+
+    if settings.fact_backend == FactBackend::Sqlite {
+        let store = SqliteProviderUsageStore::connect(&settings.database_url).await?;
+        return Ok(Arc::new(store));
+    }
+
+    Ok(Arc::new(MockProviderUsageStore::new()))
 }
 
 fn provider_runtime(settings: &Settings) -> MemcoreResult<ProviderRuntime> {
@@ -196,13 +278,14 @@ pub struct AppState {
     pub rate_limiter: Arc<RateLimiter>,
     pub metrics: Arc<Metrics>,
     pub provider_usage: Arc<dyn ProviderUsageRecorder>,
+    pub provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
 }
 
 impl AppState {
     /// Builds application state using configured storage and providers.
     pub async fn initialize(settings: Settings) -> MemcoreResult<Self> {
-        let provider_usage = provider_usage_recorder(settings.provider_usage_metrics_enabled);
-        let memory_engine = Arc::new(create_memory_engine(&settings, provider_usage.clone()).await?);
+        let wiring = ProviderWiring::from_settings(&settings).await?;
+        let memory_engine = Arc::new(create_memory_engine(&settings, &wiring).await?);
         let api_key_store = create_api_key_store(&settings).await?;
         Ok(Self {
             settings: settings.clone(),
@@ -211,7 +294,8 @@ impl AppState {
             api_key_store,
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
-            provider_usage,
+            provider_usage: wiring.usage_recorder,
+            provider_usage_store: wiring.usage_store,
         })
     }
 
@@ -223,18 +307,19 @@ impl AppState {
             && settings.event_backend == EventBackend::Mock
             && settings.vector_backend == VectorBackend::Mock
         {
-            let provider_usage = provider_usage_recorder(settings.provider_usage_metrics_enabled);
+            let wiring = ProviderWiring::for_mock_tests(&settings);
             Self {
                 started_at: Utc::now(),
                 memory_engine: Arc::new(
-                    create_mock_memory_engine_with_usage(&settings, provider_usage.clone())
+                    create_mock_memory_engine_with_wiring(&settings, &wiring)
                         .expect("failed to create mock memory engine"),
                 ),
                 api_key_store: Arc::new(MockApiKeyStore::new()),
                 settings: settings.clone(),
                 rate_limiter: create_rate_limiter(&settings),
                 metrics: Arc::new(Metrics::default()),
-                provider_usage,
+                provider_usage: wiring.usage_recorder,
+                provider_usage_store: wiring.usage_store,
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -254,6 +339,7 @@ impl AppState {
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
             provider_usage: provider_usage_recorder(settings.provider_usage_metrics_enabled),
+            provider_usage_store: None,
         }
     }
 
@@ -270,6 +356,25 @@ impl AppState {
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
             provider_usage,
+            provider_usage_store: None,
+        }
+    }
+
+    pub fn with_memory_engine_provider_usage_and_store(
+        settings: Settings,
+        memory_engine: Arc<MemoryEngine>,
+        provider_usage: Arc<dyn ProviderUsageRecorder>,
+        provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
+    ) -> Self {
+        Self {
+            settings: settings.clone(),
+            started_at: Utc::now(),
+            memory_engine,
+            api_key_store: Arc::new(MockApiKeyStore::new()),
+            rate_limiter: create_rate_limiter(&settings),
+            metrics: Arc::new(Metrics::default()),
+            provider_usage,
+            provider_usage_store,
         }
     }
 }
@@ -284,11 +389,19 @@ fn create_rate_limiter(settings: &Settings) -> Arc<RateLimiter> {
 /// Wires `MemoryEngine` from settings: configurable fact/vector stores and LLM/embedding providers.
 pub async fn create_memory_engine(
     settings: &Settings,
-    usage_recorder: Arc<dyn ProviderUsageRecorder>,
+    wiring: &ProviderWiring,
 ) -> MemcoreResult<MemoryEngine> {
     let (fact_store, event_store) = create_storage(settings).await?;
-    let llm_provider = create_llm_provider(settings, usage_recorder.clone())?;
-    let embedding_provider = create_embedding_provider(settings, usage_recorder)?;
+    let llm_provider = create_llm_provider(
+        settings,
+        wiring.usage_recorder.clone(),
+        wiring.attribution_slot.clone(),
+    )?;
+    let embedding_provider = create_embedding_provider(
+        settings,
+        wiring.usage_recorder.clone(),
+        wiring.attribution_slot.clone(),
+    )?;
     let vector_store =
         create_vector_store(settings, embedding_provider.dimensions()).await?;
 
@@ -301,6 +414,7 @@ pub async fn create_memory_engine(
         )
         .with_pii_redaction(settings.enable_pii_redaction)
         .with_event_store(event_store)
+        .with_usage_attribution(wiring.attribution_slot.clone())
         .with_audit_provider_info(
             Some(llm_provider_name(settings)),
             Some(settings.llm_model.clone()),
@@ -467,6 +581,7 @@ fn provider_execution_policy(settings: &Settings) -> MemcoreResult<ProviderExecu
 fn create_llm_provider(
     settings: &Settings,
     usage_recorder: Arc<dyn ProviderUsageRecorder>,
+    attribution_slot: Arc<ProviderUsageAttributionSlot>,
 ) -> MemcoreResult<Arc<dyn LlmProvider>> {
     let runtime = provider_runtime(settings)?;
     let llm_names = if settings.provider_fallback_enabled {
@@ -508,6 +623,7 @@ fn create_llm_provider(
         settings.provider_fallback_enabled,
         Some(runtime.metrics),
         Some(usage_recorder),
+        Some(attribution_slot),
         settings.provider_cost_tracking_enabled,
     ))
 }
@@ -515,6 +631,7 @@ fn create_llm_provider(
 fn create_embedding_provider(
     settings: &Settings,
     usage_recorder: Arc<dyn ProviderUsageRecorder>,
+    attribution_slot: Arc<ProviderUsageAttributionSlot>,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
     let runtime = provider_runtime(settings)?;
     let names = if settings.provider_fallback_enabled {
@@ -538,6 +655,7 @@ fn create_embedding_provider(
         settings.provider_fallback_enabled,
         Some(runtime.metrics),
         Some(usage_recorder),
+        Some(attribution_slot),
         settings.provider_cost_tracking_enabled,
     )
 }
@@ -616,25 +734,41 @@ fn require_qdrant_url(settings: &Settings) -> MemcoreResult<String> {
 
 /// In-memory mock fact and vector stores for fast API tests.
 pub fn create_mock_memory_engine(settings: &Settings) -> MemcoreResult<MemoryEngine> {
-    create_mock_memory_engine_with_usage(
-        settings,
-        provider_usage_recorder(settings.provider_usage_metrics_enabled),
-    )
+    create_mock_memory_engine_with_wiring(settings, &ProviderWiring::for_mock_tests(settings))
 }
 
 pub fn create_mock_memory_engine_with_usage(
     settings: &Settings,
     usage_recorder: Arc<dyn ProviderUsageRecorder>,
 ) -> MemcoreResult<MemoryEngine> {
+    create_mock_memory_engine_with_wiring(
+        settings,
+        &ProviderWiring::for_tests(usage_recorder),
+    )
+}
+
+pub fn create_mock_memory_engine_with_wiring(
+    settings: &Settings,
+    wiring: &ProviderWiring,
+) -> MemcoreResult<MemoryEngine> {
     apply_context_cache(
         MemoryEngine::new(
             Arc::new(MockFactStore::new()),
             Arc::new(MockVectorStore::new()),
-            create_llm_provider(settings, usage_recorder.clone())?,
-            create_embedding_provider(settings, usage_recorder)?,
+            create_llm_provider(
+                settings,
+                wiring.usage_recorder.clone(),
+                wiring.attribution_slot.clone(),
+            )?,
+            create_embedding_provider(
+                settings,
+                wiring.usage_recorder.clone(),
+                wiring.attribution_slot.clone(),
+            )?,
         )
         .with_pii_redaction(settings.enable_pii_redaction)
         .with_event_store(Arc::new(MockMemoryEventStore::new()))
+        .with_usage_attribution(wiring.attribution_slot.clone())
         .with_audit_provider_info(
             Some(llm_provider_name(settings)),
             Some(settings.llm_model.clone()),

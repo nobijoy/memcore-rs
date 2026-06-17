@@ -69,6 +69,7 @@ async fn llm_extraction_falls_back_to_healthy_mock_provider() {
         true,
         Some(ProviderRoutingMetrics::new()),
         Some(usage.clone()),
+        None,
         false,
     );
 
@@ -117,6 +118,7 @@ async fn embedding_search_falls_back_to_healthy_mock_provider() {
         true,
         Some(ProviderRoutingMetrics::new()),
         Some(usage.clone()),
+        None,
         false,
     )
     .expect("embedding provider");
