@@ -67,9 +67,14 @@ pub async fn build_context(
         "context build completed"
     );
 
-    if output.cache.refresh_started {
+    if output.cache.refresh_started && !state.shutdown_token.is_cancelled() {
         let engine = state.memory_engine.clone();
+        let shutdown_token = state.shutdown_token.child_token();
         tokio::spawn(async move {
+            if shutdown_token.is_cancelled() {
+                tracing::info!("stale context refresh skipped because shutdown is requested");
+                return;
+            }
             let _ = engine.refresh_stale_context(build_input).await;
         });
     }

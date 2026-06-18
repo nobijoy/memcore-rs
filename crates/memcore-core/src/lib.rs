@@ -16,6 +16,7 @@ pub mod privacy;
 pub mod quota;
 pub mod ranking;
 pub mod retention;
+pub mod shutdown;
 
 pub use admin::{
     CreateMemoryUsageSnapshotInput, CreateMemoryUsageSnapshotOutput, DEFAULT_LIST_ORG_USERS_LIMIT,
@@ -116,3 +117,4 @@ pub use retention::{
     ApplyProviderUsageRetentionInput, ApplyProviderUsageRetentionOutput, ApplyRetentionInput,
     ApplyRetentionOutput, RetentionPolicy,
 };
+pub use shutdown::ShutdownToken;

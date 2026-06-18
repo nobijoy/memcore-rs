@@ -14,7 +14,8 @@ use memcore_core::{
     BackgroundJobRunStore, BackgroundJobRunner, ContextCacheConfig, EmbeddingProvider, FactStore,
     InMemoryContextCache, LlmProvider, MemoryEngine, MemoryEventStore, MemoryRetentionJob,
     MemoryUsageSnapshotJob, MemoryUsageSnapshotStore, OrgPlanStore, OrgQuotaLimits,
-    ProviderUsageAttributionSlot, ProviderUsageRetentionJob, ProviderUsageStore, VectorStore,
+    ProviderUsageAttributionSlot, ProviderUsageRetentionJob, ProviderUsageStore, ShutdownToken,
+    VectorStore,
 };
 use memcore_providers::{
     CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, OpenAiClient,
@@ -368,11 +369,20 @@ pub struct AppState {
     pub background_job_run_store: Option<Arc<dyn BackgroundJobRunStore>>,
     pub background_job_lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
     pub background_job_lock_owner_id: Option<String>,
+    pub shutdown_token: ShutdownToken,
 }
 
 impl AppState {
     /// Builds application state using configured storage and providers.
     pub async fn initialize(settings: Settings) -> MemcoreResult<Self> {
+        Self::initialize_with_shutdown(settings, ShutdownToken::new()).await
+    }
+
+    /// Builds application state using a caller-provided shutdown token.
+    pub async fn initialize_with_shutdown(
+        settings: Settings,
+        shutdown_token: ShutdownToken,
+    ) -> MemcoreResult<Self> {
         let wiring = ProviderWiring::from_settings(&settings).await?;
         let org_plan_store = create_org_plan_store(&settings).await?;
         let memory_usage_snapshot_store = create_memory_usage_snapshot_store(&settings).await?;
@@ -396,6 +406,7 @@ impl AppState {
             background_job_run_store.clone(),
             background_job_lock_store.clone(),
             background_job_lock_owner_id.clone(),
+            shutdown_token.child_token(),
         ));
         if settings.background_jobs_enabled {
             let runner = background_jobs.clone();
@@ -418,6 +429,7 @@ impl AppState {
             background_job_run_store,
             background_job_lock_store,
             background_job_lock_owner_id,
+            shutdown_token,
         })
     }
 
@@ -460,6 +472,7 @@ impl AppState {
                 background_job_run_store.clone(),
                 background_job_lock_store.clone(),
                 background_job_lock_owner_id.clone(),
+                ShutdownToken::new(),
             ));
             Self {
                 started_at: Utc::now(),
@@ -475,6 +488,7 @@ impl AppState {
                 background_job_run_store,
                 background_job_lock_store,
                 background_job_lock_owner_id,
+                shutdown_token: ShutdownToken::new(),
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -501,10 +515,12 @@ impl AppState {
                 None,
                 None,
                 None,
+                ShutdownToken::new(),
             )),
             background_job_run_store: None,
             background_job_lock_store: None,
             background_job_lock_owner_id: None,
+            shutdown_token: ShutdownToken::new(),
         }
     }
 
@@ -529,10 +545,12 @@ impl AppState {
                 None,
                 None,
                 None,
+                ShutdownToken::new(),
             )),
             background_job_run_store: None,
             background_job_lock_store: None,
             background_job_lock_owner_id: None,
+            shutdown_token: ShutdownToken::new(),
         }
     }
 
@@ -558,10 +576,12 @@ impl AppState {
                 None,
                 None,
                 None,
+                ShutdownToken::new(),
             )),
             background_job_run_store: None,
             background_job_lock_store: None,
             background_job_lock_owner_id: None,
+            shutdown_token: ShutdownToken::new(),
         }
     }
 }
@@ -572,6 +592,7 @@ fn create_background_job_runner(
     background_job_run_store: Option<Arc<dyn BackgroundJobRunStore>>,
     background_job_lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
     background_job_lock_owner_id: Option<String>,
+    shutdown_token: ShutdownToken,
 ) -> BackgroundJobRunner {
     let org_ids = settings.background_job_org_ids.clone();
     let jobs: Vec<Arc<dyn BackgroundJob>> = vec![
@@ -610,6 +631,10 @@ fn create_background_job_runner(
         background_job_lock_store,
     )
     .with_retry_policy(background_job_retry_policy(settings))
+    .with_shutdown(
+        shutdown_token,
+        Duration::from_secs(settings.background_job_shutdown_timeout_seconds),
+    )
 }
 
 fn create_rate_limiter(settings: &Settings) -> Arc<RateLimiter> {

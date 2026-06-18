@@ -3,6 +3,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use memcore_common::{MemcoreError, MemcoreResult};
 
+use crate::ShutdownToken;
+
 use super::{BackgroundJobKind, BackgroundJobRun, BackgroundJobStatus};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,6 +94,27 @@ pub fn is_retryable_job_error(error: &MemcoreError) -> bool {
 pub async fn execute_background_job_with_retries<F, Fut>(
     kind: BackgroundJobKind,
     policy: &BackgroundJobRetryPolicy,
+    operation: F,
+) -> BackgroundJobRun
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = MemcoreResult<BackgroundJobRun>>,
+{
+    execute_background_job_with_retries_and_shutdown(
+        kind,
+        policy,
+        None,
+        Duration::from_secs(30),
+        operation,
+    )
+    .await
+}
+
+pub async fn execute_background_job_with_retries_and_shutdown<F, Fut>(
+    kind: BackgroundJobKind,
+    policy: &BackgroundJobRetryPolicy,
+    shutdown_token: Option<ShutdownToken>,
+    shutdown_timeout: Duration,
     mut operation: F,
 ) -> BackgroundJobRun
 where
@@ -105,6 +128,21 @@ where
     let total_started = Instant::now();
 
     for attempt in 0..max_attempts {
+        if shutdown_token
+            .as_ref()
+            .is_some_and(ShutdownToken::is_cancelled)
+        {
+            tracing::warn!(
+                job_kind = %kind,
+                attempt = attempts_made,
+                max_attempts = max_attempts,
+                status = BackgroundJobStatus::Cancelled.as_str(),
+                error_code = "SHUTDOWN_REQUESTED",
+                "background job cancelled before next attempt"
+            );
+            return cancelled_run(kind, started_at, total_started, attempts_made, max_attempts);
+        }
+
         let attempt_number = attempt + 1;
         attempts_made = attempt_number;
         let attempt_started = Instant::now();
@@ -115,7 +153,49 @@ where
             "background job attempt started"
         );
 
-        match operation().await {
+        let operation_future = operation();
+        tokio::pin!(operation_future);
+
+        let attempt_result = match &shutdown_token {
+            Some(token) => {
+                tokio::select! {
+                    result = &mut operation_future => result,
+                    _ = token.cancelled() => {
+                        tracing::warn!(
+                            job_kind = %kind,
+                            attempt = attempt_number,
+                            max_attempts = max_attempts,
+                            timeout_seconds = shutdown_timeout.as_secs(),
+                            "background job shutdown requested during attempt"
+                        );
+                        match tokio::time::timeout(shutdown_timeout, &mut operation_future).await {
+                            Ok(result) => result,
+                            Err(_) => {
+                                tracing::warn!(
+                                    job_kind = %kind,
+                                    attempt = attempt_number,
+                                    max_attempts = max_attempts,
+                                    timeout_seconds = shutdown_timeout.as_secs(),
+                                    status = BackgroundJobStatus::Cancelled.as_str(),
+                                    error_code = "SHUTDOWN_TIMEOUT",
+                                    "background job shutdown timeout reached"
+                                );
+                                return cancelled_run(
+                                    kind,
+                                    started_at,
+                                    total_started,
+                                    attempts_made,
+                                    max_attempts,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            None => operation_future.await,
+        };
+
+        match attempt_result {
             Ok(mut run) => {
                 run.attempt_count = attempt_number;
                 run.max_attempts = max_attempts;
@@ -190,7 +270,32 @@ where
                     error_code = error.code(),
                     "background job retry scheduled"
                 );
-                tokio::time::sleep(backoff).await;
+                match &shutdown_token {
+                    Some(token) => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(backoff) => {}
+                            _ = token.cancelled() => {
+                                tracing::warn!(
+                                    job_kind = %kind,
+                                    attempt = attempt_number,
+                                    max_attempts = max_attempts,
+                                    backoff_ms = backoff.as_millis(),
+                                    status = BackgroundJobStatus::Cancelled.as_str(),
+                                    error_code = "SHUTDOWN_REQUESTED",
+                                    "background job retry backoff interrupted by shutdown"
+                                );
+                                return cancelled_run(
+                                    kind,
+                                    started_at,
+                                    total_started,
+                                    attempts_made,
+                                    max_attempts,
+                                );
+                            }
+                        }
+                    }
+                    None => tokio::time::sleep(backoff).await,
+                }
             }
         }
     }
@@ -216,6 +321,33 @@ where
     if run.duration_ms.is_none() {
         run.duration_ms = Some((finished_at - started_at).num_milliseconds().max(0) as u64);
     }
+    tracing::info!(
+        job_kind = %kind,
+        attempt = run.attempt_count,
+        max_attempts = run.max_attempts,
+        status = run.status.as_str(),
+        duration_ms = run.duration_ms,
+        error_code = run.error_code.as_deref(),
+        "background job final result"
+    );
+    run
+}
+
+fn cancelled_run(
+    kind: BackgroundJobKind,
+    started_at: chrono::DateTime<chrono::Utc>,
+    total_started: Instant,
+    attempts_made: usize,
+    max_attempts: usize,
+) -> BackgroundJobRun {
+    let finished_at = chrono::Utc::now();
+    let mut run = BackgroundJobRun::cancelled(kind, "shutdown requested");
+    run.started_at = started_at;
+    run.finished_at = Some(finished_at);
+    run.duration_ms = Some(total_started.elapsed().as_millis() as u64);
+    run.attempt_count = attempts_made;
+    run.max_attempts = max_attempts;
+    run.retried = attempts_made > 1;
     tracing::info!(
         job_kind = %kind,
         attempt = run.attempt_count,
@@ -473,6 +605,114 @@ mod tests {
         assert_eq!(run.status, BackgroundJobStatus::Failed);
         assert_eq!(run.attempt_count, 1);
         assert!(!run.retried);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_before_first_attempt_prevents_execution() {
+        let token = ShutdownToken::new();
+        token.cancel();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_closure = calls.clone();
+
+        let run = execute_background_job_with_retries_and_shutdown(
+            BackgroundJobKind::MemoryUsageSnapshot,
+            &test_policy(2),
+            Some(token),
+            Duration::from_millis(10),
+            || {
+                let calls = calls_for_closure.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(successful_run())
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(run.status, BackgroundJobStatus::Cancelled);
+        assert_eq!(run.attempt_count, 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn shutdown_during_backoff_stops_retries() {
+        let token = ShutdownToken::new();
+        let child = token.child_token();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_closure = calls.clone();
+
+        let handle = tokio::spawn(async move {
+            execute_background_job_with_retries_and_shutdown(
+                BackgroundJobKind::MemoryUsageSnapshot,
+                &BackgroundJobRetryPolicy {
+                    initial_backoff: Duration::from_secs(60),
+                    max_backoff: Duration::from_secs(60),
+                    jitter_enabled: false,
+                    ..test_policy(2)
+                },
+                Some(child),
+                Duration::from_millis(10),
+                || {
+                    let calls = calls_for_closure.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Err(MemcoreError::StorageError(
+                            "service unavailable".to_string(),
+                        ))
+                    }
+                },
+            )
+            .await
+        });
+
+        while calls.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        token.cancel();
+
+        let run = tokio::time::timeout(Duration::from_millis(100), handle)
+            .await
+            .expect("shutdown should interrupt backoff")
+            .expect("retry task should complete");
+        assert_eq!(run.status, BackgroundJobStatus::Cancelled);
+        assert_eq!(run.attempt_count, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_during_attempt_waits_for_completion_within_timeout() {
+        let token = ShutdownToken::new();
+        let child = token.child_token();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_closure = calls.clone();
+
+        let handle = tokio::spawn(async move {
+            execute_background_job_with_retries_and_shutdown(
+                BackgroundJobKind::MemoryUsageSnapshot,
+                &test_policy(2),
+                Some(child),
+                Duration::from_millis(100),
+                || {
+                    let calls = calls_for_closure.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        Ok(successful_run())
+                    }
+                },
+            )
+            .await
+        });
+
+        while calls.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        token.cancel();
+
+        let run = handle.await.expect("retry task should complete");
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(run.attempt_count, 1);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

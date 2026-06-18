@@ -104,6 +104,9 @@ const MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS: &str = "MEMCORE_BACKGROUND_JOB_MAX_
 const MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER: &str = "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER";
 const MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED: &str =
     "MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED";
+const MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS: &str = "MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS";
+const MEMCORE_BACKGROUND_JOB_SHUTDOWN_TIMEOUT_SECONDS: &str =
+    "MEMCORE_BACKGROUND_JOB_SHUTDOWN_TIMEOUT_SECONDS";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -368,6 +371,10 @@ pub struct Settings {
     pub background_job_backoff_multiplier: f32,
     /// Apply simple jitter to background job retry backoff delays.
     pub background_job_retry_jitter_enabled: bool,
+    /// Maximum time to wait for API server graceful shutdown after a signal.
+    pub graceful_shutdown_timeout_seconds: u64,
+    /// Maximum time to wait for a background job attempt to finish after shutdown starts.
+    pub background_job_shutdown_timeout_seconds: u64,
 }
 
 impl Default for Settings {
@@ -463,6 +470,8 @@ impl Default for Settings {
             background_job_max_backoff_ms: 5000,
             background_job_backoff_multiplier: 2.0,
             background_job_retry_jitter_enabled: true,
+            graceful_shutdown_timeout_seconds: 30,
+            background_job_shutdown_timeout_seconds: 30,
         }
     }
 }
@@ -733,6 +742,14 @@ impl Settings {
             MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED,
             defaults.background_job_retry_jitter_enabled,
         )?;
+        let graceful_shutdown_timeout_seconds = parse_u64(
+            MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
+            defaults.graceful_shutdown_timeout_seconds,
+        )?;
+        let background_job_shutdown_timeout_seconds = parse_u64(
+            MEMCORE_BACKGROUND_JOB_SHUTDOWN_TIMEOUT_SECONDS,
+            defaults.background_job_shutdown_timeout_seconds,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -831,6 +848,8 @@ impl Settings {
             background_job_max_backoff_ms,
             background_job_backoff_multiplier,
             background_job_retry_jitter_enabled,
+            graceful_shutdown_timeout_seconds,
+            background_job_shutdown_timeout_seconds,
         };
 
         settings.validate()?;
@@ -1052,6 +1071,17 @@ impl Settings {
         if self.background_job_backoff_multiplier < 1.0 {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER must be >= 1.0".to_string(),
+            ));
+        }
+        if self.graceful_shutdown_timeout_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS must be greater than 0".to_string(),
+            ));
+        }
+        if self.background_job_shutdown_timeout_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKGROUND_JOB_SHUTDOWN_TIMEOUT_SECONDS must be greater than 0"
+                    .to_string(),
             ));
         }
 
@@ -1575,6 +1605,8 @@ mod tests {
         "MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS",
         "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER",
         "MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED",
+        "MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS",
+        "MEMCORE_BACKGROUND_JOB_SHUTDOWN_TIMEOUT_SECONDS",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1675,6 +1707,8 @@ mod tests {
         assert_eq!(settings.background_job_max_backoff_ms, 5000);
         assert!((settings.background_job_backoff_multiplier - 2.0).abs() < f32::EPSILON);
         assert!(settings.background_job_retry_jitter_enabled);
+        assert_eq!(settings.graceful_shutdown_timeout_seconds, 30);
+        assert_eq!(settings.background_job_shutdown_timeout_seconds, 30);
     }
 
     #[test]
@@ -1710,6 +1744,8 @@ mod tests {
             std::env::set_var("MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS", "500");
             std::env::set_var("MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER", "1.5");
             std::env::set_var("MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED", "false");
+            std::env::set_var("MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS", "20");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_SHUTDOWN_TIMEOUT_SECONDS", "15");
         }
 
         let settings = Settings::from_env().expect("background job settings should load");
@@ -1747,6 +1783,8 @@ mod tests {
         assert_eq!(settings.background_job_max_backoff_ms, 500);
         assert!((settings.background_job_backoff_multiplier - 1.5).abs() < f32::EPSILON);
         assert!(!settings.background_job_retry_jitter_enabled);
+        assert_eq!(settings.graceful_shutdown_timeout_seconds, 20);
+        assert_eq!(settings.background_job_shutdown_timeout_seconds, 15);
     }
 
     #[test]
@@ -1757,6 +1795,8 @@ mod tests {
             "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS",
             "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS",
             "MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS",
+            "MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS",
+            "MEMCORE_BACKGROUND_JOB_SHUTDOWN_TIMEOUT_SECONDS",
         ] {
             let _lock = env_test_lock()
                 .lock()

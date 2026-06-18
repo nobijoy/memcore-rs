@@ -6,6 +6,7 @@ pub mod openapi;
 pub mod response;
 pub mod routes;
 pub mod security;
+pub mod shutdown;
 pub mod state;
 
 pub use app::{create_app, run};

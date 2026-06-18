@@ -66,6 +66,7 @@ pub enum BackgroundJobStatus {
     Succeeded,
     Failed,
     Skipped,
+    Cancelled,
 }
 
 impl BackgroundJobStatus {
@@ -76,6 +77,7 @@ impl BackgroundJobStatus {
             Self::Succeeded => "Succeeded",
             Self::Failed => "Failed",
             Self::Skipped => "Skipped",
+            Self::Cancelled => "Cancelled",
         }
     }
 }
@@ -96,6 +98,7 @@ impl FromStr for BackgroundJobStatus {
             "Succeeded" | "succeeded" | "success" => Ok(Self::Succeeded),
             "Failed" | "failed" | "error" => Ok(Self::Failed),
             "Skipped" | "skipped" => Ok(Self::Skipped),
+            "Cancelled" | "cancelled" | "canceled" => Ok(Self::Cancelled),
             other => Err(MemcoreError::ValidationError(format!(
                 "invalid job status: {other}"
             ))),
@@ -168,6 +171,13 @@ impl BackgroundJobRun {
     ) -> Self {
         let mut run = Self::running(kind).finish(BackgroundJobStatus::Failed);
         run.error_code = Some(code.into());
+        run.error_message = Some(message.into());
+        run
+    }
+
+    pub fn cancelled(kind: BackgroundJobKind, message: impl Into<String>) -> Self {
+        let mut run = Self::running(kind).finish(BackgroundJobStatus::Cancelled);
+        run.error_code = Some("SHUTDOWN_REQUESTED".to_string());
         run.error_message = Some(message.into());
         run
     }

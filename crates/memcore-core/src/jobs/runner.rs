@@ -7,11 +7,12 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use tokio::time::{MissedTickBehavior, interval, timeout};
 
 use super::registry::BackgroundJob;
-use super::retry::{BackgroundJobRetryPolicy, execute_background_job_with_retries};
+use super::retry::{BackgroundJobRetryPolicy, execute_background_job_with_retries_and_shutdown};
 use super::types::{
     BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobSnapshot,
     BackgroundJobStatus,
 };
+use crate::ShutdownToken;
 use crate::ports::{
     AcquiredJobLock, BackgroundJobLockStore, BackgroundJobRunStore, StoredBackgroundJobRun,
 };
@@ -123,6 +124,8 @@ pub struct BackgroundJobRunner {
     lock_ttl: Duration,
     lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
     retry_policy: BackgroundJobRetryPolicy,
+    shutdown_token: Option<ShutdownToken>,
+    shutdown_timeout: Duration,
 }
 
 impl BackgroundJobRunner {
@@ -157,6 +160,8 @@ impl BackgroundJobRunner {
             lock_ttl: Duration::from_secs(300),
             lock_store: None,
             retry_policy: BackgroundJobRetryPolicy::disabled(),
+            shutdown_token: None,
+            shutdown_timeout: Duration::from_secs(30),
         }
     }
 
@@ -189,6 +194,16 @@ impl BackgroundJobRunner {
         self
     }
 
+    pub fn with_shutdown(
+        mut self,
+        shutdown_token: ShutdownToken,
+        shutdown_timeout: Duration,
+    ) -> Self {
+        self.shutdown_token = Some(shutdown_token);
+        self.shutdown_timeout = shutdown_timeout.max(Duration::from_millis(1));
+        self
+    }
+
     pub fn snapshot(&self) -> BackgroundJobSnapshot {
         let mut jobs = self
             .jobs
@@ -213,9 +228,18 @@ impl BackgroundJobRunner {
             return Vec::new();
         }
 
+        if self.is_shutdown_requested() {
+            tracing::info!("background job scheduling skipped because shutdown is requested");
+            return Vec::new();
+        }
+
         let now = Utc::now();
         let mut runs = Vec::new();
         for job in self.jobs.values() {
+            if self.is_shutdown_requested() {
+                tracing::info!("background job scheduling stopped because shutdown is requested");
+                break;
+            }
             let definition = job.definition();
             if !definition.enabled || !self.state.is_due(&definition, now) {
                 continue;
@@ -234,6 +258,18 @@ impl BackgroundJobRunner {
 
     async fn run_job(&self, job: Arc<dyn BackgroundJob>) -> BackgroundJobRun {
         let kind = job.kind();
+        if self.is_shutdown_requested() {
+            let run = BackgroundJobRun::cancelled(kind, "shutdown requested");
+            tracing::warn!(
+                job_kind = %kind,
+                status = run.status.as_str(),
+                error_code = run.error_code.as_deref(),
+                "background job cancelled before start"
+            );
+            self.record_run(run.clone()).await;
+            return run;
+        }
+
         if !self.state.try_begin(kind) {
             let run = BackgroundJobRun::skipped(kind, "job is already running");
             tracing::warn!(
@@ -262,10 +298,16 @@ impl BackgroundJobRunner {
         let retry_policy = self.retry_policy.clone();
         let run = match timeout(
             job.interval(),
-            execute_background_job_with_retries(kind, &retry_policy, || {
-                let job = job.clone();
-                async move { job.run_once().await }
-            }),
+            execute_background_job_with_retries_and_shutdown(
+                kind,
+                &retry_policy,
+                self.shutdown_token.as_ref().map(ShutdownToken::child_token),
+                self.shutdown_timeout,
+                || {
+                    let job = job.clone();
+                    async move { job.run_once().await }
+                },
+            ),
         )
         .await
         {
@@ -376,6 +418,7 @@ impl BackgroundJobRunner {
                 tracing::info!(
                     job_kind = %kind,
                     owner_id = %self.lock_owner_id,
+                    shutdown_requested = self.is_shutdown_requested(),
                     "background job distributed lock released"
                 );
             }
@@ -447,9 +490,35 @@ impl BackgroundJobRunner {
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
-            ticker.tick().await;
-            let _ = self.run_due_once().await;
+            match &self.shutdown_token {
+                Some(token) => {
+                    tokio::select! {
+                        _ = token.cancelled() => {
+                            tracing::info!(
+                                timeout_seconds = self.shutdown_timeout.as_secs(),
+                                "background job runner shutdown started"
+                            );
+                            break;
+                        }
+                        _ = ticker.tick() => {
+                            let _ = self.run_due_once().await;
+                        }
+                    }
+                }
+                None => {
+                    ticker.tick().await;
+                    let _ = self.run_due_once().await;
+                }
+            }
         }
+
+        tracing::info!("background job runner stopped");
+    }
+
+    fn is_shutdown_requested(&self) -> bool {
+        self.shutdown_token
+            .as_ref()
+            .is_some_and(ShutdownToken::is_cancelled)
     }
 }
 
@@ -481,6 +550,14 @@ mod tests {
         fail_until_attempt: usize,
         error: MemcoreError,
         lock_store: Option<Arc<CapturingLockStore>>,
+    }
+
+    struct SlowJob {
+        kind: BackgroundJobKind,
+        enabled: bool,
+        interval: Duration,
+        runs: Arc<AtomicUsize>,
+        sleep_for: Duration,
     }
 
     #[derive(Debug, Default)]
@@ -668,6 +745,27 @@ mod tests {
             if attempt <= self.fail_until_attempt {
                 return Err(self.error.clone());
             }
+            Ok(BackgroundJobRun::running(self.kind).finish(BackgroundJobStatus::Succeeded))
+        }
+    }
+
+    #[async_trait]
+    impl BackgroundJob for SlowJob {
+        fn kind(&self) -> BackgroundJobKind {
+            self.kind
+        }
+
+        fn interval(&self) -> Duration {
+            self.interval
+        }
+
+        fn enabled(&self) -> bool {
+            self.enabled
+        }
+
+        async fn run_once(&self) -> MemcoreResult<BackgroundJobRun> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(self.sleep_for).await;
             Ok(BackgroundJobRun::running(self.kind).finish(BackgroundJobStatus::Succeeded))
         }
     }
@@ -1263,5 +1361,186 @@ mod tests {
         assert_eq!(runs.load(Ordering::SeqCst), 0);
         assert_eq!(lock_store.acquire_count.load(Ordering::SeqCst), 1);
         assert_eq!(lock_store.release_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn runner_exits_when_shutdown_token_is_cancelled() {
+        let token = ShutdownToken::new();
+        let runner = BackgroundJobRunner::new(true, Duration::from_secs(60), Vec::new())
+            .with_shutdown(token.child_token(), Duration::from_millis(10));
+
+        let handle = tokio::spawn(async move {
+            runner.run_forever().await;
+        });
+        token.cancel();
+
+        tokio::time::timeout(Duration::from_millis(100), handle)
+            .await
+            .expect("runner should exit after shutdown")
+            .expect("runner task should complete");
+    }
+
+    #[tokio::test]
+    async fn runner_does_not_start_new_jobs_after_shutdown() {
+        let token = ShutdownToken::new();
+        token.cancel();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runner = BackgroundJobRunner::new(
+            true,
+            Duration::from_millis(10),
+            vec![Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: true,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail: false,
+            })],
+        )
+        .with_shutdown(token, Duration::from_millis(10));
+
+        let result = runner.run_due_once().await;
+        assert!(result.is_empty());
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn running_job_can_finish_during_shutdown() {
+        let token = ShutdownToken::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runner = Arc::new(
+            BackgroundJobRunner::new(
+                false,
+                Duration::from_millis(10),
+                vec![Arc::new(SlowJob {
+                    kind: BackgroundJobKind::MemoryUsageSnapshot,
+                    enabled: false,
+                    interval: Duration::from_secs(1),
+                    runs: runs.clone(),
+                    sleep_for: Duration::from_millis(10),
+                })],
+            )
+            .with_shutdown(token.child_token(), Duration::from_millis(100)),
+        );
+
+        let runner_for_task = runner.clone();
+        let handle = tokio::spawn(async move {
+            runner_for_task
+                .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+                .await
+                .expect("manual run")
+        });
+        while runs.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        token.cancel();
+
+        let run = handle.await.expect("manual task should complete");
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_timeout_prevents_indefinite_job_wait() {
+        let token = ShutdownToken::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runner = Arc::new(
+            BackgroundJobRunner::new(
+                false,
+                Duration::from_millis(10),
+                vec![Arc::new(SlowJob {
+                    kind: BackgroundJobKind::MemoryUsageSnapshot,
+                    enabled: false,
+                    interval: Duration::from_secs(60),
+                    runs: runs.clone(),
+                    sleep_for: Duration::from_secs(60),
+                })],
+            )
+            .with_shutdown(token.child_token(), Duration::from_millis(5)),
+        );
+
+        let runner_for_task = runner.clone();
+        let handle = tokio::spawn(async move {
+            runner_for_task
+                .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+                .await
+                .expect("manual run")
+        });
+        while runs.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        token.cancel();
+
+        let run = tokio::time::timeout(Duration::from_millis(100), handle)
+            .await
+            .expect("shutdown timeout should stop waiting")
+            .expect("manual task should complete");
+        assert_eq!(run.status, BackgroundJobStatus::Cancelled);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_backoff_shutdown_records_cancelled_run_and_releases_lock() {
+        let token = ShutdownToken::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let run_store = Arc::new(CapturingRunStore::default());
+        let lock_store = Arc::new(CapturingLockStore::default());
+        let runner = Arc::new(
+            BackgroundJobRunner::new(
+                false,
+                Duration::from_millis(10),
+                vec![Arc::new(FlakyJob {
+                    kind: BackgroundJobKind::MemoryUsageSnapshot,
+                    enabled: false,
+                    interval: Duration::from_secs(60),
+                    runs: runs.clone(),
+                    fail_until_attempt: usize::MAX,
+                    error: MemcoreError::StorageError("service unavailable".to_string()),
+                    lock_store: Some(lock_store.clone()),
+                })],
+            )
+            .with_retry_policy(BackgroundJobRetryPolicy {
+                initial_backoff: Duration::from_secs(60),
+                max_backoff: Duration::from_secs(60),
+                jitter_enabled: false,
+                ..retry_policy(2)
+            })
+            .with_history_store(true, Some(run_store.clone()))
+            .with_lock_store(
+                true,
+                "owner-a",
+                Duration::from_secs(60),
+                Some(lock_store.clone()),
+            )
+            .with_shutdown(token.child_token(), Duration::from_millis(10)),
+        );
+
+        let runner_for_task = runner.clone();
+        let handle = tokio::spawn(async move {
+            runner_for_task
+                .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+                .await
+                .expect("manual run")
+        });
+        while runs.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        token.cancel();
+
+        let run = tokio::time::timeout(Duration::from_millis(100), handle)
+            .await
+            .expect("shutdown should interrupt retry backoff")
+            .expect("manual task should complete");
+        assert_eq!(run.status, BackgroundJobStatus::Cancelled);
+        assert_eq!(run.attempt_count, 1);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(lock_store.release_count.load(Ordering::SeqCst), 1);
+        assert!(lock_store.get_lock(run.kind).await.expect("lock").is_none());
+
+        let persisted = run_store
+            .runs
+            .lock()
+            .expect("capturing store mutex should not be poisoned");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].status, BackgroundJobStatus::Cancelled);
     }
 }
