@@ -50,9 +50,14 @@ pub use import::{
     ImportValidationIssueResponse, ImportValidationSummaryResponse,
 };
 pub use jobs::{
-    BackgroundJobDefinitionResponse, BackgroundJobRunResponse, BackgroundJobSnapshotResponse,
-    BackgroundJobsResponse, RunBackgroundJobResponse, background_jobs_response,
-    parse_background_job_kind, run_background_job_response,
+    ApplyBackgroundJobRunRetentionRequest, ApplyBackgroundJobRunRetentionResponse,
+    ApplyBackgroundJobRunRetentionSummaryResponse, BackgroundJobDefinitionResponse,
+    BackgroundJobRunResponse, BackgroundJobSnapshotResponse, BackgroundJobsResponse,
+    QueryBackgroundJobRunsParams, QueryBackgroundJobRunsResponse, RunBackgroundJobResponse,
+    background_job_run_retention_response, background_jobs_response,
+    background_jobs_response_with_persisted_runs, parse_background_job_kind,
+    query_background_job_runs_input, query_background_job_runs_response,
+    run_background_job_response,
 };
 pub use keyword_search::parse_keyword_query;
 pub use memories::{
@@ -64,6 +69,7 @@ pub use memories::{
 pub use memory_events::{
     ListMemoryEventsQuery, ListMemoryEventsResponse, MemoryEventItemResponse,
     MemoryEventOperationResponse, parse_event_date_filters, parse_memory_event_operation_label,
+    parse_optional_rfc3339_timestamp,
 };
 pub use provider_usage_retention::{
     ApplyProviderUsageRetentionRequest, ApplyProviderUsageRetentionResponse,

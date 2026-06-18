@@ -8,8 +8,8 @@ use memcore_api::{AppState, create_app};
 use memcore_common::hash_api_key;
 use memcore_config::{AuthMode, Settings};
 use memcore_core::{
-    ApiKeyRecord, ApiKeyScope, ProviderCallStatus, ProviderUsageCapability,
-    ProviderUsageEventRecord, ProviderUsageQuery,
+    ApiKeyRecord, ApiKeyScope, BackgroundJobKind, BackgroundJobStatus, ProviderCallStatus,
+    ProviderUsageCapability, ProviderUsageEventRecord, ProviderUsageQuery, StoredBackgroundJobRun,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -40,6 +40,19 @@ fn bearer_request(method: &str, uri: &str, org_id: &str, token: &str) -> Request
         .header("X-Organization-ID", org_id)
         .header("Authorization", format!("Bearer {token}"))
         .body(Body::empty())
+        .expect("request")
+}
+
+fn json_request(method: &str, uri: &str, org_id: &str, body: serde_json::Value) -> Request<Body> {
+    let bytes = serde_json::to_vec(&body).expect("json body");
+    let (name, value) = authorization_header();
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("X-Organization-ID", org_id)
+        .header(name, value)
+        .header("content-type", "application/json")
+        .body(Body::from(bytes))
         .expect("request")
 }
 
@@ -103,6 +116,24 @@ async fn get_jobs_requires_auth_and_org_header() {
 
     let (status, json, _) =
         response_parts(app, request("GET", "/api/v1/admin/jobs", None, true)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn get_job_runs_requires_auth_and_org_header() {
+    let app = create_app(AppState::new(Settings::default()));
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        request("GET", "/api/v1/admin/jobs/runs", Some(ORG_A), false),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(json["error"]["code"], "UNAUTHORIZED");
+
+    let (status, json, _) =
+        response_parts(app, request("GET", "/api/v1/admin/jobs/runs", None, true)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
 }
@@ -182,6 +213,199 @@ async fn manual_memory_snapshot_run_works_without_global_runner_enabled() {
 }
 
 #[tokio::test]
+async fn manual_job_run_is_persisted_and_queryable() {
+    let state = AppState::new(jobs_settings());
+    let app = create_app(state);
+
+    let (status, _, _) = response_parts(
+        app.clone(),
+        request(
+            "POST",
+            "/api/v1/admin/jobs/memory-usage-snapshot/run",
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, json, body) = response_parts(
+        app.clone(),
+        request(
+            "GET",
+            "/api/v1/admin/jobs/runs?kind=MemoryUsageSnapshot&status=Succeeded",
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["runs"].as_array().expect("runs").len(), 1);
+    assert_eq!(json["runs"][0]["kind"], "MemoryUsageSnapshot");
+    assert_eq!(json["runs"][0]["status"], "Succeeded");
+    assert!(!body.contains("Bearer"));
+    assert!(!body.contains("secret"));
+
+    let (status, json, _) =
+        response_parts(app, request("GET", "/api/v1/admin/jobs", Some(ORG_A), true)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        json["jobs"]["latest_persisted_runs"]
+            .as_array()
+            .expect("latest persisted runs")
+            .len()
+            >= 1
+    );
+}
+
+#[tokio::test]
+async fn job_run_history_filters_and_validation_work() {
+    let state = AppState::new(jobs_settings());
+    let store = state
+        .background_job_run_store
+        .clone()
+        .expect("history store should be configured");
+    let base = Utc::now();
+    store
+        .insert_run(test_job_run(
+            BackgroundJobKind::MemoryUsageSnapshot,
+            BackgroundJobStatus::Succeeded,
+            base - Duration::days(2),
+        ))
+        .await
+        .expect("insert old run");
+    store
+        .insert_run(test_job_run(
+            BackgroundJobKind::ProviderUsageRetention,
+            BackgroundJobStatus::Failed,
+            base,
+        ))
+        .await
+        .expect("insert latest run");
+
+    let app = create_app(state);
+    let created_after = (base - Duration::days(1)).to_rfc3339();
+    let uri = format!(
+        "/api/v1/admin/jobs/runs?status=Failed&created_after={}",
+        urlencoding_like(&created_after)
+    );
+    let (status, json, _) =
+        response_parts(app.clone(), request("GET", &uri, Some(ORG_A), true)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["runs"].as_array().expect("runs").len(), 1);
+    assert_eq!(json["runs"][0]["status"], "Failed");
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        request(
+            "GET",
+            "/api/v1/admin/jobs/runs?kind=not-a-job",
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        request(
+            "GET",
+            "/api/v1/admin/jobs/runs?status=not-a-status",
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+
+    let (status, json, _) = response_parts(
+        app,
+        request(
+            "GET",
+            "/api/v1/admin/jobs/runs?created_after=not-a-date",
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn job_run_history_retention_dry_run_and_apply_work() {
+    let state = AppState::new(jobs_settings());
+    let store = state
+        .background_job_run_store
+        .clone()
+        .expect("history store should be configured");
+    store
+        .insert_run(test_job_run(
+            BackgroundJobKind::MemoryUsageSnapshot,
+            BackgroundJobStatus::Succeeded,
+            Utc::now() - Duration::days(45),
+        ))
+        .await
+        .expect("old insert");
+    store
+        .insert_run(test_job_run(
+            BackgroundJobKind::MemoryUsageSnapshot,
+            BackgroundJobStatus::Succeeded,
+            Utc::now(),
+        ))
+        .await
+        .expect("new insert");
+
+    let app = create_app(state);
+    let (status, json, _) = response_parts(
+        app.clone(),
+        json_request(
+            "POST",
+            "/api/v1/admin/jobs/runs/retention/apply",
+            ORG_A,
+            serde_json::json!({ "dry_run": true, "retention_days": 30 }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["summary"]["matched_runs"], 1);
+    assert_eq!(json["summary"]["deleted_runs"], 0);
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        request("GET", "/api/v1/admin/jobs/runs", Some(ORG_A), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["runs"].as_array().expect("runs").len(), 2);
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        json_request(
+            "POST",
+            "/api/v1/admin/jobs/runs/retention/apply",
+            ORG_A,
+            serde_json::json!({ "dry_run": false, "retention_days": 30 }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["summary"]["deleted_runs"], 1);
+
+    let (status, json, _) = response_parts(
+        app,
+        request("GET", "/api/v1/admin/jobs/runs", Some(ORG_A), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["runs"].as_array().expect("runs").len(), 1);
+}
+
+#[tokio::test]
 async fn manual_provider_usage_retention_run_deletes_only_configured_org() {
     let mut settings = jobs_settings();
     settings.provider_usage_persistence_enabled = true;
@@ -258,7 +482,7 @@ async fn database_auth_scopes_are_enforced_for_job_endpoints() {
     assert_eq!(status, StatusCode::OK);
 
     let (status, json, _) = response_parts(
-        app,
+        app.clone(),
         bearer_request(
             "POST",
             "/api/v1/admin/jobs/memory-usage-snapshot/run",
@@ -269,6 +493,50 @@ async fn database_auth_scopes_are_enforced_for_job_endpoints() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(json["error"]["code"], "FORBIDDEN");
+
+    let (status, _, _) = response_parts(
+        app.clone(),
+        bearer_request("GET", "/api/v1/admin/jobs/runs", ORG_A, RAW_API_KEY),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, json, _) = response_parts(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/admin/jobs/runs/retention/apply")
+            .header("X-Organization-ID", ORG_A)
+            .header("Authorization", format!("Bearer {RAW_API_KEY}"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"dry_run":true}"#))
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(json["error"]["code"], "FORBIDDEN");
+}
+
+fn test_job_run(
+    kind: BackgroundJobKind,
+    status: BackgroundJobStatus,
+    started_at: chrono::DateTime<Utc>,
+) -> StoredBackgroundJobRun {
+    StoredBackgroundJobRun {
+        id: Uuid::new_v4(),
+        kind,
+        status,
+        started_at,
+        finished_at: Some(started_at + Duration::seconds(1)),
+        duration_ms: Some(1000),
+        error_code: None,
+        error_message: None,
+        metadata: Some(serde_json::json!({ "org_count": 1, "affected_count": 1 })),
+    }
+}
+
+fn urlencoding_like(value: &str) -> String {
+    value.replace(':', "%3A").replace('+', "%2B")
 }
 
 fn test_usage_event(org_id: &str, created_at: chrono::DateTime<Utc>) -> ProviderUsageEventRecord {

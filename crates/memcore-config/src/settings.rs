@@ -90,6 +90,9 @@ const MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS: &str =
 const MEMCORE_MEMORY_RETENTION_JOB_ENABLED: &str = "MEMCORE_MEMORY_RETENTION_JOB_ENABLED";
 const MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS: &str =
     "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS";
+const MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED: &str = "MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED";
+const MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS: &str =
+    "MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -325,6 +328,10 @@ pub struct Settings {
     pub memory_retention_job_enabled: bool,
     /// Memory retention job interval in seconds.
     pub memory_retention_job_interval_seconds: u64,
+    /// Persist background job run history to the configured storage backend.
+    pub background_job_history_enabled: bool,
+    /// Default background job run history retention window in days (`0` disables cleanup).
+    pub background_job_history_retention_days: u32,
 }
 
 impl Default for Settings {
@@ -408,6 +415,8 @@ impl Default for Settings {
             provider_usage_retention_job_interval_seconds: 86_400,
             memory_retention_job_enabled: false,
             memory_retention_job_interval_seconds: 86_400,
+            background_job_history_enabled: true,
+            background_job_history_retention_days: 30,
         }
     }
 }
@@ -631,6 +640,14 @@ impl Settings {
             MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS,
             defaults.memory_retention_job_interval_seconds,
         )?;
+        let background_job_history_enabled = parse_bool(
+            MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED,
+            defaults.background_job_history_enabled,
+        )?;
+        let background_job_history_retention_days = parse_u32(
+            MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS,
+            defaults.background_job_history_retention_days,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -717,6 +734,8 @@ impl Settings {
             provider_usage_retention_job_interval_seconds,
             memory_retention_job_enabled,
             memory_retention_job_interval_seconds,
+            background_job_history_enabled,
+            background_job_history_retention_days,
         };
 
         settings.validate()?;
@@ -883,6 +902,12 @@ impl Settings {
         if self.provider_usage_retention_days > 365_000 {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_PROVIDER_USAGE_RETENTION_DAYS is unreasonably large".to_string(),
+            ));
+        }
+
+        if self.background_job_history_retention_days > 365_000 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS is unreasonably large".to_string(),
             ));
         }
 
@@ -1407,6 +1432,8 @@ mod tests {
         "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS",
         "MEMCORE_MEMORY_RETENTION_JOB_ENABLED",
         "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS",
+        "MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED",
+        "MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1492,6 +1519,8 @@ mod tests {
         );
         assert!(!settings.memory_retention_job_enabled);
         assert_eq!(settings.memory_retention_job_interval_seconds, 86_400);
+        assert!(settings.background_job_history_enabled);
+        assert_eq!(settings.background_job_history_retention_days, 30);
     }
 
     #[test]
@@ -1515,6 +1544,8 @@ mod tests {
             );
             std::env::set_var("MEMCORE_MEMORY_RETENTION_JOB_ENABLED", "true");
             std::env::set_var("MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS", "30");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED", "false");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS", "45");
         }
 
         let settings = Settings::from_env().expect("background job settings should load");
@@ -1534,6 +1565,8 @@ mod tests {
         assert_eq!(settings.provider_usage_retention_job_interval_seconds, 20);
         assert!(settings.memory_retention_job_enabled);
         assert_eq!(settings.memory_retention_job_interval_seconds, 30);
+        assert!(!settings.background_job_history_enabled);
+        assert_eq!(settings.background_job_history_retention_days, 45);
     }
 
     #[test]
@@ -2095,6 +2128,37 @@ mod tests {
                 .to_string()
                 .contains("MEMCORE_PROVIDER_USAGE_RETENTION_DAYS must be a valid unsigned integer")
         );
+    }
+
+    #[test]
+    fn background_job_history_retention_zero_disables_cleanup() {
+        let settings = Settings {
+            background_job_history_retention_days: 0,
+            ..Settings::default()
+        };
+        assert_eq!(settings.background_job_history_retention_days, 0);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn fails_on_negative_background_job_history_retention_days() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS", "-1");
+        }
+
+        let error = Settings::from_env()
+            .expect_err("negative background job history retention days should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(error.to_string().contains(
+            "MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS must be a valid unsigned integer"
+        ));
     }
 
     #[test]

@@ -1,29 +1,33 @@
 use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
+use chrono::{Duration, Utc};
 use memcore_common::MemcoreError;
 use memcore_core::{
     ApiKeyScope, GetOrgQuotaStatusInput, ListOrgUsersInput, ProviderUsageDailyInput,
     ProviderUsageQuery, SearchOrgMemoryEventsInput, parse_optional_cursor,
-    validate_provider_usage_limit,
+    validate_background_job_run_limit, validate_provider_usage_limit,
 };
 use uuid::Uuid;
 
 use crate::dto::{
+    ApplyBackgroundJobRunRetentionRequest, ApplyBackgroundJobRunRetentionResponse,
     ContextCacheMetricsResponse, CreateMemoryUsageSnapshotRequest,
     CreateMemoryUsageSnapshotResponse, DeleteOrgPlanResponse, GetOrgPlanResponse,
     ListOrgUsersQuery, ListOrgUsersResponse, OrgQuotaStatusResponse, OrgQuotasQuery,
     OrgSummaryResponse, OrgUsageDashboardResponse, OrgUsageDateRangeQuery,
     ProviderUsageDailyQueryParams, ProviderUsageDailyResponse, ProviderUsageQueryParams,
-    ProviderUsageResponse, QueryMemoryUsageSnapshotsParams, QueryMemoryUsageSnapshotsResponse,
-    RunBackgroundJobResponse, SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse,
-    UpsertOrgPlanRequest, UpsertOrgPlanResponse, background_jobs_response,
-    context_cache_metrics_response, get_org_plan_response, org_quota_status_response,
-    org_summary_input, org_usage_dashboard_input, parse_background_job_kind,
-    parse_event_date_filters, parse_keyword_query, parse_memory_event_operation_label,
-    parse_org_usage_window, parse_provider_usage_capability, provider_usage_memory_response,
-    provider_usage_persisted_response, query_memory_usage_snapshots_input,
-    run_background_job_response, upsert_org_plan_response, validate_list_org_users_limit,
-    validate_search_org_memory_events_limit,
+    ProviderUsageResponse, QueryBackgroundJobRunsParams, QueryBackgroundJobRunsResponse,
+    QueryMemoryUsageSnapshotsParams, QueryMemoryUsageSnapshotsResponse, RunBackgroundJobResponse,
+    SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
+    UpsertOrgPlanResponse, background_job_run_retention_response, background_jobs_response,
+    background_jobs_response_with_persisted_runs, context_cache_metrics_response,
+    get_org_plan_response, org_quota_status_response, org_summary_input, org_usage_dashboard_input,
+    parse_background_job_kind, parse_event_date_filters, parse_keyword_query,
+    parse_memory_event_operation_label, parse_org_usage_window, parse_provider_usage_capability,
+    provider_usage_memory_response, provider_usage_persisted_response,
+    query_background_job_runs_input, query_background_job_runs_response,
+    query_memory_usage_snapshots_input, run_background_job_response, upsert_org_plan_response,
+    validate_list_org_users_limit, validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{ApiError, check_any_scope};
@@ -40,9 +44,37 @@ pub async fn get_background_jobs(
         &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
     )?;
 
-    Ok(Json(background_jobs_response(
-        state.background_jobs.snapshot(),
-    )))
+    let snapshot = state.background_jobs.snapshot();
+    if let Some(store) = &state.background_job_run_store {
+        let query = memcore_core::BackgroundJobRunQuery {
+            kind: None,
+            status: None,
+            created_after: None,
+            created_before: None,
+            limit: 10,
+            cursor: None,
+        };
+        match store.query_runs(query).await {
+            Ok(result) => {
+                tracing::info!(
+                    run_count = result.runs.len(),
+                    "background job history queried"
+                );
+                return Ok(Json(background_jobs_response_with_persisted_runs(
+                    snapshot,
+                    result.runs,
+                )));
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error_code = error.code(),
+                    "background job history query failed for jobs snapshot"
+                );
+            }
+        }
+    }
+
+    Ok(Json(background_jobs_response(snapshot)))
 }
 
 pub async fn run_background_job(
@@ -61,6 +93,96 @@ pub async fn run_background_job(
     let run = state.background_jobs.run_manual(kind).await?;
 
     Ok(Json(run_background_job_response(run)))
+}
+
+pub async fn query_background_job_runs(
+    State(state): State<AppState>,
+    Extension(_organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Query(params): Query<QueryBackgroundJobRunsParams>,
+) -> Result<Json<QueryBackgroundJobRunsResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    validate_background_job_run_limit(params.limit)?;
+    let query = query_background_job_runs_input(params)?;
+    let Some(store) = &state.background_job_run_store else {
+        return Ok(Json(query_background_job_runs_response(
+            memcore_core::BackgroundJobRunQueryResult {
+                runs: Vec::new(),
+                next_cursor: None,
+            },
+        )));
+    };
+
+    let result = store.query_runs(query).await?;
+    tracing::info!(
+        run_count = result.runs.len(),
+        "background job history queried"
+    );
+    Ok(Json(query_background_job_runs_response(result)))
+}
+
+pub async fn apply_background_job_run_retention(
+    State(state): State<AppState>,
+    Extension(_organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    body: Option<Json<ApplyBackgroundJobRunRetentionRequest>>,
+) -> Result<Json<ApplyBackgroundJobRunRetentionResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite],
+    )?;
+
+    let request =
+        body.map(|Json(request)| request)
+            .unwrap_or(ApplyBackgroundJobRunRetentionRequest {
+                dry_run: true,
+                retention_days: None,
+            });
+    let retention_days = request.retention_days(&state.settings);
+    let cutoff = Utc::now() - Duration::days(retention_days as i64);
+    if retention_days == 0 {
+        tracing::info!(
+            dry_run = request.dry_run,
+            deleted_count = 0usize,
+            "background job history cleanup skipped because retention is disabled"
+        );
+        return Ok(Json(background_job_run_retention_response(
+            request, cutoff, 0,
+        )));
+    }
+
+    let Some(store) = &state.background_job_run_store else {
+        return Ok(Json(background_job_run_retention_response(
+            request, cutoff, 0,
+        )));
+    };
+
+    let matched_or_deleted = store
+        .delete_runs_older_than(cutoff, request.dry_run)
+        .await?;
+    if request.dry_run {
+        tracing::info!(
+            dry_run = true,
+            deleted_count = 0usize,
+            "background job history cleanup dry-run"
+        );
+    } else {
+        tracing::info!(
+            dry_run = false,
+            deleted_count = matched_or_deleted,
+            "background job history cleanup applied"
+        );
+    }
+
+    Ok(Json(background_job_run_retention_response(
+        request,
+        cutoff,
+        matched_or_deleted,
+    )))
 }
 
 pub async fn get_org_summary(

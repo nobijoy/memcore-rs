@@ -84,16 +84,20 @@ pub use pagination::{
     page_fetch_limit, parse_optional_cursor,
 };
 pub use ports::{
-    ApiKeyListQuery, ApiKeyStore, DEFAULT_MEMORY_EVENT_LIST_LIMIT, DEFAULT_PROVIDER_USAGE_LIMIT,
-    EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MAX_MEMORY_EVENT_LIST_LIMIT, MAX_PROVIDER_USAGE_LIMIT, MemoryEventQuery,
-    MemoryEventStore, MemoryMessage, MemoryUsageSnapshotQuery, MemoryUsageSnapshotQueryResult,
+    ApiKeyListQuery, ApiKeyStore, BackgroundJobRunQuery, BackgroundJobRunQueryResult,
+    BackgroundJobRunStore, DEFAULT_BACKGROUND_JOB_RUN_LIMIT, DEFAULT_MEMORY_EVENT_LIST_LIMIT,
+    DEFAULT_PROVIDER_USAGE_LIMIT, EmbeddingProvider, FactClassificationInput, FactExtractionInput,
+    FactSearchQuery, FactStore, LlmProvider, MAX_BACKGROUND_JOB_RUN_LIMIT,
+    MAX_MEMORY_EVENT_LIST_LIMIT, MAX_PROVIDER_USAGE_LIMIT, MemoryEventQuery, MemoryEventStore,
+    MemoryMessage, MemoryUsageSnapshotQuery, MemoryUsageSnapshotQueryResult,
     MemoryUsageSnapshotStore, MessageRole, OrgMemoryEventQuery, OrgPlanStore, OrgUserListQuery,
     OrgUserSummary, ProviderCallStatus, ProviderUsageAttribution, ProviderUsageAttributionSlot,
     ProviderUsageCapability, ProviderUsageDailyQuery, ProviderUsageEventRecord,
     ProviderUsagePersistedSummary, ProviderUsageQuery, ProviderUsageQueryResult,
-    ProviderUsageStore, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery,
-    VectorSearchResult, VectorStore, validate_event_date_range, validate_provider_usage_limit,
+    ProviderUsageStore, RetentionPruneResult, StoredBackgroundJobRun, SummarizationInput,
+    VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
+    sanitize_background_job_error_message, validate_background_job_run_limit,
+    validate_event_date_range, validate_provider_usage_limit,
 };
 pub use privacy::PiiRedactor;
 pub use quota::{

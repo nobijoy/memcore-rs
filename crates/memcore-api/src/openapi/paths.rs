@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use crate::dto::{
-    AddMemoryRequest, AddMemoryResponse, ApplyProviderUsageRetentionRequest,
+    AddMemoryRequest, AddMemoryResponse, ApplyBackgroundJobRunRetentionRequest,
+    ApplyBackgroundJobRunRetentionResponse, ApplyProviderUsageRetentionRequest,
     ApplyProviderUsageRetentionResponse, ApplyRetentionRequest, ApplyRetentionResponse,
     BackgroundJobsResponse, BuildContextRequest, BuildContextResponse, ContextCacheMetricsResponse,
     CreateApiKeyRequest, CreateApiKeyResponse, CreateMemoryUsageSnapshotRequest,
@@ -11,9 +12,10 @@ use crate::dto::{
     ExportUserResponse, ForgetUserResponse, GetOrgPlanResponse, ImportUserDataRequest,
     ImportUserDataResponse, ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse,
     ListOrgUsersResponse, OrgQuotaStatusResponse, OrgSummaryResponse, OrgUsageDashboardResponse,
-    ProviderUsageDailyResponse, ProviderUsageResponse, QueryMemoryUsageSnapshotsResponse,
-    RevokeApiKeyResponse, RunBackgroundJobResponse, SearchMemoryRequest, SearchMemoryResponse,
-    SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest, UpsertOrgPlanResponse,
+    ProviderUsageDailyResponse, ProviderUsageResponse, QueryBackgroundJobRunsResponse,
+    QueryMemoryUsageSnapshotsResponse, RevokeApiKeyResponse, RunBackgroundJobResponse,
+    SearchMemoryRequest, SearchMemoryResponse, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
+    UpsertOrgPlanResponse,
 };
 use crate::response::ErrorBody;
 use crate::routes::health::{HealthResponse, ReadyResponse};
@@ -380,6 +382,52 @@ pub fn get_org_summary() {}
     )
 )]
 pub fn get_background_jobs() {}
+
+/// List persisted background job run history.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/jobs/runs",
+    tag = "Admin",
+    params(
+        ("kind" = Option<String>, Query, description = "Optional job kind filter"),
+        ("status" = Option<String>, Query, description = "Optional job status filter"),
+        ("created_after" = Option<String>, Query, description = "Optional RFC3339 lower bound on started_at"),
+        ("created_before" = Option<String>, Query, description = "Optional RFC3339 upper bound on started_at"),
+        ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Background job run history", body = QueryBackgroundJobRunsResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn query_background_job_runs() {}
+
+/// Apply retention cleanup to persisted background job run history only.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/jobs/runs/retention/apply",
+    tag = "Admin",
+    request_body = ApplyBackgroundJobRunRetentionRequest,
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Background job run history retention summary", body = ApplyBackgroundJobRunRetentionResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn apply_background_job_run_retention() {}
 
 /// Manually run one registered background job once.
 #[utoipa::path(

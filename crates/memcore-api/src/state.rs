@@ -10,11 +10,11 @@ use memcore_config::{
     LlmProviderKind, Settings, VectorBackend,
 };
 use memcore_core::{
-    ApiKeyStore, BackgroundJob, BackgroundJobRunner, ContextCacheConfig, EmbeddingProvider,
-    FactStore, InMemoryContextCache, LlmProvider, MemoryEngine, MemoryEventStore,
-    MemoryRetentionJob, MemoryUsageSnapshotJob, MemoryUsageSnapshotStore, OrgPlanStore,
-    OrgQuotaLimits, ProviderUsageAttributionSlot, ProviderUsageRetentionJob, ProviderUsageStore,
-    VectorStore,
+    ApiKeyStore, BackgroundJob, BackgroundJobRunStore, BackgroundJobRunner, ContextCacheConfig,
+    EmbeddingProvider, FactStore, InMemoryContextCache, LlmProvider, MemoryEngine,
+    MemoryEventStore, MemoryRetentionJob, MemoryUsageSnapshotJob, MemoryUsageSnapshotStore,
+    OrgPlanStore, OrgQuotaLimits, ProviderUsageAttributionSlot, ProviderUsageRetentionJob,
+    ProviderUsageStore, VectorStore,
 };
 use memcore_providers::{
     CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, OpenAiClient,
@@ -34,14 +34,16 @@ use memcore_storage::QdrantVectorStore;
 use memcore_storage::RedisContextCache;
 use memcore_storage::SqliteProviderUsageStore;
 use memcore_storage::{
-    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockMemoryUsageSnapshotStore,
-    MockOrgPlanStore, MockProviderUsageStore, MockVectorStore, SqliteApiKeyStore, SqliteFactStore,
-    SqliteMemoryEventStore, SqliteMemoryUsageSnapshotStore, SqliteOrgPlanStore,
+    MockApiKeyStore, MockBackgroundJobRunStore, MockFactStore, MockMemoryEventStore,
+    MockMemoryUsageSnapshotStore, MockOrgPlanStore, MockProviderUsageStore, MockVectorStore,
+    SqliteApiKeyStore, SqliteBackgroundJobRunStore, SqliteFactStore, SqliteMemoryEventStore,
+    SqliteMemoryUsageSnapshotStore, SqliteOrgPlanStore,
 };
 #[cfg(feature = "postgres")]
 use memcore_storage::{
-    PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore,
-    PostgresMemoryUsageSnapshotStore, PostgresOrgPlanStore, PostgresProviderUsageStore,
+    PostgresApiKeyStore, PostgresBackgroundJobRunStore, PostgresFactStore,
+    PostgresMemoryEventStore, PostgresMemoryUsageSnapshotStore, PostgresOrgPlanStore,
+    PostgresProviderUsageStore,
 };
 
 /// Default embedding dimensions for the mock embedding provider.
@@ -131,6 +133,37 @@ async fn create_provider_usage_store(
     }
 
     Ok(Arc::new(MockProviderUsageStore::new()))
+}
+
+async fn create_background_job_run_store(
+    settings: &Settings,
+) -> MemcoreResult<Option<Arc<dyn BackgroundJobRunStore>>> {
+    if !settings.background_job_history_enabled {
+        return Ok(None);
+    }
+
+    if settings.fact_backend == FactBackend::Postgres {
+        #[cfg(feature = "postgres")]
+        {
+            let url = require_postgres_url(settings)?;
+            let store = PostgresBackgroundJobRunStore::connect(&url).await?;
+            return Ok(Some(Arc::new(store)));
+        }
+        #[cfg(not(feature = "postgres"))]
+        {
+            return Err(MemcoreError::ValidationError(
+                "background job history with postgres requires the `postgres` cargo feature"
+                    .to_string(),
+            ));
+        }
+    }
+
+    if settings.fact_backend == FactBackend::Sqlite {
+        let store = SqliteBackgroundJobRunStore::connect(&settings.database_url).await?;
+        return Ok(Some(Arc::new(store)));
+    }
+
+    Ok(Some(Arc::new(MockBackgroundJobRunStore::new())))
 }
 
 fn provider_runtime(settings: &Settings) -> MemcoreResult<ProviderRuntime> {
@@ -290,6 +323,7 @@ pub struct AppState {
     pub provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
     pub org_plan_store: Arc<dyn OrgPlanStore>,
     pub background_jobs: Arc<BackgroundJobRunner>,
+    pub background_job_run_store: Option<Arc<dyn BackgroundJobRunStore>>,
 }
 
 impl AppState {
@@ -298,6 +332,7 @@ impl AppState {
         let wiring = ProviderWiring::from_settings(&settings).await?;
         let org_plan_store = create_org_plan_store(&settings).await?;
         let memory_usage_snapshot_store = create_memory_usage_snapshot_store(&settings).await?;
+        let background_job_run_store = create_background_job_run_store(&settings).await?;
         let memory_engine = Arc::new(
             create_memory_engine(
                 &settings,
@@ -310,6 +345,7 @@ impl AppState {
         let background_jobs = Arc::new(create_background_job_runner(
             &settings,
             memory_engine.clone(),
+            background_job_run_store.clone(),
         ));
         if settings.background_jobs_enabled {
             let runner = background_jobs.clone();
@@ -329,6 +365,7 @@ impl AppState {
             provider_usage_store: wiring.usage_store,
             org_plan_store,
             background_jobs,
+            background_job_run_store,
         })
     }
 
@@ -343,6 +380,11 @@ impl AppState {
             let wiring = ProviderWiring::for_mock_tests(&settings);
             let org_plan_store = Arc::new(MockOrgPlanStore::new());
             let memory_usage_snapshot_store = Arc::new(MockMemoryUsageSnapshotStore::new());
+            let background_job_run_store = if settings.background_job_history_enabled {
+                Some(Arc::new(MockBackgroundJobRunStore::new()) as Arc<dyn BackgroundJobRunStore>)
+            } else {
+                None
+            };
             let memory_engine = Arc::new(
                 create_mock_memory_engine_with_wiring_and_org_plan_store(
                     &settings,
@@ -355,6 +397,7 @@ impl AppState {
             let background_jobs = Arc::new(create_background_job_runner(
                 &settings,
                 memory_engine.clone(),
+                background_job_run_store.clone(),
             ));
             Self {
                 started_at: Utc::now(),
@@ -367,6 +410,7 @@ impl AppState {
                 provider_usage_store: wiring.usage_store,
                 org_plan_store,
                 background_jobs,
+                background_job_run_store,
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -390,7 +434,9 @@ impl AppState {
             background_jobs: Arc::new(create_background_job_runner(
                 &settings,
                 memory_engine.clone(),
+                None,
             )),
+            background_job_run_store: None,
         }
     }
 
@@ -412,7 +458,9 @@ impl AppState {
             background_jobs: Arc::new(create_background_job_runner(
                 &settings,
                 memory_engine.clone(),
+                None,
             )),
+            background_job_run_store: None,
         }
     }
 
@@ -435,7 +483,9 @@ impl AppState {
             background_jobs: Arc::new(create_background_job_runner(
                 &settings,
                 memory_engine.clone(),
+                None,
             )),
+            background_job_run_store: None,
         }
     }
 }
@@ -443,6 +493,7 @@ impl AppState {
 fn create_background_job_runner(
     settings: &Settings,
     memory_engine: Arc<MemoryEngine>,
+    background_job_run_store: Option<Arc<dyn BackgroundJobRunStore>>,
 ) -> BackgroundJobRunner {
     let org_ids = settings.background_job_org_ids.clone();
     let jobs: Vec<Arc<dyn BackgroundJob>> = vec![
@@ -469,6 +520,10 @@ fn create_background_job_runner(
         settings.background_jobs_enabled,
         Duration::from_secs(settings.background_job_runner_interval_seconds),
         jobs,
+    )
+    .with_history_store(
+        settings.background_job_history_enabled,
+        background_job_run_store,
     )
 }
 

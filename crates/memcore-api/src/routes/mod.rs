@@ -62,6 +62,14 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/api/v1/admin/org/summary", get(admin::get_org_summary))
         .route("/api/v1/admin/jobs", get(admin::get_background_jobs))
         .route(
+            "/api/v1/admin/jobs/runs",
+            get(admin::query_background_job_runs),
+        )
+        .route(
+            "/api/v1/admin/jobs/runs/retention/apply",
+            post(admin::apply_background_job_run_retention),
+        )
+        .route(
             "/api/v1/admin/jobs/{job_kind}/run",
             post(admin::run_background_job),
         )

@@ -80,6 +80,29 @@ impl BackgroundJobStatus {
     }
 }
 
+impl fmt::Display for BackgroundJobStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for BackgroundJobStatus {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> MemcoreResult<Self> {
+        match value.trim() {
+            "Idle" | "idle" => Ok(Self::Idle),
+            "Running" | "running" => Ok(Self::Running),
+            "Succeeded" | "succeeded" | "success" => Ok(Self::Succeeded),
+            "Failed" | "failed" | "error" => Ok(Self::Failed),
+            "Skipped" | "skipped" => Ok(Self::Skipped),
+            other => Err(MemcoreError::ValidationError(format!(
+                "invalid job status: {other}"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackgroundJobDefinition {
     pub kind: BackgroundJobKind,

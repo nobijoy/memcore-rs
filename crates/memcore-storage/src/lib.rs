@@ -1,4 +1,5 @@
 pub mod context_cache;
+pub mod jobs;
 pub mod keyword_search;
 #[cfg(feature = "lancedb")]
 pub mod lancedb;
@@ -22,6 +23,11 @@ pub use context_cache::RedisContextCache;
 pub use context_cache::{
     redis_context_cache_key, redis_context_index_key, sanitize_redis_url_for_display,
 };
+pub use jobs::MockBackgroundJobRunStore;
+#[cfg(feature = "postgres")]
+pub use jobs::PostgresBackgroundJobRunStore;
+#[cfg(feature = "sqlite")]
+pub use jobs::SqliteBackgroundJobRunStore;
 #[cfg(feature = "lancedb")]
 pub use lancedb::LanceDbVectorStore;
 pub use memory_usage::MockMemoryUsageSnapshotStore;
@@ -48,7 +54,7 @@ pub use queries::{FactSearchQuery, MemoryEventQuery};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore};
 pub use traits::{
-    ApiKeyStore, FactStore, MemoryEventStore, MemoryUsageSnapshotStore, OrgPlanStore,
-    ProviderUsageStore, VectorStore,
+    ApiKeyStore, BackgroundJobRunStore, FactStore, MemoryEventStore, MemoryUsageSnapshotStore,
+    OrgPlanStore, ProviderUsageStore, VectorStore,
 };
 pub use vector::{VectorRecord, VectorSearchQuery, VectorSearchResult};

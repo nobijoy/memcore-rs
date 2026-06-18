@@ -1,11 +1,16 @@
 use chrono::{DateTime, Utc};
 use memcore_common::MemcoreResult;
+use memcore_config::Settings;
 use memcore_core::{
-    BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobSnapshot,
+    BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobRunQuery,
+    BackgroundJobRunQueryResult, BackgroundJobSnapshot, BackgroundJobStatus,
+    DEFAULT_BACKGROUND_JOB_RUN_LIMIT, StoredBackgroundJobRun,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
+
+use crate::dto::parse_optional_rfc3339_timestamp;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BackgroundJobsResponse {
@@ -18,6 +23,8 @@ pub struct BackgroundJobSnapshotResponse {
     pub jobs_enabled: bool,
     pub jobs: Vec<BackgroundJobDefinitionResponse>,
     pub recent_runs: Vec<BackgroundJobRunResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_persisted_runs: Option<Vec<BackgroundJobRunResponse>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -47,6 +54,54 @@ pub struct RunBackgroundJobResponse {
     pub run: BackgroundJobRunResponse,
 }
 
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct QueryBackgroundJobRunsParams {
+    pub kind: Option<String>,
+    pub status: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    #[serde(default = "default_background_job_run_limit")]
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct QueryBackgroundJobRunsResponse {
+    pub status: &'static str,
+    pub runs: Vec<BackgroundJobRunResponse>,
+    pub next_cursor: Option<String>,
+}
+
+fn default_background_job_run_limit() -> usize {
+    DEFAULT_BACKGROUND_JOB_RUN_LIMIT
+}
+
+fn default_dry_run_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ApplyBackgroundJobRunRetentionRequest {
+    #[serde(default = "default_dry_run_true")]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub retention_days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ApplyBackgroundJobRunRetentionResponse {
+    pub status: &'static str,
+    pub summary: ApplyBackgroundJobRunRetentionSummaryResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ApplyBackgroundJobRunRetentionSummaryResponse {
+    pub dry_run: bool,
+    pub matched_runs: usize,
+    pub deleted_runs: usize,
+    pub cutoff: DateTime<Utc>,
+}
+
 impl From<BackgroundJobDefinition> for BackgroundJobDefinitionResponse {
     fn from(definition: BackgroundJobDefinition) -> Self {
         Self {
@@ -74,6 +129,12 @@ impl From<BackgroundJobRun> for BackgroundJobRunResponse {
     }
 }
 
+impl From<StoredBackgroundJobRun> for BackgroundJobRunResponse {
+    fn from(run: StoredBackgroundJobRun) -> Self {
+        BackgroundJobRunResponse::from(BackgroundJobRun::from(&run))
+    }
+}
+
 impl From<BackgroundJobSnapshot> for BackgroundJobSnapshotResponse {
     fn from(snapshot: BackgroundJobSnapshot) -> Self {
         Self {
@@ -88,6 +149,7 @@ impl From<BackgroundJobSnapshot> for BackgroundJobSnapshotResponse {
                 .into_iter()
                 .map(BackgroundJobRunResponse::from)
                 .collect(),
+            latest_persisted_runs: None,
         }
     }
 }
@@ -96,6 +158,23 @@ pub fn background_jobs_response(snapshot: BackgroundJobSnapshot) -> BackgroundJo
     BackgroundJobsResponse {
         status: "success",
         jobs: BackgroundJobSnapshotResponse::from(snapshot),
+    }
+}
+
+pub fn background_jobs_response_with_persisted_runs(
+    snapshot: BackgroundJobSnapshot,
+    latest_persisted_runs: Vec<StoredBackgroundJobRun>,
+) -> BackgroundJobsResponse {
+    let mut jobs = BackgroundJobSnapshotResponse::from(snapshot);
+    jobs.latest_persisted_runs = Some(
+        latest_persisted_runs
+            .into_iter()
+            .map(BackgroundJobRunResponse::from)
+            .collect(),
+    );
+    BackgroundJobsResponse {
+        status: "success",
+        jobs,
     }
 }
 
@@ -108,4 +187,89 @@ pub fn run_background_job_response(run: BackgroundJobRun) -> RunBackgroundJobRes
 
 pub fn parse_background_job_kind(value: &str) -> MemcoreResult<BackgroundJobKind> {
     value.parse()
+}
+
+pub fn parse_background_job_status(value: &str) -> MemcoreResult<BackgroundJobStatus> {
+    value.parse()
+}
+
+pub fn query_background_job_runs_input(
+    params: QueryBackgroundJobRunsParams,
+) -> MemcoreResult<BackgroundJobRunQuery> {
+    let kind = params
+        .kind
+        .as_deref()
+        .map(parse_background_job_kind)
+        .transpose()?;
+    let status = params
+        .status
+        .as_deref()
+        .map(parse_background_job_status)
+        .transpose()?;
+    let created_after =
+        parse_optional_rfc3339_timestamp(params.created_after.as_ref(), "created_after")?;
+    let created_before =
+        parse_optional_rfc3339_timestamp(params.created_before.as_ref(), "created_before")?;
+    if let (Some(after), Some(before)) = (created_after, created_before) {
+        if after >= before {
+            return Err(memcore_common::MemcoreError::ValidationError(
+                "created_after must be earlier than created_before".to_string(),
+            ));
+        }
+    }
+
+    Ok(BackgroundJobRunQuery {
+        kind,
+        status,
+        created_after,
+        created_before,
+        limit: params.limit,
+        cursor: memcore_core::parse_optional_cursor(params.cursor)?,
+    })
+}
+
+pub fn query_background_job_runs_response(
+    result: BackgroundJobRunQueryResult,
+) -> QueryBackgroundJobRunsResponse {
+    QueryBackgroundJobRunsResponse {
+        status: "success",
+        runs: result
+            .runs
+            .into_iter()
+            .map(BackgroundJobRunResponse::from)
+            .collect(),
+        next_cursor: result.next_cursor,
+    }
+}
+
+pub fn resolve_background_job_history_retention_days(
+    override_days: Option<u32>,
+    default_days: u32,
+) -> u32 {
+    override_days.unwrap_or(default_days)
+}
+
+impl ApplyBackgroundJobRunRetentionRequest {
+    pub fn retention_days(&self, settings: &Settings) -> u32 {
+        resolve_background_job_history_retention_days(
+            self.retention_days,
+            settings.background_job_history_retention_days,
+        )
+    }
+}
+
+pub fn background_job_run_retention_response(
+    request: ApplyBackgroundJobRunRetentionRequest,
+    cutoff: DateTime<Utc>,
+    matched_runs: usize,
+) -> ApplyBackgroundJobRunRetentionResponse {
+    ApplyBackgroundJobRunRetentionResponse {
+        status: "success",
+        summary: ApplyBackgroundJobRunRetentionSummaryResponse {
+            dry_run: request.dry_run,
+            matched_runs,
+            deleted_runs: if request.dry_run { 0 } else { matched_runs },
+            cutoff,
+        },
+    }
 }

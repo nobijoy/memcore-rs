@@ -11,6 +11,7 @@ use super::types::{
     BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobSnapshot,
     BackgroundJobStatus,
 };
+use crate::ports::{BackgroundJobRunStore, StoredBackgroundJobRun};
 
 const DEFAULT_RECENT_RUN_LIMIT: usize = 100;
 
@@ -112,6 +113,8 @@ pub struct BackgroundJobRunner {
     runner_interval: Duration,
     jobs: HashMap<BackgroundJobKind, Arc<dyn BackgroundJob>>,
     state: Arc<InMemoryBackgroundJobState>,
+    history_enabled: bool,
+    run_store: Option<Arc<dyn BackgroundJobRunStore>>,
 }
 
 impl BackgroundJobRunner {
@@ -139,7 +142,19 @@ impl BackgroundJobRunner {
             runner_interval,
             jobs: jobs.into_iter().map(|job| (job.kind(), job)).collect(),
             state,
+            history_enabled: false,
+            run_store: None,
         }
+    }
+
+    pub fn with_history_store(
+        mut self,
+        history_enabled: bool,
+        run_store: Option<Arc<dyn BackgroundJobRunStore>>,
+    ) -> Self {
+        self.history_enabled = history_enabled;
+        self.run_store = run_store;
+        self
     }
 
     pub fn snapshot(&self) -> BackgroundJobSnapshot {
@@ -194,7 +209,7 @@ impl BackgroundJobRunner {
                 status = BackgroundJobStatus::Skipped.as_str(),
                 "background job overlapping run skipped"
             );
-            self.state.record_run(run.clone());
+            self.record_run(run.clone()).await;
             return run;
         }
 
@@ -219,8 +234,42 @@ impl BackgroundJobRunner {
             error_code = run.error_code.as_deref(),
             "background job finished"
         );
-        self.state.record_run(run.clone());
+        self.record_run(run.clone()).await;
         run
+    }
+
+    async fn record_run(&self, run: BackgroundJobRun) {
+        self.state.record_run(run.clone());
+        if !self.history_enabled {
+            return;
+        }
+
+        let Some(store) = &self.run_store else {
+            return;
+        };
+
+        let stored = StoredBackgroundJobRun::from(run.clone());
+        match store.insert_run(stored).await {
+            Ok(_) => {
+                tracing::info!(
+                    job_kind = %run.kind,
+                    status = run.status.as_str(),
+                    duration_ms = run.duration_ms,
+                    run_id = %run.id,
+                    "background job run persisted"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    job_kind = %run.kind,
+                    status = run.status.as_str(),
+                    duration_ms = run.duration_ms,
+                    run_id = %run.id,
+                    error_code = error.code(),
+                    "background job history persistence failed"
+                );
+            }
+        }
     }
 
     pub async fn run_forever(&self) {
@@ -251,6 +300,10 @@ mod tests {
     use async_trait::async_trait;
 
     use super::*;
+    use crate::ports::{
+        BackgroundJobRunQuery, BackgroundJobRunQueryResult, BackgroundJobRunStore,
+        StoredBackgroundJobRun,
+    };
 
     struct TestJob {
         kind: BackgroundJobKind,
@@ -258,6 +311,53 @@ mod tests {
         interval: Duration,
         runs: Arc<AtomicUsize>,
         fail: bool,
+    }
+
+    #[derive(Debug, Default)]
+    struct CapturingRunStore {
+        runs: Mutex<Vec<StoredBackgroundJobRun>>,
+        fail_insert: bool,
+    }
+
+    #[async_trait]
+    impl BackgroundJobRunStore for CapturingRunStore {
+        async fn insert_run(
+            &self,
+            run: StoredBackgroundJobRun,
+        ) -> MemcoreResult<StoredBackgroundJobRun> {
+            if self.fail_insert {
+                return Err(MemcoreError::StorageError(
+                    "test persistence failure".to_string(),
+                ));
+            }
+            self.runs
+                .lock()
+                .expect("capturing store mutex should not be poisoned")
+                .push(run.clone());
+            Ok(run)
+        }
+
+        async fn query_runs(
+            &self,
+            _query: BackgroundJobRunQuery,
+        ) -> MemcoreResult<BackgroundJobRunQueryResult> {
+            Ok(BackgroundJobRunQueryResult {
+                runs: self
+                    .runs
+                    .lock()
+                    .expect("capturing store mutex should not be poisoned")
+                    .clone(),
+                next_cursor: None,
+            })
+        }
+
+        async fn delete_runs_older_than(
+            &self,
+            _cutoff: DateTime<Utc>,
+            _dry_run: bool,
+        ) -> MemcoreResult<usize> {
+            Ok(0)
+        }
     }
 
     #[async_trait]
@@ -441,5 +541,98 @@ mod tests {
             .expect("manual run should work");
         assert_eq!(run.status, BackgroundJobStatus::Succeeded);
         assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn successful_manual_run_is_persisted_when_history_store_is_configured() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let store = Arc::new(CapturingRunStore::default());
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail: false,
+            })],
+        )
+        .with_history_store(true, Some(store.clone()));
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run should work");
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(
+            store
+                .runs
+                .lock()
+                .expect("capturing store mutex should not be poisoned")
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn skipped_overlap_run_is_persisted() {
+        let store = Arc::new(CapturingRunStore::default());
+        let runner = BackgroundJobRunner::new(true, Duration::from_millis(10), Vec::new())
+            .with_history_store(true, Some(store.clone()));
+        assert!(
+            runner
+                .state
+                .try_begin(BackgroundJobKind::MemoryUsageSnapshot)
+        );
+
+        let run = runner
+            .run_job(Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: true,
+                interval: Duration::from_secs(1),
+                runs: Arc::new(AtomicUsize::new(0)),
+                fail: false,
+            }))
+            .await;
+
+        assert_eq!(run.status, BackgroundJobStatus::Skipped);
+        assert_eq!(
+            store
+                .runs
+                .lock()
+                .expect("capturing store mutex should not be poisoned")
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn persistence_failure_does_not_fail_job_execution_or_memory_state() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let store = Arc::new(CapturingRunStore {
+            runs: Mutex::new(Vec::new()),
+            fail_insert: true,
+        });
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs,
+                fail: false,
+            })],
+        )
+        .with_history_store(true, Some(store));
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("job execution should not fail due to persistence");
+
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(runner.snapshot().recent_runs.len(), 1);
     }
 }
