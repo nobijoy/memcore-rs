@@ -6,7 +6,10 @@ use async_trait::async_trait;
 use crate::{ApplyProviderUsageRetentionInput, CreateMemoryUsageSnapshotInput, MemoryEngine};
 use memcore_common::MemcoreResult;
 
-use super::{BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobStatus};
+use super::{
+    BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobStatus,
+    is_retryable_job_error,
+};
 
 #[async_trait]
 pub trait BackgroundJob: Send + Sync {
@@ -75,6 +78,8 @@ impl BackgroundJob for MemoryUsageSnapshotJob {
         }
 
         let mut failures = 0u64;
+        let mut successes = 0u64;
+        let mut first_retryable_error = None;
         for org_id in &self.org_ids {
             match self
                 .engine
@@ -84,9 +89,15 @@ impl BackgroundJob for MemoryUsageSnapshotJob {
                 })
                 .await
             {
-                Ok(_) => run.affected_count += 1,
+                Ok(_) => {
+                    successes += 1;
+                    run.affected_count += 1;
+                }
                 Err(error) => {
                     failures += 1;
+                    if first_retryable_error.is_none() && is_retryable_job_error(&error) {
+                        first_retryable_error = Some(error.clone());
+                    }
                     tracing::warn!(
                         job_kind = %self.kind(),
                         org_id = %org_id,
@@ -98,6 +109,11 @@ impl BackgroundJob for MemoryUsageSnapshotJob {
         }
 
         if failures > 0 {
+            if successes == 0 {
+                if let Some(error) = first_retryable_error {
+                    return Err(error);
+                }
+            }
             run.error_code = Some("PARTIAL_FAILURE".to_string());
             run.error_message = Some(format!("{failures} organization(s) failed"));
             return Ok(run.finish(BackgroundJobStatus::Failed));
@@ -166,6 +182,8 @@ impl BackgroundJob for ProviderUsageRetentionJob {
         }
 
         let mut failures = 0u64;
+        let mut successes = 0u64;
+        let mut first_retryable_error = None;
         for org_id in &self.org_ids {
             match self
                 .engine
@@ -176,9 +194,15 @@ impl BackgroundJob for ProviderUsageRetentionJob {
                 })
                 .await
             {
-                Ok(output) => run.affected_count += output.deleted_events as u64,
+                Ok(output) => {
+                    successes += 1;
+                    run.affected_count += output.deleted_events as u64;
+                }
                 Err(error) => {
                     failures += 1;
+                    if first_retryable_error.is_none() && is_retryable_job_error(&error) {
+                        first_retryable_error = Some(error.clone());
+                    }
                     tracing::warn!(
                         job_kind = %self.kind(),
                         org_id = %org_id,
@@ -190,6 +214,11 @@ impl BackgroundJob for ProviderUsageRetentionJob {
         }
 
         if failures > 0 {
+            if successes == 0 {
+                if let Some(error) = first_retryable_error {
+                    return Err(error);
+                }
+            }
             run.error_code = Some("PARTIAL_FAILURE".to_string());
             run.error_message = Some(format!("{failures} organization(s) failed"));
             return Ok(run.finish(BackgroundJobStatus::Failed));

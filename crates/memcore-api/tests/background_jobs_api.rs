@@ -81,6 +81,13 @@ fn jobs_settings() -> Settings {
     settings
 }
 
+fn locked_jobs_settings() -> Settings {
+    let mut settings = jobs_settings();
+    settings.background_job_lock_enabled = true;
+    settings.background_job_lock_owner_id = Some("instance-a".to_string());
+    settings
+}
+
 fn database_auth_settings() -> Settings {
     let mut settings = Settings::sqlite_memory();
     settings.auth_mode = AuthMode::Database;
@@ -157,6 +164,53 @@ async fn get_jobs_returns_disabled_defaults() {
 }
 
 #[tokio::test]
+async fn lock_owner_id_is_generated_when_empty() {
+    let mut settings = jobs_settings();
+    settings.background_job_lock_enabled = true;
+    settings.background_job_lock_owner_id = None;
+    let state = AppState::new(settings);
+
+    let owner_id = state
+        .background_job_lock_owner_id
+        .as_deref()
+        .expect("owner id should be generated");
+    assert!(Uuid::parse_str(owner_id).is_ok());
+}
+
+#[tokio::test]
+async fn get_jobs_shows_lock_status_when_enabled() {
+    let state = AppState::new(locked_jobs_settings());
+    let store = state
+        .background_job_lock_store
+        .clone()
+        .expect("lock store should be configured");
+    store
+        .try_acquire_lock(
+            BackgroundJobKind::MemoryUsageSnapshot,
+            "instance-a",
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        .expect("lock acquire");
+    let app = create_app(state);
+
+    let (status, json, body) =
+        response_parts(app, request("GET", "/api/v1/admin/jobs", Some(ORG_A), true)).await;
+    assert_eq!(status, StatusCode::OK);
+    let memory_job = json["jobs"]["jobs"]
+        .as_array()
+        .expect("jobs")
+        .iter()
+        .find(|job| job["kind"] == "MemoryUsageSnapshot")
+        .expect("memory job");
+    assert_eq!(memory_job["lock"]["enabled"], true);
+    assert_eq!(memory_job["lock"]["owner_id"], "instance-a");
+    assert_eq!(memory_job["lock"]["is_locked"], true);
+    assert!(!body.contains("Bearer"));
+    assert!(!body.contains("secret"));
+}
+
+#[tokio::test]
 async fn invalid_job_kind_returns_validation_error() {
     let app = create_app(AppState::new(Settings::default()));
     let (status, json, _) = response_parts(
@@ -194,6 +248,9 @@ async fn manual_memory_snapshot_run_works_without_global_runner_enabled() {
     assert_eq!(json["run"]["kind"], "MemoryUsageSnapshot");
     assert_eq!(json["run"]["status"], "Succeeded");
     assert_eq!(json["run"]["affected_count"], 1);
+    assert_eq!(json["run"]["attempt_count"], 1);
+    assert_eq!(json["run"]["max_attempts"], 3);
+    assert_eq!(json["run"]["retried"], false);
     assert!(!body.contains("secret"));
     assert!(!body.contains("Bearer"));
 
@@ -210,6 +267,41 @@ async fn manual_memory_snapshot_run_works_without_global_runner_enabled() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["snapshots"].as_array().expect("snapshots").len(), 1);
+}
+
+#[tokio::test]
+async fn manual_job_run_is_skipped_when_distributed_lock_is_held_by_another_owner() {
+    let state = AppState::new(locked_jobs_settings());
+    let store = state
+        .background_job_lock_store
+        .clone()
+        .expect("lock store should be configured");
+    store
+        .try_acquire_lock(
+            BackgroundJobKind::MemoryUsageSnapshot,
+            "instance-b",
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        .expect("other owner acquire");
+    let app = create_app(state);
+
+    let (status, json, body) = response_parts(
+        app,
+        request(
+            "POST",
+            "/api/v1/admin/jobs/memory-usage-snapshot/run",
+            Some(ORG_A),
+            true,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["run"]["status"], "Skipped");
+    assert_eq!(json["run"]["error_code"], "JOB_ALREADY_RUNNING");
+    assert!(!body.contains("secret"));
+    assert!(!body.contains("Bearer"));
 }
 
 #[tokio::test]
@@ -244,6 +336,8 @@ async fn manual_job_run_is_persisted_and_queryable() {
     assert_eq!(json["runs"].as_array().expect("runs").len(), 1);
     assert_eq!(json["runs"][0]["kind"], "MemoryUsageSnapshot");
     assert_eq!(json["runs"][0]["status"], "Succeeded");
+    assert_eq!(json["runs"][0]["attempt_count"], 1);
+    assert_eq!(json["runs"][0]["retried"], false);
     assert!(!body.contains("Bearer"));
     assert!(!body.contains("secret"));
 
@@ -529,6 +623,9 @@ fn test_job_run(
         started_at,
         finished_at: Some(started_at + Duration::seconds(1)),
         duration_ms: Some(1000),
+        attempt_count: 1,
+        max_attempts: 1,
+        retried: false,
         error_code: None,
         error_message: None,
         metadata: Some(serde_json::json!({ "org_count": 1, "affected_count": 1 })),

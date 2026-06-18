@@ -23,11 +23,11 @@ pub use context_cache::RedisContextCache;
 pub use context_cache::{
     redis_context_cache_key, redis_context_index_key, sanitize_redis_url_for_display,
 };
-pub use jobs::MockBackgroundJobRunStore;
+pub use jobs::{MockBackgroundJobLockStore, MockBackgroundJobRunStore};
 #[cfg(feature = "postgres")]
-pub use jobs::PostgresBackgroundJobRunStore;
+pub use jobs::{PostgresBackgroundJobLockStore, PostgresBackgroundJobRunStore};
 #[cfg(feature = "sqlite")]
-pub use jobs::SqliteBackgroundJobRunStore;
+pub use jobs::{SqliteBackgroundJobLockStore, SqliteBackgroundJobRunStore};
 #[cfg(feature = "lancedb")]
 pub use lancedb::LanceDbVectorStore;
 pub use memory_usage::MockMemoryUsageSnapshotStore;
@@ -54,7 +54,7 @@ pub use queries::{FactSearchQuery, MemoryEventQuery};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore};
 pub use traits::{
-    ApiKeyStore, BackgroundJobRunStore, FactStore, MemoryEventStore, MemoryUsageSnapshotStore,
-    OrgPlanStore, ProviderUsageStore, VectorStore,
+    ApiKeyStore, BackgroundJobLockStore, BackgroundJobRunStore, FactStore, MemoryEventStore,
+    MemoryUsageSnapshotStore, OrgPlanStore, ProviderUsageStore, VectorStore,
 };
 pub use vector::{VectorRecord, VectorSearchQuery, VectorSearchResult};

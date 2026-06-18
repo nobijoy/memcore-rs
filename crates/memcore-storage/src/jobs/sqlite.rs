@@ -86,6 +86,22 @@ fn row_to_run(row: &SqliteRow) -> MemcoreResult<StoredBackgroundJobRun> {
             .ok()
             .flatten()
             .map(|value| value as u64),
+        attempt_count: row
+            .try_get::<i64, _>("attempt_count")
+            .ok()
+            .filter(|value| *value > 0)
+            .map(|value| value as usize)
+            .unwrap_or(1),
+        max_attempts: row
+            .try_get::<i64, _>("max_attempts")
+            .ok()
+            .filter(|value| *value > 0)
+            .map(|value| value as usize)
+            .unwrap_or(1),
+        retried: row
+            .try_get::<bool, _>("retried")
+            .or_else(|_| row.try_get::<i64, _>("retried").map(|value| value != 0))
+            .unwrap_or(false),
         error_code: row.try_get("error_code").ok(),
         error_message: row.try_get("error_message").ok(),
         metadata: metadata_from_str(row.try_get("metadata").ok())?,
@@ -157,8 +173,9 @@ impl BackgroundJobRunStore for SqliteBackgroundJobRunStore {
             r#"
             INSERT INTO background_job_runs (
                 id, kind, status, started_at, finished_at, duration_ms,
+                attempt_count, max_attempts, retried,
                 error_code, error_message, metadata, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(run.id.to_string())
@@ -167,6 +184,9 @@ impl BackgroundJobRunStore for SqliteBackgroundJobRunStore {
         .bind(datetime_to_str(run.started_at))
         .bind(run.finished_at.map(datetime_to_str))
         .bind(run.duration_ms.map(|value| value as i64))
+        .bind(run.attempt_count as i64)
+        .bind(run.max_attempts as i64)
+        .bind(run.retried)
         .bind(run.error_code.as_deref())
         .bind(run.error_message.as_deref())
         .bind(metadata_to_str(&run.metadata)?)
@@ -184,7 +204,7 @@ impl BackgroundJobRunStore for SqliteBackgroundJobRunStore {
     ) -> MemcoreResult<BackgroundJobRunQueryResult> {
         let limit = validate_background_job_run_limit(query.limit)?;
         let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT id, kind, status, started_at, finished_at, duration_ms, error_code, error_message, metadata FROM background_job_runs",
+            "SELECT id, kind, status, started_at, finished_at, duration_ms, attempt_count, max_attempts, retried, error_code, error_message, metadata FROM background_job_runs",
         );
         push_filters(&mut builder, &query);
 
@@ -274,6 +294,9 @@ mod tests {
             started_at,
             finished_at: Some(started_at + Duration::seconds(1)),
             duration_ms: Some(1000),
+            attempt_count: 1,
+            max_attempts: 1,
+            retried: false,
             error_code: Some("SAFE_ERROR".to_string()),
             error_message: Some("safe error only".to_string()),
             metadata: Some(json!({ "org_count": 1, "affected_count": 2 })),

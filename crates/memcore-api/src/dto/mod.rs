@@ -52,10 +52,11 @@ pub use import::{
 pub use jobs::{
     ApplyBackgroundJobRunRetentionRequest, ApplyBackgroundJobRunRetentionResponse,
     ApplyBackgroundJobRunRetentionSummaryResponse, BackgroundJobDefinitionResponse,
-    BackgroundJobRunResponse, BackgroundJobSnapshotResponse, BackgroundJobsResponse,
-    QueryBackgroundJobRunsParams, QueryBackgroundJobRunsResponse, RunBackgroundJobResponse,
-    background_job_run_retention_response, background_jobs_response,
-    background_jobs_response_with_persisted_runs, parse_background_job_kind,
+    BackgroundJobLockStatusResponse, BackgroundJobRunResponse, BackgroundJobSnapshotResponse,
+    BackgroundJobsResponse, QueryBackgroundJobRunsParams, QueryBackgroundJobRunsResponse,
+    RunBackgroundJobResponse, background_job_run_retention_response, background_jobs_response,
+    background_jobs_response_with_persisted_runs,
+    background_jobs_response_with_persisted_runs_and_locks, parse_background_job_kind,
     query_background_job_runs_input, query_background_job_runs_response,
     run_background_job_response,
 };

@@ -20,7 +20,7 @@ use crate::dto::{
     QueryMemoryUsageSnapshotsParams, QueryMemoryUsageSnapshotsResponse, RunBackgroundJobResponse,
     SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
     UpsertOrgPlanResponse, background_job_run_retention_response, background_jobs_response,
-    background_jobs_response_with_persisted_runs, context_cache_metrics_response,
+    background_jobs_response_with_persisted_runs_and_locks, context_cache_metrics_response,
     get_org_plan_response, org_quota_status_response, org_summary_input, org_usage_dashboard_input,
     parse_background_job_kind, parse_event_date_filters, parse_keyword_query,
     parse_memory_event_operation_label, parse_org_usage_window, parse_provider_usage_capability,
@@ -45,6 +45,7 @@ pub async fn get_background_jobs(
     )?;
 
     let snapshot = state.background_jobs.snapshot();
+    let mut latest_persisted_runs = None;
     if let Some(store) = &state.background_job_run_store {
         let query = memcore_core::BackgroundJobRunQuery {
             kind: None,
@@ -60,10 +61,7 @@ pub async fn get_background_jobs(
                     run_count = result.runs.len(),
                     "background job history queried"
                 );
-                return Ok(Json(background_jobs_response_with_persisted_runs(
-                    snapshot,
-                    result.runs,
-                )));
+                latest_persisted_runs = Some(result.runs);
             }
             Err(error) => {
                 tracing::warn!(
@@ -72,6 +70,44 @@ pub async fn get_background_jobs(
                 );
             }
         }
+    }
+
+    if state.settings.background_job_lock_enabled {
+        let mut lock_statuses = Vec::new();
+        if let Some(store) = &state.background_job_lock_store {
+            for definition in &snapshot.jobs {
+                match store.get_lock(definition.kind).await {
+                    Ok(lock) => lock_statuses.push((definition.kind, lock)),
+                    Err(error) => {
+                        tracing::warn!(
+                            job_kind = %definition.kind,
+                            error_code = error.code(),
+                            "background job lock status query failed"
+                        );
+                        lock_statuses.push((definition.kind, None));
+                    }
+                }
+            }
+        }
+        return Ok(Json(
+            background_jobs_response_with_persisted_runs_and_locks(
+                snapshot,
+                latest_persisted_runs,
+                true,
+                lock_statuses,
+            ),
+        ));
+    }
+
+    if let Some(runs) = latest_persisted_runs {
+        return Ok(Json(
+            background_jobs_response_with_persisted_runs_and_locks(
+                snapshot,
+                Some(runs),
+                false,
+                Vec::new(),
+            ),
+        ));
     }
 
     Ok(Json(background_jobs_response(snapshot)))

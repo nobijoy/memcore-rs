@@ -93,6 +93,17 @@ const MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS: &str =
 const MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED: &str = "MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED";
 const MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS: &str =
     "MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS";
+const MEMCORE_BACKGROUND_JOB_LOCK_ENABLED: &str = "MEMCORE_BACKGROUND_JOB_LOCK_ENABLED";
+const MEMCORE_BACKGROUND_JOB_LOCK_BACKEND: &str = "MEMCORE_BACKGROUND_JOB_LOCK_BACKEND";
+const MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS: &str = "MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS";
+const MEMCORE_BACKGROUND_JOB_LOCK_OWNER_ID: &str = "MEMCORE_BACKGROUND_JOB_LOCK_OWNER_ID";
+const MEMCORE_BACKGROUND_JOB_RETRIES_ENABLED: &str = "MEMCORE_BACKGROUND_JOB_RETRIES_ENABLED";
+const MEMCORE_BACKGROUND_JOB_MAX_RETRIES: &str = "MEMCORE_BACKGROUND_JOB_MAX_RETRIES";
+const MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS: &str = "MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS";
+const MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS: &str = "MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS";
+const MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER: &str = "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER";
+const MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED: &str =
+    "MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -106,6 +117,11 @@ pub enum ContextCacheBackend {
     Disabled,
     Memory,
     Redis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundJobLockBackend {
+    Database,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -332,6 +348,26 @@ pub struct Settings {
     pub background_job_history_enabled: bool,
     /// Default background job run history retention window in days (`0` disables cleanup).
     pub background_job_history_retention_days: u32,
+    /// Enable distributed background job locks.
+    pub background_job_lock_enabled: bool,
+    /// Distributed background job lock backend.
+    pub background_job_lock_backend: BackgroundJobLockBackend,
+    /// Distributed background job lock TTL in seconds.
+    pub background_job_lock_ttl_seconds: u64,
+    /// Optional lock owner id. Empty means API bootstrap generates one.
+    pub background_job_lock_owner_id: Option<String>,
+    /// Enable bounded in-process retries for failed background jobs.
+    pub background_job_retries_enabled: bool,
+    /// Maximum retry attempts after the initial background job attempt.
+    pub background_job_max_retries: usize,
+    /// Initial background job retry backoff in milliseconds.
+    pub background_job_initial_backoff_ms: u64,
+    /// Maximum background job retry backoff in milliseconds.
+    pub background_job_max_backoff_ms: u64,
+    /// Exponential backoff multiplier between background job retries.
+    pub background_job_backoff_multiplier: f32,
+    /// Apply simple jitter to background job retry backoff delays.
+    pub background_job_retry_jitter_enabled: bool,
 }
 
 impl Default for Settings {
@@ -417,6 +453,16 @@ impl Default for Settings {
             memory_retention_job_interval_seconds: 86_400,
             background_job_history_enabled: true,
             background_job_history_retention_days: 30,
+            background_job_lock_enabled: false,
+            background_job_lock_backend: BackgroundJobLockBackend::Database,
+            background_job_lock_ttl_seconds: 300,
+            background_job_lock_owner_id: None,
+            background_job_retries_enabled: true,
+            background_job_max_retries: 2,
+            background_job_initial_backoff_ms: 500,
+            background_job_max_backoff_ms: 5000,
+            background_job_backoff_multiplier: 2.0,
+            background_job_retry_jitter_enabled: true,
         }
     }
 }
@@ -648,6 +694,45 @@ impl Settings {
             MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS,
             defaults.background_job_history_retention_days,
         )?;
+        let background_job_lock_enabled = parse_bool(
+            MEMCORE_BACKGROUND_JOB_LOCK_ENABLED,
+            defaults.background_job_lock_enabled,
+        )?;
+        let background_job_lock_backend = BackgroundJobLockBackend::from_str(&read_env_or(
+            MEMCORE_BACKGROUND_JOB_LOCK_BACKEND,
+            "database",
+        ))?;
+        let background_job_lock_ttl_seconds = parse_u64(
+            MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS,
+            defaults.background_job_lock_ttl_seconds,
+        )?;
+        let background_job_lock_owner_id = read_env_optional(MEMCORE_BACKGROUND_JOB_LOCK_OWNER_ID)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let background_job_retries_enabled = parse_bool(
+            MEMCORE_BACKGROUND_JOB_RETRIES_ENABLED,
+            defaults.background_job_retries_enabled,
+        )?;
+        let background_job_max_retries = parse_usize(
+            MEMCORE_BACKGROUND_JOB_MAX_RETRIES,
+            defaults.background_job_max_retries,
+        )?;
+        let background_job_initial_backoff_ms = parse_u64(
+            MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS,
+            defaults.background_job_initial_backoff_ms,
+        )?;
+        let background_job_max_backoff_ms = parse_u64(
+            MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS,
+            defaults.background_job_max_backoff_ms,
+        )?;
+        let background_job_backoff_multiplier = parse_f32(
+            MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER,
+            defaults.background_job_backoff_multiplier,
+        )?;
+        let background_job_retry_jitter_enabled = parse_bool(
+            MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED,
+            defaults.background_job_retry_jitter_enabled,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -736,6 +821,16 @@ impl Settings {
             memory_retention_job_interval_seconds,
             background_job_history_enabled,
             background_job_history_retention_days,
+            background_job_lock_enabled,
+            background_job_lock_backend,
+            background_job_lock_ttl_seconds,
+            background_job_lock_owner_id,
+            background_job_retries_enabled,
+            background_job_max_retries,
+            background_job_initial_backoff_ms,
+            background_job_max_backoff_ms,
+            background_job_backoff_multiplier,
+            background_job_retry_jitter_enabled,
         };
 
         settings.validate()?;
@@ -934,6 +1029,29 @@ impl Settings {
         if self.memory_retention_job_interval_seconds == 0 {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.background_job_lock_ttl_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.background_job_initial_backoff_ms == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS must be greater than 0".to_string(),
+            ));
+        }
+        if self.background_job_max_backoff_ms < self.background_job_initial_backoff_ms {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS must be >= MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS"
+                    .to_string(),
+            ));
+        }
+        if self.background_job_backoff_multiplier < 1.0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER must be >= 1.0".to_string(),
             ));
         }
 
@@ -1304,6 +1422,19 @@ impl FromStr for ContextCacheBackend {
     }
 }
 
+impl FromStr for BackgroundJobLockBackend {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "database" => Ok(Self::Database),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_BACKGROUND_JOB_LOCK_BACKEND value: {value}"
+            ))),
+        }
+    }
+}
+
 impl FromStr for AuthMode {
     type Err = MemcoreError;
 
@@ -1434,6 +1565,16 @@ mod tests {
         "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS",
         "MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED",
         "MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS",
+        "MEMCORE_BACKGROUND_JOB_LOCK_ENABLED",
+        "MEMCORE_BACKGROUND_JOB_LOCK_BACKEND",
+        "MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS",
+        "MEMCORE_BACKGROUND_JOB_LOCK_OWNER_ID",
+        "MEMCORE_BACKGROUND_JOB_RETRIES_ENABLED",
+        "MEMCORE_BACKGROUND_JOB_MAX_RETRIES",
+        "MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS",
+        "MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS",
+        "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER",
+        "MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1521,6 +1662,19 @@ mod tests {
         assert_eq!(settings.memory_retention_job_interval_seconds, 86_400);
         assert!(settings.background_job_history_enabled);
         assert_eq!(settings.background_job_history_retention_days, 30);
+        assert!(!settings.background_job_lock_enabled);
+        assert_eq!(
+            settings.background_job_lock_backend,
+            super::BackgroundJobLockBackend::Database
+        );
+        assert_eq!(settings.background_job_lock_ttl_seconds, 300);
+        assert!(settings.background_job_lock_owner_id.is_none());
+        assert!(settings.background_job_retries_enabled);
+        assert_eq!(settings.background_job_max_retries, 2);
+        assert_eq!(settings.background_job_initial_backoff_ms, 500);
+        assert_eq!(settings.background_job_max_backoff_ms, 5000);
+        assert!((settings.background_job_backoff_multiplier - 2.0).abs() < f32::EPSILON);
+        assert!(settings.background_job_retry_jitter_enabled);
     }
 
     #[test]
@@ -1546,6 +1700,16 @@ mod tests {
             std::env::set_var("MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS", "30");
             std::env::set_var("MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED", "false");
             std::env::set_var("MEMCORE_BACKGROUND_JOB_HISTORY_RETENTION_DAYS", "45");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_LOCK_ENABLED", "true");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_LOCK_BACKEND", "database");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS", "120");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_LOCK_OWNER_ID", "instance-a");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_RETRIES_ENABLED", "false");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_MAX_RETRIES", "0");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS", "100");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS", "500");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER", "1.5");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_RETRY_JITTER_ENABLED", "false");
         }
 
         let settings = Settings::from_env().expect("background job settings should load");
@@ -1567,6 +1731,22 @@ mod tests {
         assert_eq!(settings.memory_retention_job_interval_seconds, 30);
         assert!(!settings.background_job_history_enabled);
         assert_eq!(settings.background_job_history_retention_days, 45);
+        assert!(settings.background_job_lock_enabled);
+        assert_eq!(
+            settings.background_job_lock_backend,
+            super::BackgroundJobLockBackend::Database
+        );
+        assert_eq!(settings.background_job_lock_ttl_seconds, 120);
+        assert_eq!(
+            settings.background_job_lock_owner_id.as_deref(),
+            Some("instance-a")
+        );
+        assert!(!settings.background_job_retries_enabled);
+        assert_eq!(settings.background_job_max_retries, 0);
+        assert_eq!(settings.background_job_initial_backoff_ms, 100);
+        assert_eq!(settings.background_job_max_backoff_ms, 500);
+        assert!((settings.background_job_backoff_multiplier - 1.5).abs() < f32::EPSILON);
+        assert!(!settings.background_job_retry_jitter_enabled);
     }
 
     #[test]
@@ -1576,6 +1756,7 @@ mod tests {
             "MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS",
             "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS",
             "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS",
+            "MEMCORE_BACKGROUND_JOB_LOCK_TTL_SECONDS",
         ] {
             let _lock = env_test_lock()
                 .lock()
@@ -1593,6 +1774,66 @@ mod tests {
                 "unexpected error for {key}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn invalid_background_job_retry_config_fails_validation() {
+        for (key, value, expected) in [
+            (
+                "MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS",
+                "0",
+                "MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS must be greater than 0",
+            ),
+            (
+                "MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS",
+                "100",
+                "MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS must be >= MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS",
+            ),
+            (
+                "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER",
+                "0.5",
+                "MEMCORE_BACKGROUND_JOB_BACKOFF_MULTIPLIER must be >= 1.0",
+            ),
+        ] {
+            let _lock = env_test_lock()
+                .lock()
+                .expect("env test lock should not be poisoned");
+            let _guard = EnvGuard::new();
+            clear_env();
+
+            unsafe {
+                std::env::set_var("MEMCORE_BACKGROUND_JOB_INITIAL_BACKOFF_MS", "500");
+                std::env::set_var("MEMCORE_BACKGROUND_JOB_MAX_BACKOFF_MS", "5000");
+                std::env::set_var(key, value);
+            }
+
+            let error = Settings::from_env().expect_err("invalid retry config should fail");
+            assert!(
+                error.to_string().contains(expected),
+                "unexpected error for {key}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_background_job_lock_backend_fails_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_LOCK_BACKEND", "redis");
+        }
+
+        let error = Settings::from_env().expect_err("invalid backend should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid MEMCORE_BACKGROUND_JOB_LOCK_BACKEND value")
+        );
     }
 
     #[test]

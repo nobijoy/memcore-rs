@@ -6,15 +6,15 @@ use crate::observability::Metrics;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
-    AuthMode, ContextCacheBackend, EmbeddingProviderKind, EventBackend, FactBackend,
-    LlmProviderKind, Settings, VectorBackend,
+    AuthMode, BackgroundJobLockBackend, ContextCacheBackend, EmbeddingProviderKind, EventBackend,
+    FactBackend, LlmProviderKind, Settings, VectorBackend,
 };
 use memcore_core::{
-    ApiKeyStore, BackgroundJob, BackgroundJobRunStore, BackgroundJobRunner, ContextCacheConfig,
-    EmbeddingProvider, FactStore, InMemoryContextCache, LlmProvider, MemoryEngine,
-    MemoryEventStore, MemoryRetentionJob, MemoryUsageSnapshotJob, MemoryUsageSnapshotStore,
-    OrgPlanStore, OrgQuotaLimits, ProviderUsageAttributionSlot, ProviderUsageRetentionJob,
-    ProviderUsageStore, VectorStore,
+    ApiKeyStore, BackgroundJob, BackgroundJobLockStore, BackgroundJobRetryPolicy,
+    BackgroundJobRunStore, BackgroundJobRunner, ContextCacheConfig, EmbeddingProvider, FactStore,
+    InMemoryContextCache, LlmProvider, MemoryEngine, MemoryEventStore, MemoryRetentionJob,
+    MemoryUsageSnapshotJob, MemoryUsageSnapshotStore, OrgPlanStore, OrgQuotaLimits,
+    ProviderUsageAttributionSlot, ProviderUsageRetentionJob, ProviderUsageStore, VectorStore,
 };
 use memcore_providers::{
     CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, OpenAiClient,
@@ -34,16 +34,16 @@ use memcore_storage::QdrantVectorStore;
 use memcore_storage::RedisContextCache;
 use memcore_storage::SqliteProviderUsageStore;
 use memcore_storage::{
-    MockApiKeyStore, MockBackgroundJobRunStore, MockFactStore, MockMemoryEventStore,
-    MockMemoryUsageSnapshotStore, MockOrgPlanStore, MockProviderUsageStore, MockVectorStore,
-    SqliteApiKeyStore, SqliteBackgroundJobRunStore, SqliteFactStore, SqliteMemoryEventStore,
-    SqliteMemoryUsageSnapshotStore, SqliteOrgPlanStore,
+    MockApiKeyStore, MockBackgroundJobLockStore, MockBackgroundJobRunStore, MockFactStore,
+    MockMemoryEventStore, MockMemoryUsageSnapshotStore, MockOrgPlanStore, MockProviderUsageStore,
+    MockVectorStore, SqliteApiKeyStore, SqliteBackgroundJobLockStore, SqliteBackgroundJobRunStore,
+    SqliteFactStore, SqliteMemoryEventStore, SqliteMemoryUsageSnapshotStore, SqliteOrgPlanStore,
 };
 #[cfg(feature = "postgres")]
 use memcore_storage::{
-    PostgresApiKeyStore, PostgresBackgroundJobRunStore, PostgresFactStore,
-    PostgresMemoryEventStore, PostgresMemoryUsageSnapshotStore, PostgresOrgPlanStore,
-    PostgresProviderUsageStore,
+    PostgresApiKeyStore, PostgresBackgroundJobLockStore, PostgresBackgroundJobRunStore,
+    PostgresFactStore, PostgresMemoryEventStore, PostgresMemoryUsageSnapshotStore,
+    PostgresOrgPlanStore, PostgresProviderUsageStore,
 };
 
 /// Default embedding dimensions for the mock embedding provider.
@@ -164,6 +164,48 @@ async fn create_background_job_run_store(
     }
 
     Ok(Some(Arc::new(MockBackgroundJobRunStore::new())))
+}
+
+async fn create_background_job_lock_store(
+    settings: &Settings,
+) -> MemcoreResult<Option<Arc<dyn BackgroundJobLockStore>>> {
+    if !settings.background_job_lock_enabled {
+        return Ok(None);
+    }
+
+    match settings.background_job_lock_backend {
+        BackgroundJobLockBackend::Database => {}
+    }
+
+    if settings.fact_backend == FactBackend::Postgres {
+        #[cfg(feature = "postgres")]
+        {
+            let url = require_postgres_url(settings)?;
+            let store = PostgresBackgroundJobLockStore::connect(&url).await?;
+            return Ok(Some(Arc::new(store)));
+        }
+        #[cfg(not(feature = "postgres"))]
+        {
+            return Err(MemcoreError::ValidationError(
+                "background job locks with postgres require the `postgres` cargo feature"
+                    .to_string(),
+            ));
+        }
+    }
+
+    if settings.fact_backend == FactBackend::Sqlite {
+        let store = SqliteBackgroundJobLockStore::connect(&settings.database_url).await?;
+        return Ok(Some(Arc::new(store)));
+    }
+
+    Ok(Some(Arc::new(MockBackgroundJobLockStore::new())))
+}
+
+fn background_job_lock_owner_id(settings: &Settings) -> String {
+    settings
+        .background_job_lock_owner_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
 }
 
 fn provider_runtime(settings: &Settings) -> MemcoreResult<ProviderRuntime> {
@@ -324,6 +366,8 @@ pub struct AppState {
     pub org_plan_store: Arc<dyn OrgPlanStore>,
     pub background_jobs: Arc<BackgroundJobRunner>,
     pub background_job_run_store: Option<Arc<dyn BackgroundJobRunStore>>,
+    pub background_job_lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
+    pub background_job_lock_owner_id: Option<String>,
 }
 
 impl AppState {
@@ -333,6 +377,10 @@ impl AppState {
         let org_plan_store = create_org_plan_store(&settings).await?;
         let memory_usage_snapshot_store = create_memory_usage_snapshot_store(&settings).await?;
         let background_job_run_store = create_background_job_run_store(&settings).await?;
+        let background_job_lock_store = create_background_job_lock_store(&settings).await?;
+        let background_job_lock_owner_id = settings
+            .background_job_lock_enabled
+            .then(|| background_job_lock_owner_id(&settings));
         let memory_engine = Arc::new(
             create_memory_engine(
                 &settings,
@@ -346,6 +394,8 @@ impl AppState {
             &settings,
             memory_engine.clone(),
             background_job_run_store.clone(),
+            background_job_lock_store.clone(),
+            background_job_lock_owner_id.clone(),
         ));
         if settings.background_jobs_enabled {
             let runner = background_jobs.clone();
@@ -366,6 +416,8 @@ impl AppState {
             org_plan_store,
             background_jobs,
             background_job_run_store,
+            background_job_lock_store,
+            background_job_lock_owner_id,
         })
     }
 
@@ -385,6 +437,14 @@ impl AppState {
             } else {
                 None
             };
+            let background_job_lock_store = if settings.background_job_lock_enabled {
+                Some(Arc::new(MockBackgroundJobLockStore::new()) as Arc<dyn BackgroundJobLockStore>)
+            } else {
+                None
+            };
+            let background_job_lock_owner_id = settings
+                .background_job_lock_enabled
+                .then(|| background_job_lock_owner_id(&settings));
             let memory_engine = Arc::new(
                 create_mock_memory_engine_with_wiring_and_org_plan_store(
                     &settings,
@@ -398,6 +458,8 @@ impl AppState {
                 &settings,
                 memory_engine.clone(),
                 background_job_run_store.clone(),
+                background_job_lock_store.clone(),
+                background_job_lock_owner_id.clone(),
             ));
             Self {
                 started_at: Utc::now(),
@@ -411,6 +473,8 @@ impl AppState {
                 org_plan_store,
                 background_jobs,
                 background_job_run_store,
+                background_job_lock_store,
+                background_job_lock_owner_id,
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -435,8 +499,12 @@ impl AppState {
                 &settings,
                 memory_engine.clone(),
                 None,
+                None,
+                None,
             )),
             background_job_run_store: None,
+            background_job_lock_store: None,
+            background_job_lock_owner_id: None,
         }
     }
 
@@ -459,8 +527,12 @@ impl AppState {
                 &settings,
                 memory_engine.clone(),
                 None,
+                None,
+                None,
             )),
             background_job_run_store: None,
+            background_job_lock_store: None,
+            background_job_lock_owner_id: None,
         }
     }
 
@@ -484,8 +556,12 @@ impl AppState {
                 &settings,
                 memory_engine.clone(),
                 None,
+                None,
+                None,
             )),
             background_job_run_store: None,
+            background_job_lock_store: None,
+            background_job_lock_owner_id: None,
         }
     }
 }
@@ -494,6 +570,8 @@ fn create_background_job_runner(
     settings: &Settings,
     memory_engine: Arc<MemoryEngine>,
     background_job_run_store: Option<Arc<dyn BackgroundJobRunStore>>,
+    background_job_lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
+    background_job_lock_owner_id: Option<String>,
 ) -> BackgroundJobRunner {
     let org_ids = settings.background_job_org_ids.clone();
     let jobs: Vec<Arc<dyn BackgroundJob>> = vec![
@@ -525,6 +603,13 @@ fn create_background_job_runner(
         settings.background_job_history_enabled,
         background_job_run_store,
     )
+    .with_lock_store(
+        settings.background_job_lock_enabled,
+        background_job_lock_owner_id.unwrap_or_default(),
+        Duration::from_secs(settings.background_job_lock_ttl_seconds),
+        background_job_lock_store,
+    )
+    .with_retry_policy(background_job_retry_policy(settings))
 }
 
 fn create_rate_limiter(settings: &Settings) -> Arc<RateLimiter> {
@@ -781,6 +866,17 @@ fn provider_execution_policy(settings: &Settings) -> MemcoreResult<ProviderExecu
         settings.provider_backoff_multiplier,
         settings.provider_retry_jitter_enabled,
     )
+}
+
+fn background_job_retry_policy(settings: &Settings) -> BackgroundJobRetryPolicy {
+    BackgroundJobRetryPolicy {
+        enabled: settings.background_job_retries_enabled,
+        max_retries: settings.background_job_max_retries,
+        initial_backoff: Duration::from_millis(settings.background_job_initial_backoff_ms),
+        max_backoff: Duration::from_millis(settings.background_job_max_backoff_ms),
+        backoff_multiplier: settings.background_job_backoff_multiplier,
+        jitter_enabled: settings.background_job_retry_jitter_enabled,
+    }
 }
 
 fn create_llm_provider(

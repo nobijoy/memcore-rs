@@ -4,7 +4,7 @@ use memcore_config::Settings;
 use memcore_core::{
     BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobRunQuery,
     BackgroundJobRunQueryResult, BackgroundJobSnapshot, BackgroundJobStatus,
-    DEFAULT_BACKGROUND_JOB_RUN_LIMIT, StoredBackgroundJobRun,
+    DEFAULT_BACKGROUND_JOB_RUN_LIMIT, JobLockRecord, StoredBackgroundJobRun,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -32,6 +32,16 @@ pub struct BackgroundJobDefinitionResponse {
     pub kind: String,
     pub enabled: bool,
     pub interval_seconds: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lock: Option<BackgroundJobLockStatusResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct BackgroundJobLockStatusResponse {
+    pub enabled: bool,
+    pub owner_id: Option<String>,
+    pub locked_until: Option<DateTime<Utc>>,
+    pub is_locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -42,6 +52,9 @@ pub struct BackgroundJobRunResponse {
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
+    pub attempt_count: usize,
+    pub max_attempts: usize,
+    pub retried: bool,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub org_count: u64,
@@ -108,6 +121,7 @@ impl From<BackgroundJobDefinition> for BackgroundJobDefinitionResponse {
             kind: definition.kind.as_str().to_string(),
             enabled: definition.enabled,
             interval_seconds: definition.interval.as_secs(),
+            lock: None,
         }
     }
 }
@@ -121,6 +135,9 @@ impl From<BackgroundJobRun> for BackgroundJobRunResponse {
             started_at: run.started_at,
             finished_at: run.finished_at,
             duration_ms: run.duration_ms,
+            attempt_count: run.attempt_count,
+            max_attempts: run.max_attempts,
+            retried: run.retried,
             error_code: run.error_code,
             error_message: run.error_message,
             org_count: run.org_count,
@@ -172,6 +189,47 @@ pub fn background_jobs_response_with_persisted_runs(
             .map(BackgroundJobRunResponse::from)
             .collect(),
     );
+    BackgroundJobsResponse {
+        status: "success",
+        jobs,
+    }
+}
+
+pub fn background_jobs_response_with_persisted_runs_and_locks(
+    snapshot: BackgroundJobSnapshot,
+    latest_persisted_runs: Option<Vec<StoredBackgroundJobRun>>,
+    locks_enabled: bool,
+    lock_statuses: Vec<(BackgroundJobKind, Option<JobLockRecord>)>,
+) -> BackgroundJobsResponse {
+    let mut jobs = BackgroundJobSnapshotResponse::from(snapshot);
+    if let Some(runs) = latest_persisted_runs {
+        jobs.latest_persisted_runs = Some(
+            runs.into_iter()
+                .map(BackgroundJobRunResponse::from)
+                .collect(),
+        );
+    }
+
+    if locks_enabled {
+        for job in &mut jobs.jobs {
+            let kind = parse_background_job_kind(&job.kind).ok();
+            let lock = kind.and_then(|kind| {
+                lock_statuses
+                    .iter()
+                    .find(|(lock_kind, _)| *lock_kind == kind)
+                    .and_then(|(_, lock)| lock.clone())
+            });
+            job.lock = Some(BackgroundJobLockStatusResponse {
+                enabled: true,
+                owner_id: lock.as_ref().map(|lock| lock.owner_id.clone()),
+                locked_until: lock.as_ref().map(|lock| lock.locked_until),
+                is_locked: lock
+                    .as_ref()
+                    .is_some_and(|lock| lock.locked_until > Utc::now()),
+            });
+        }
+    }
+
     BackgroundJobsResponse {
         status: "success",
         jobs,

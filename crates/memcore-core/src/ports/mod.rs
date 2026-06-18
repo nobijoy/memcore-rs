@@ -1,4 +1,5 @@
 pub mod api_key_store;
+pub mod background_job_lock_store;
 pub mod background_job_run_store;
 pub mod event_store;
 pub mod memory_usage_snapshot_store;
@@ -8,6 +9,9 @@ pub mod provider_usage;
 pub mod storage;
 
 pub use api_key_store::{ApiKeyListQuery, ApiKeyStore};
+pub use background_job_lock_store::{
+    AcquiredJobLock, BackgroundJobLockStore, JobLockKey, JobLockRecord, lock_until_from_ttl,
+};
 pub use background_job_run_store::{
     BackgroundJobRunQuery, BackgroundJobRunQueryResult, BackgroundJobRunStore,
     DEFAULT_BACKGROUND_JOB_RUN_LIMIT, MAX_BACKGROUND_JOB_RUN_LIMIT, StoredBackgroundJobRun,

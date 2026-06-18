@@ -7,11 +7,14 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use tokio::time::{MissedTickBehavior, interval, timeout};
 
 use super::registry::BackgroundJob;
+use super::retry::{BackgroundJobRetryPolicy, execute_background_job_with_retries};
 use super::types::{
     BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun, BackgroundJobSnapshot,
     BackgroundJobStatus,
 };
-use crate::ports::{BackgroundJobRunStore, StoredBackgroundJobRun};
+use crate::ports::{
+    AcquiredJobLock, BackgroundJobLockStore, BackgroundJobRunStore, StoredBackgroundJobRun,
+};
 
 const DEFAULT_RECENT_RUN_LIMIT: usize = 100;
 
@@ -115,6 +118,11 @@ pub struct BackgroundJobRunner {
     state: Arc<InMemoryBackgroundJobState>,
     history_enabled: bool,
     run_store: Option<Arc<dyn BackgroundJobRunStore>>,
+    lock_enabled: bool,
+    lock_owner_id: String,
+    lock_ttl: Duration,
+    lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
+    retry_policy: BackgroundJobRetryPolicy,
 }
 
 impl BackgroundJobRunner {
@@ -144,6 +152,11 @@ impl BackgroundJobRunner {
             state,
             history_enabled: false,
             run_store: None,
+            lock_enabled: false,
+            lock_owner_id: String::new(),
+            lock_ttl: Duration::from_secs(300),
+            lock_store: None,
+            retry_policy: BackgroundJobRetryPolicy::disabled(),
         }
     }
 
@@ -154,6 +167,25 @@ impl BackgroundJobRunner {
     ) -> Self {
         self.history_enabled = history_enabled;
         self.run_store = run_store;
+        self
+    }
+
+    pub fn with_lock_store(
+        mut self,
+        lock_enabled: bool,
+        owner_id: impl Into<String>,
+        ttl: Duration,
+        lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
+    ) -> Self {
+        self.lock_enabled = lock_enabled;
+        self.lock_owner_id = owner_id.into();
+        self.lock_ttl = ttl;
+        self.lock_store = lock_store;
+        self
+    }
+
+    pub fn with_retry_policy(mut self, retry_policy: BackgroundJobRetryPolicy) -> Self {
+        self.retry_policy = retry_policy;
         self
     }
 
@@ -213,15 +245,36 @@ impl BackgroundJobRunner {
             return run;
         }
 
-        tracing::info!(job_kind = %kind, "background job started");
-        let run = match timeout(job.interval(), job.run_once()).await {
-            Ok(Ok(run)) => run,
-            Ok(Err(error)) => {
-                let mut run = BackgroundJobRun::failed(kind, error.code(), "background job failed");
-                run.error_message = Some(error.message());
+        let acquired_lock = match self.acquire_lock(kind).await {
+            Ok(lock) => lock,
+            Err(run) => {
+                self.record_run(run.clone()).await;
+                return run;
+            }
+        };
+
+        tracing::info!(
+            job_kind = %kind,
+            max_attempts = self.retry_policy.total_attempts(),
+            retries_enabled = self.retry_policy.enabled,
+            "background job started"
+        );
+        let retry_policy = self.retry_policy.clone();
+        let run = match timeout(
+            job.interval(),
+            execute_background_job_with_retries(kind, &retry_policy, || {
+                let job = job.clone();
+                async move { job.run_once().await }
+            }),
+        )
+        .await
+        {
+            Ok(run) => run,
+            Err(_) => {
+                let mut run = BackgroundJobRun::failed(kind, "TIMEOUT", "background job timed out");
+                run.max_attempts = self.retry_policy.total_attempts();
                 run
             }
-            Err(_) => BackgroundJobRun::failed(kind, "TIMEOUT", "background job timed out"),
         };
 
         let status = run.status;
@@ -229,13 +282,120 @@ impl BackgroundJobRunner {
             job_kind = %kind,
             status = status.as_str(),
             duration_ms = run.duration_ms,
+            attempt_count = run.attempt_count,
+            max_attempts = run.max_attempts,
+            retried = run.retried,
             org_count = run.org_count,
             affected_count = run.affected_count,
             error_code = run.error_code.as_deref(),
             "background job finished"
         );
+        self.release_lock(kind, acquired_lock).await;
         self.record_run(run.clone()).await;
         run
+    }
+
+    async fn acquire_lock(
+        &self,
+        kind: BackgroundJobKind,
+    ) -> Result<Option<AcquiredJobLock>, BackgroundJobRun> {
+        if !self.lock_enabled {
+            return Ok(None);
+        }
+
+        let Some(store) = &self.lock_store else {
+            tracing::warn!(
+                job_kind = %kind,
+                status = BackgroundJobStatus::Skipped.as_str(),
+                error_code = "JOB_LOCK_STORE_NOT_CONFIGURED",
+                "background job skipped because distributed lock store is not configured"
+            );
+            let mut run =
+                BackgroundJobRun::skipped(kind, "distributed job lock store is not configured");
+            run.error_code = Some("JOB_LOCK_STORE_NOT_CONFIGURED".to_string());
+            return Err(run);
+        };
+
+        tracing::debug!(
+            job_kind = %kind,
+            owner_id = %self.lock_owner_id,
+            ttl_seconds = self.lock_ttl.as_secs(),
+            "background job distributed lock acquire attempt"
+        );
+        match store
+            .try_acquire_lock(kind, &self.lock_owner_id, self.lock_ttl)
+            .await
+        {
+            Ok(Some(lock)) => {
+                tracing::info!(
+                    job_kind = %kind,
+                    owner_id = %self.lock_owner_id,
+                    locked_until = %lock.locked_until,
+                    "background job distributed lock acquired"
+                );
+                Ok(Some(lock))
+            }
+            Ok(None) => {
+                tracing::info!(
+                    job_kind = %kind,
+                    owner_id = %self.lock_owner_id,
+                    status = BackgroundJobStatus::Skipped.as_str(),
+                    "background job skipped because another owner holds distributed lock"
+                );
+                let mut run =
+                    BackgroundJobRun::skipped(kind, "job is already running on another instance");
+                run.error_code = Some("JOB_ALREADY_RUNNING".to_string());
+                Err(run)
+            }
+            Err(error) => {
+                tracing::warn!(
+                    job_kind = %kind,
+                    owner_id = %self.lock_owner_id,
+                    status = BackgroundJobStatus::Skipped.as_str(),
+                    error_code = error.code(),
+                    "background job distributed lock acquisition failed"
+                );
+                let mut run = BackgroundJobRun::skipped(kind, "distributed job lock unavailable");
+                run.error_code = Some("JOB_LOCK_UNAVAILABLE".to_string());
+                Err(run)
+            }
+        }
+    }
+
+    async fn release_lock(&self, kind: BackgroundJobKind, acquired_lock: Option<AcquiredJobLock>) {
+        if !self.lock_enabled || acquired_lock.is_none() {
+            return;
+        }
+
+        let Some(store) = &self.lock_store else {
+            return;
+        };
+
+        match store.release_lock(kind, &self.lock_owner_id).await {
+            Ok(true) => {
+                tracing::info!(
+                    job_kind = %kind,
+                    owner_id = %self.lock_owner_id,
+                    "background job distributed lock released"
+                );
+            }
+            Ok(false) => {
+                tracing::warn!(
+                    job_kind = %kind,
+                    owner_id = %self.lock_owner_id,
+                    error_code = "JOB_LOCK_RELEASE_NOT_OWNER",
+                    "background job distributed lock release skipped"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    job_kind = %kind,
+                    owner_id = %self.lock_owner_id,
+                    error_code = error.code(),
+                    "background job distributed lock release failed"
+                );
+            }
+        }
     }
 
     async fn record_run(&self, run: BackgroundJobRun) {
@@ -301,8 +461,8 @@ mod tests {
 
     use super::*;
     use crate::ports::{
-        BackgroundJobRunQuery, BackgroundJobRunQueryResult, BackgroundJobRunStore,
-        StoredBackgroundJobRun,
+        BackgroundJobLockStore, BackgroundJobRunQuery, BackgroundJobRunQueryResult,
+        BackgroundJobRunStore, JobLockRecord, StoredBackgroundJobRun, lock_until_from_ttl,
     };
 
     struct TestJob {
@@ -313,10 +473,28 @@ mod tests {
         fail: bool,
     }
 
+    struct FlakyJob {
+        kind: BackgroundJobKind,
+        enabled: bool,
+        interval: Duration,
+        runs: Arc<AtomicUsize>,
+        fail_until_attempt: usize,
+        error: MemcoreError,
+        lock_store: Option<Arc<CapturingLockStore>>,
+    }
+
     #[derive(Debug, Default)]
     struct CapturingRunStore {
         runs: Mutex<Vec<StoredBackgroundJobRun>>,
         fail_insert: bool,
+    }
+
+    #[derive(Debug, Default)]
+    struct CapturingLockStore {
+        owner_id: Mutex<Option<String>>,
+        acquire_count: AtomicUsize,
+        release_count: AtomicUsize,
+        fail_release: bool,
     }
 
     #[async_trait]
@@ -361,6 +539,84 @@ mod tests {
     }
 
     #[async_trait]
+    impl BackgroundJobLockStore for CapturingLockStore {
+        async fn try_acquire_lock(
+            &self,
+            kind: BackgroundJobKind,
+            owner_id: &str,
+            ttl: Duration,
+        ) -> MemcoreResult<Option<AcquiredJobLock>> {
+            self.acquire_count.fetch_add(1, Ordering::SeqCst);
+            let mut current = self
+                .owner_id
+                .lock()
+                .expect("capturing lock store mutex should not be poisoned");
+            if current.as_deref().is_some_and(|owner| owner != owner_id) {
+                return Ok(None);
+            }
+            *current = Some(owner_id.to_string());
+            Ok(Some(AcquiredJobLock {
+                kind,
+                owner_id: owner_id.to_string(),
+                locked_until: lock_until_from_ttl(Utc::now(), ttl),
+            }))
+        }
+
+        async fn renew_lock(
+            &self,
+            kind: BackgroundJobKind,
+            owner_id: &str,
+            ttl: Duration,
+        ) -> MemcoreResult<bool> {
+            let _ = (kind, ttl);
+            Ok(self
+                .owner_id
+                .lock()
+                .expect("capturing lock store mutex should not be poisoned")
+                .as_deref()
+                == Some(owner_id))
+        }
+
+        async fn release_lock(
+            &self,
+            kind: BackgroundJobKind,
+            owner_id: &str,
+        ) -> MemcoreResult<bool> {
+            let _ = kind;
+            if self.fail_release {
+                return Err(MemcoreError::StorageError(
+                    "test release failure".to_string(),
+                ));
+            }
+            let mut current = self
+                .owner_id
+                .lock()
+                .expect("capturing lock store mutex should not be poisoned");
+            if current.as_deref() != Some(owner_id) {
+                return Ok(false);
+            }
+            *current = None;
+            self.release_count.fetch_add(1, Ordering::SeqCst);
+            Ok(true)
+        }
+
+        async fn get_lock(&self, kind: BackgroundJobKind) -> MemcoreResult<Option<JobLockRecord>> {
+            let owner = self
+                .owner_id
+                .lock()
+                .expect("capturing lock store mutex should not be poisoned")
+                .clone();
+            Ok(owner.map(|owner_id| JobLockRecord {
+                kind,
+                owner_id,
+                locked_until: Utc::now() + chrono::Duration::seconds(60),
+                acquired_at: Utc::now(),
+                heartbeat_at: None,
+            }))
+        }
+    }
+
+    #[async_trait]
     impl BackgroundJob for TestJob {
         fn kind(&self) -> BackgroundJobKind {
             self.kind
@@ -380,6 +636,50 @@ mod tests {
                 return Err(MemcoreError::Internal("test failure".to_string()));
             }
             Ok(BackgroundJobRun::running(self.kind).finish(BackgroundJobStatus::Succeeded))
+        }
+    }
+
+    #[async_trait]
+    impl BackgroundJob for FlakyJob {
+        fn kind(&self) -> BackgroundJobKind {
+            self.kind
+        }
+
+        fn interval(&self) -> Duration {
+            self.interval
+        }
+
+        fn enabled(&self) -> bool {
+            self.enabled
+        }
+
+        async fn run_once(&self) -> MemcoreResult<BackgroundJobRun> {
+            if let Some(lock_store) = &self.lock_store {
+                assert!(
+                    lock_store
+                        .owner_id
+                        .lock()
+                        .expect("capturing lock store mutex should not be poisoned")
+                        .is_some(),
+                    "lock should be held while retry attempts execute"
+                );
+            }
+            let attempt = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
+            if attempt <= self.fail_until_attempt {
+                return Err(self.error.clone());
+            }
+            Ok(BackgroundJobRun::running(self.kind).finish(BackgroundJobStatus::Succeeded))
+        }
+    }
+
+    fn retry_policy(max_retries: usize) -> BackgroundJobRetryPolicy {
+        BackgroundJobRetryPolicy {
+            enabled: true,
+            max_retries,
+            initial_backoff: Duration::from_millis(1),
+            max_backoff: Duration::from_millis(1),
+            backoff_multiplier: 1.0,
+            jitter_enabled: false,
         }
     }
 
@@ -634,5 +934,334 @@ mod tests {
 
         assert_eq!(run.status, BackgroundJobStatus::Succeeded);
         assert_eq!(runner.snapshot().recent_runs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn distributed_lock_disabled_preserves_existing_manual_behavior() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let lock_store = Arc::new(CapturingLockStore::default());
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail: false,
+            })],
+        )
+        .with_lock_store(
+            false,
+            "owner-a",
+            Duration::from_secs(60),
+            Some(lock_store.clone()),
+        );
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(lock_store.acquire_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn distributed_lock_acquired_and_released_on_success() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let lock_store = Arc::new(CapturingLockStore::default());
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail: false,
+            })],
+        )
+        .with_lock_store(
+            true,
+            "owner-a",
+            Duration::from_secs(60),
+            Some(lock_store.clone()),
+        );
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(lock_store.acquire_count.load(Ordering::SeqCst), 1);
+        assert_eq!(lock_store.release_count.load(Ordering::SeqCst), 1);
+        assert!(lock_store.get_lock(run.kind).await.expect("lock").is_none());
+    }
+
+    #[tokio::test]
+    async fn distributed_lock_skip_is_recorded_when_another_owner_holds_lock() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let run_store = Arc::new(CapturingRunStore::default());
+        let lock_store = Arc::new(CapturingLockStore {
+            owner_id: Mutex::new(Some("owner-b".to_string())),
+            acquire_count: AtomicUsize::new(0),
+            release_count: AtomicUsize::new(0),
+            fail_release: false,
+        });
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail: false,
+            })],
+        )
+        .with_history_store(true, Some(run_store.clone()))
+        .with_lock_store(
+            true,
+            "owner-a",
+            Duration::from_secs(60),
+            Some(lock_store.clone()),
+        );
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Skipped);
+        assert_eq!(run.error_code.as_deref(), Some("JOB_ALREADY_RUNNING"));
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+        assert_eq!(lock_store.release_count.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            run_store
+                .runs
+                .lock()
+                .expect("capturing store mutex should not be poisoned")
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn distributed_lock_released_after_job_failure_and_release_failure_is_non_fatal() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let lock_store = Arc::new(CapturingLockStore {
+            owner_id: Mutex::new(None),
+            acquire_count: AtomicUsize::new(0),
+            release_count: AtomicUsize::new(0),
+            fail_release: true,
+        });
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(TestJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail: true,
+            })],
+        )
+        .with_lock_store(
+            true,
+            "owner-a",
+            Duration::from_secs(60),
+            Some(lock_store.clone()),
+        );
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Failed);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(lock_store.acquire_count.load(Ordering::SeqCst), 1);
+        assert_eq!(runner.snapshot().recent_runs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn scheduled_job_uses_retry_policy_and_persists_successful_retry() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let store = Arc::new(CapturingRunStore::default());
+        let runner = BackgroundJobRunner::new(
+            true,
+            Duration::from_millis(10),
+            vec![Arc::new(FlakyJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: true,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail_until_attempt: 1,
+                error: MemcoreError::StorageError("database is locked".to_string()),
+                lock_store: None,
+            })],
+        )
+        .with_retry_policy(retry_policy(2))
+        .with_history_store(true, Some(store.clone()));
+
+        let runs_result = runner.run_due_once().await;
+        assert_eq!(runs_result.len(), 1);
+        assert_eq!(runs_result[0].status, BackgroundJobStatus::Succeeded);
+        assert_eq!(runs_result[0].attempt_count, 2);
+        assert!(runs_result[0].retried);
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+
+        let persisted = store
+            .runs
+            .lock()
+            .expect("capturing store mutex should not be poisoned");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].status, BackgroundJobStatus::Succeeded);
+        assert_eq!(persisted[0].attempt_count, 2);
+        assert!(persisted[0].retried);
+    }
+
+    #[tokio::test]
+    async fn manual_job_uses_retry_policy() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(FlakyJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail_until_attempt: 1,
+                error: MemcoreError::StorageError("service unavailable".to_string()),
+                lock_store: None,
+            })],
+        )
+        .with_retry_policy(retry_policy(2));
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(run.attempt_count, 2);
+        assert!(run.retried);
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn exhausted_retries_are_persisted_as_failed() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let store = Arc::new(CapturingRunStore::default());
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(FlakyJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail_until_attempt: usize::MAX,
+                error: MemcoreError::StorageError("service unavailable".to_string()),
+                lock_store: None,
+            })],
+        )
+        .with_retry_policy(retry_policy(2))
+        .with_history_store(true, Some(store.clone()));
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Failed);
+        assert_eq!(run.attempt_count, 3);
+        assert_eq!(run.max_attempts, 3);
+        assert!(run.retried);
+        assert_eq!(runs.load(Ordering::SeqCst), 3);
+
+        let persisted = store
+            .runs
+            .lock()
+            .expect("capturing store mutex should not be poisoned");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].status, BackgroundJobStatus::Failed);
+        assert_eq!(persisted[0].attempt_count, 3);
+        assert!(persisted[0].retried);
+    }
+
+    #[tokio::test]
+    async fn distributed_lock_is_held_for_full_retry_sequence() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let lock_store = Arc::new(CapturingLockStore::default());
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(FlakyJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail_until_attempt: 1,
+                error: MemcoreError::StorageError("database is locked".to_string()),
+                lock_store: Some(lock_store.clone()),
+            })],
+        )
+        .with_retry_policy(retry_policy(2))
+        .with_lock_store(
+            true,
+            "owner-a",
+            Duration::from_secs(60),
+            Some(lock_store.clone()),
+        );
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Succeeded);
+        assert_eq!(run.attempt_count, 2);
+        assert_eq!(lock_store.acquire_count.load(Ordering::SeqCst), 1);
+        assert_eq!(lock_store.release_count.load(Ordering::SeqCst), 1);
+        assert!(lock_store.get_lock(run.kind).await.expect("lock").is_none());
+    }
+
+    #[tokio::test]
+    async fn lock_acquisition_failure_does_not_retry_job_body() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let lock_store = Arc::new(CapturingLockStore {
+            owner_id: Mutex::new(Some("owner-b".to_string())),
+            acquire_count: AtomicUsize::new(0),
+            release_count: AtomicUsize::new(0),
+            fail_release: false,
+        });
+        let runner = BackgroundJobRunner::new(
+            false,
+            Duration::from_millis(10),
+            vec![Arc::new(FlakyJob {
+                kind: BackgroundJobKind::MemoryUsageSnapshot,
+                enabled: false,
+                interval: Duration::from_secs(1),
+                runs: runs.clone(),
+                fail_until_attempt: 1,
+                error: MemcoreError::StorageError("database is locked".to_string()),
+                lock_store: Some(lock_store.clone()),
+            })],
+        )
+        .with_retry_policy(retry_policy(2))
+        .with_lock_store(
+            true,
+            "owner-a",
+            Duration::from_secs(60),
+            Some(lock_store.clone()),
+        );
+
+        let run = runner
+            .run_manual(BackgroundJobKind::MemoryUsageSnapshot)
+            .await
+            .expect("manual run");
+        assert_eq!(run.status, BackgroundJobStatus::Skipped);
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+        assert_eq!(lock_store.acquire_count.load(Ordering::SeqCst), 1);
+        assert_eq!(lock_store.release_count.load(Ordering::SeqCst), 0);
     }
 }

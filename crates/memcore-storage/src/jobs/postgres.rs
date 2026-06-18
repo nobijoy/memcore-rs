@@ -38,6 +38,19 @@ fn row_to_run(row: &PgRow) -> MemcoreResult<StoredBackgroundJobRun> {
             .ok()
             .flatten()
             .map(|value| value as u64),
+        attempt_count: row
+            .try_get::<i64, _>("attempt_count")
+            .ok()
+            .filter(|value| *value > 0)
+            .map(|value| value as usize)
+            .unwrap_or(1),
+        max_attempts: row
+            .try_get::<i64, _>("max_attempts")
+            .ok()
+            .filter(|value| *value > 0)
+            .map(|value| value as usize)
+            .unwrap_or(1),
+        retried: row.try_get::<bool, _>("retried").ok().unwrap_or(false),
         error_code: row.try_get("error_code").ok(),
         error_message: row.try_get("error_message").ok(),
         metadata: row.try_get::<Option<Value>, _>("metadata").ok().flatten(),
@@ -102,8 +115,9 @@ impl BackgroundJobRunStore for PostgresBackgroundJobRunStore {
             r#"
             INSERT INTO background_job_runs (
                 id, kind, status, started_at, finished_at, duration_ms,
+                attempt_count, max_attempts, retried,
                 error_code, error_message, metadata, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#,
         )
         .bind(run.id)
@@ -112,6 +126,9 @@ impl BackgroundJobRunStore for PostgresBackgroundJobRunStore {
         .bind(run.started_at)
         .bind(run.finished_at)
         .bind(run.duration_ms.map(|value| value as i64))
+        .bind(run.attempt_count as i64)
+        .bind(run.max_attempts as i64)
+        .bind(run.retried)
         .bind(run.error_code.as_deref())
         .bind(run.error_message.as_deref())
         .bind(run.metadata.as_ref())
@@ -129,7 +146,7 @@ impl BackgroundJobRunStore for PostgresBackgroundJobRunStore {
     ) -> MemcoreResult<BackgroundJobRunQueryResult> {
         let limit = validate_background_job_run_limit(query.limit)?;
         let mut builder = QueryBuilder::<Postgres>::new(
-            "SELECT id, kind, status, started_at, finished_at, duration_ms, error_code, error_message, metadata FROM background_job_runs",
+            "SELECT id, kind, status, started_at, finished_at, duration_ms, attempt_count, max_attempts, retried, error_code, error_message, metadata FROM background_job_runs",
         );
         push_filters(&mut builder, &query);
 

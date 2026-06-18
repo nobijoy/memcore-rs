@@ -19,6 +19,9 @@ pub struct StoredBackgroundJobRun {
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
+    pub attempt_count: usize,
+    pub max_attempts: usize,
+    pub retried: bool,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub metadata: Option<Value>,
@@ -29,6 +32,11 @@ impl From<BackgroundJobRun> for StoredBackgroundJobRun {
         let metadata = serde_json::json!({
             "org_count": run.org_count,
             "affected_count": run.affected_count,
+            "retry": {
+                "attempt_count": run.attempt_count,
+                "max_attempts": run.max_attempts,
+                "retried": run.retried
+            }
         });
         Self {
             id: run.id,
@@ -37,6 +45,9 @@ impl From<BackgroundJobRun> for StoredBackgroundJobRun {
             started_at: run.started_at,
             finished_at: run.finished_at,
             duration_ms: run.duration_ms,
+            attempt_count: run.attempt_count,
+            max_attempts: run.max_attempts,
+            retried: run.retried,
             error_code: run.error_code,
             error_message: run.error_message.map(sanitize_background_job_error_message),
             metadata: Some(metadata),
@@ -58,6 +69,34 @@ impl From<&StoredBackgroundJobRun> for BackgroundJobRun {
             .and_then(|metadata| metadata.get("affected_count"))
             .and_then(|value| value.as_u64())
             .unwrap_or(0);
+        let retry = run
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("retry"));
+        let attempt_count = if run.attempt_count == 0 {
+            retry
+                .and_then(|metadata| metadata.get("attempt_count"))
+                .and_then(|value| value.as_u64())
+                .map(|value| value as usize)
+                .unwrap_or(1)
+        } else {
+            run.attempt_count
+        };
+        let max_attempts = if run.max_attempts == 0 {
+            retry
+                .and_then(|metadata| metadata.get("max_attempts"))
+                .and_then(|value| value.as_u64())
+                .map(|value| value as usize)
+                .unwrap_or(1)
+        } else {
+            run.max_attempts
+        };
+        let retried = run.retried
+            || retry
+                .and_then(|metadata| metadata.get("retried"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            || attempt_count > 1;
 
         Self {
             id: run.id,
@@ -66,6 +105,9 @@ impl From<&StoredBackgroundJobRun> for BackgroundJobRun {
             started_at: run.started_at,
             finished_at: run.finished_at,
             duration_ms: run.duration_ms,
+            attempt_count,
+            max_attempts,
+            retried,
             error_code: run.error_code.clone(),
             error_message: run.error_message.clone(),
             org_count,
