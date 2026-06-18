@@ -1,9 +1,9 @@
 use memcore_api::AppState;
+#[cfg(not(feature = "postgres"))]
+use memcore_config::FactBackend;
 use memcore_config::{
     EmbeddingProviderKind, EventBackend, LlmProviderKind, Settings, VectorBackend,
 };
-#[cfg(not(feature = "postgres"))]
-use memcore_config::FactBackend;
 
 #[tokio::test]
 async fn mock_providers_start_without_openai_api_key() {
@@ -262,8 +262,7 @@ async fn missing_qdrant_url_fails_when_qdrant_selected() {
 async fn unsupported_vector_backend_fails_config() {
     use std::str::FromStr;
 
-    let error =
-        VectorBackend::from_str("bad-backend").expect_err("invalid backend should fail");
+    let error = VectorBackend::from_str("bad-backend").expect_err("invalid backend should fail");
     assert_eq!(error.code(), "validation_error");
     assert!(
         error

@@ -2,21 +2,24 @@ use axum::Json;
 use axum::extract::{Extension, Query, State};
 use memcore_common::MemcoreError;
 use memcore_core::{
-    ApiKeyScope, GetOrgQuotaStatusInput, ListOrgUsersInput, ProviderUsageQuery,
-    SearchOrgMemoryEventsInput, parse_optional_cursor, validate_provider_usage_limit,
+    ApiKeyScope, GetOrgQuotaStatusInput, ListOrgUsersInput, ProviderUsageDailyInput,
+    ProviderUsageQuery, SearchOrgMemoryEventsInput, parse_optional_cursor,
+    validate_provider_usage_limit,
 };
 use uuid::Uuid;
 
 use crate::dto::{
     ContextCacheMetricsResponse, DeleteOrgPlanResponse, GetOrgPlanResponse, ListOrgUsersQuery,
     ListOrgUsersResponse, OrgQuotaStatusResponse, OrgQuotasQuery, OrgSummaryResponse,
-    ProviderUsageQueryParams, ProviderUsageResponse, SearchOrgMemoryEventsQuery,
-    SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest, UpsertOrgPlanResponse,
-    context_cache_metrics_response, get_org_plan_response, org_quota_status_response,
-    org_summary_input, parse_event_date_filters, parse_keyword_query,
-    parse_memory_event_operation_label, parse_provider_usage_capability,
-    provider_usage_memory_response, provider_usage_persisted_response, upsert_org_plan_response,
-    validate_list_org_users_limit, validate_search_org_memory_events_limit,
+    OrgUsageDashboardResponse, OrgUsageDateRangeQuery, ProviderUsageDailyQueryParams,
+    ProviderUsageDailyResponse, ProviderUsageQueryParams, ProviderUsageResponse,
+    SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
+    UpsertOrgPlanResponse, context_cache_metrics_response, get_org_plan_response,
+    org_quota_status_response, org_summary_input, org_usage_dashboard_input,
+    parse_event_date_filters, parse_keyword_query, parse_memory_event_operation_label,
+    parse_org_usage_window, parse_provider_usage_capability, provider_usage_memory_response,
+    provider_usage_persisted_response, upsert_org_plan_response, validate_list_org_users_limit,
+    validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{ApiError, check_any_scope};
@@ -260,6 +263,60 @@ pub async fn get_provider_usage(
 
     let snapshot = state.provider_usage.snapshot();
     Ok(Json(provider_usage_memory_response(snapshot)))
+}
+
+pub async fn get_org_usage_dashboard(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Query(query): Query<OrgUsageDateRangeQuery>,
+) -> Result<Json<OrgUsageDashboardResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    let input = org_usage_dashboard_input(organization.org_id, query)?;
+    let output = state.memory_engine.get_org_usage_dashboard(input).await?;
+
+    Ok(Json(OrgUsageDashboardResponse::from(output)))
+}
+
+pub async fn get_provider_usage_daily(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Query(query): Query<ProviderUsageDailyQueryParams>,
+) -> Result<Json<ProviderUsageDailyResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    let capability = query
+        .capability
+        .as_deref()
+        .map(parse_provider_usage_capability)
+        .transpose()?;
+    let (created_after, created_before) = parse_org_usage_window(
+        query.created_after.as_ref(),
+        query.created_before.as_ref(),
+        query.days,
+    )?;
+
+    let output = state
+        .memory_engine
+        .get_provider_usage_daily(ProviderUsageDailyInput {
+            org_id: organization.org_id,
+            created_after,
+            created_before,
+            provider_name: query.provider_name,
+            model_name: query.model_name,
+            capability,
+        })
+        .await?;
+
+    Ok(Json(ProviderUsageDailyResponse::from(output)))
 }
 
 pub async fn apply_provider_usage_retention(

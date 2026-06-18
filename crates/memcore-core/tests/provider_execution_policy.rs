@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -11,8 +11,8 @@ use memcore_core::{
     TenantContext,
 };
 use memcore_providers::{
-    deterministic_embedding, wrap_embedding_provider, wrap_llm_provider, FactClassificationInput,
-    FactExtractionInput, MockEmbeddingProvider, MockLlmProvider, ProviderExecutionPolicy,
+    FactClassificationInput, FactExtractionInput, MockEmbeddingProvider, MockLlmProvider,
+    ProviderExecutionPolicy, deterministic_embedding, wrap_embedding_provider, wrap_llm_provider,
 };
 use memcore_storage::{MockFactStore, MockVectorStore};
 use serde_json::json;
@@ -139,10 +139,7 @@ impl FlakyLlmProvider {
 
 #[async_trait]
 impl LlmProvider for FlakyLlmProvider {
-    async fn extract_facts(
-        &self,
-        input: FactExtractionInput,
-    ) -> MemcoreResult<Vec<CandidateFact>> {
+    async fn extract_facts(&self, input: FactExtractionInput) -> MemcoreResult<Vec<CandidateFact>> {
         let attempt = self.extraction_calls.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_extraction_until {
             return Err(MemcoreError::ProviderError(
@@ -212,10 +209,7 @@ async fn retryable_embedding_failure_succeeds_on_retry_for_search() {
     let flaky = Arc::new(FlakyEmbeddingProvider::new(4, 1));
     let flaky_for_count = flaky.clone();
     let embedding = wrap_embedding_provider(flaky, test_policy()).expect("wrap");
-    let engine = engine_with_providers(
-        Arc::new(MockLlmProvider::new()),
-        embedding,
-    );
+    let engine = engine_with_providers(Arc::new(MockLlmProvider::new()), embedding);
 
     let output = engine
         .search_memory(SearchMemoryInput {
@@ -237,10 +231,7 @@ async fn retryable_llm_failure_succeeds_on_retry_for_add_memory() {
     let flaky = Arc::new(FlakyLlmProvider::new(1));
     let flaky_for_count = flaky.clone();
     let llm = wrap_llm_provider(flaky, test_policy());
-    let engine = engine_with_providers(
-        llm,
-        Arc::new(MockEmbeddingProvider::new(4)),
-    );
+    let engine = engine_with_providers(llm, Arc::new(MockEmbeddingProvider::new(4)));
 
     let output = engine
         .add_memory(AddMemoryInput {
@@ -258,10 +249,7 @@ async fn retryable_llm_failure_succeeds_on_retry_for_add_memory() {
 #[tokio::test]
 async fn non_retryable_provider_error_is_not_retried_for_add_memory() {
     let llm = wrap_llm_provider(Arc::new(NonRetryableLlmProvider), test_policy());
-    let engine = engine_with_providers(
-        llm,
-        Arc::new(MockEmbeddingProvider::new(4)),
-    );
+    let engine = engine_with_providers(llm, Arc::new(MockEmbeddingProvider::new(4)));
 
     let error = engine
         .add_memory(AddMemoryInput {
@@ -288,10 +276,7 @@ async fn embedding_provider_timeout_is_retried_when_policy_allows() {
         backoff_multiplier: 2.0,
     };
     let embedding = wrap_embedding_provider(slow, policy).expect("wrap");
-    let engine = engine_with_providers(
-        Arc::new(MockLlmProvider::new()),
-        embedding,
-    );
+    let engine = engine_with_providers(Arc::new(MockLlmProvider::new()), embedding);
 
     let _ = engine
         .search_memory(SearchMemoryInput {
@@ -411,12 +396,7 @@ async fn lifecycle_classification_uses_embedding_policy_on_update() {
     let flaky = Arc::new(FlakyEmbeddingProvider::new(4, 1));
     let flaky_for_count = flaky.clone();
     let embedding = wrap_embedding_provider(flaky, test_policy()).expect("wrap");
-    let engine = MemoryEngine::new(
-        fact_store,
-        vector_store,
-        Arc::new(llm),
-        embedding,
-    );
+    let engine = MemoryEngine::new(fact_store, vector_store, Arc::new(llm), embedding);
 
     let output = engine
         .add_memory(AddMemoryInput {

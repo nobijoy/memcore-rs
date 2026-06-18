@@ -117,7 +117,8 @@ impl ContextCacheConfig {
 
         if self.ttl_seconds == 0 {
             return Err(memcore_common::MemcoreError::ValidationError(
-                "context cache ttl_seconds must be greater than 0 when cache is enabled".to_string(),
+                "context cache ttl_seconds must be greater than 0 when cache is enabled"
+                    .to_string(),
             ));
         }
 
@@ -262,10 +263,7 @@ impl InMemoryContextCache {
 impl ContextCache for InMemoryContextCache {
     async fn get(&self, key: &ContextCacheKey) -> MemcoreResult<Option<CachedContextEntry>> {
         let now = Utc::now();
-        let mut map = self
-            .entries
-            .write()
-            .map_err(|_| lock_poisoned_error())?;
+        let mut map = self.entries.write().map_err(|_| lock_poisoned_error())?;
 
         if let Some(entry) = map.get(key) {
             if entry.is_fully_expired(now) {
@@ -283,10 +281,7 @@ impl ContextCache for InMemoryContextCache {
 
     async fn get_any(&self, key: &ContextCacheKey) -> MemcoreResult<Option<CachedContextEntry>> {
         let now = Utc::now();
-        let mut map = self
-            .entries
-            .write()
-            .map_err(|_| lock_poisoned_error())?;
+        let mut map = self.entries.write().map_err(|_| lock_poisoned_error())?;
 
         if let Some(entry) = map.get(key) {
             if entry.is_fully_expired(now) {
@@ -301,10 +296,7 @@ impl ContextCache for InMemoryContextCache {
 
     async fn set(&self, key: ContextCacheKey, entry: CachedContextEntry) -> MemcoreResult<()> {
         let now = Utc::now();
-        let mut map = self
-            .entries
-            .write()
-            .map_err(|_| lock_poisoned_error())?;
+        let mut map = self.entries.write().map_err(|_| lock_poisoned_error())?;
 
         Self::purge_expired(&mut map, now);
         map.insert(key, entry);
@@ -313,10 +305,7 @@ impl ContextCache for InMemoryContextCache {
     }
 
     async fn invalidate_user(&self, org_id: &str, user_id: &str) -> MemcoreResult<usize> {
-        let mut map = self
-            .entries
-            .write()
-            .map_err(|_| lock_poisoned_error())?;
+        let mut map = self.entries.write().map_err(|_| lock_poisoned_error())?;
 
         let before = map.len();
         map.retain(|key, _| key.org_id != org_id || key.user_id != user_id);
@@ -404,10 +393,10 @@ fn lock_poisoned_error() -> memcore_common::MemcoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TenantContext;
     use crate::context::budget::{ContextBudget, ContextBudgetUsage};
     use crate::context::compression_options::{ContextCompressionMode, ContextCompressionUsage};
     use crate::context::format_options::ContextFormat;
-    use crate::TenantContext;
 
     fn sample_input(query: &str) -> BuildContextInput {
         BuildContextInput {
@@ -479,18 +468,27 @@ mod tests {
         let base = build_context_cache_key(&sample_input("alpha"));
 
         let query_changed = sample_input("beta");
-        assert_ne!(base.query_hash, build_context_cache_key(&query_changed).query_hash);
+        assert_ne!(
+            base.query_hash,
+            build_context_cache_key(&query_changed).query_hash
+        );
 
         let mut format_changed = sample_input("alpha");
         format_changed.format_options.format = ContextFormat::Markdown;
-        assert_ne!(base.options_hash, build_context_cache_key(&format_changed).options_hash);
+        assert_ne!(
+            base.options_hash,
+            build_context_cache_key(&format_changed).options_hash
+        );
 
         let mut budget_changed = sample_input("alpha");
         budget_changed.budget = ContextBudget {
             max_tokens: 500,
             reserved_tokens: 50,
         };
-        assert_ne!(base.options_hash, build_context_cache_key(&budget_changed).options_hash);
+        assert_ne!(
+            base.options_hash,
+            build_context_cache_key(&budget_changed).options_hash
+        );
 
         let mut compression_changed = sample_input("alpha");
         compression_changed.compression_options.mode = ContextCompressionMode::SimpleExtractive;
@@ -533,11 +531,17 @@ mod tests {
         };
 
         cache
-            .set(key_a.clone(), cached_entry_with_ttl(&sample_output("a"), 300))
+            .set(
+                key_a.clone(),
+                cached_entry_with_ttl(&sample_output("a"), 300),
+            )
             .await
             .unwrap();
         cache
-            .set(key_b.clone(), cached_entry_with_ttl(&sample_output("b"), 300))
+            .set(
+                key_b.clone(),
+                cached_entry_with_ttl(&sample_output("b"), 300),
+            )
             .await
             .unwrap();
 

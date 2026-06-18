@@ -117,7 +117,10 @@ async fn add_operation_records_add_event() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].operation, MemoryEventOperation::Add);
     assert_eq!(events[0].fact_id, Some(output.memories[0].id));
-    assert_eq!(events[0].new_content.as_deref(), Some("I am learning Rust."));
+    assert_eq!(
+        events[0].new_content.as_deref(),
+        Some("I am learning Rust.")
+    );
     assert!(events[0].input_text.is_none());
     assert_eq!(events[0].provider_name.as_deref(), Some("mock"));
 }
@@ -254,7 +257,10 @@ async fn delete_operation_records_delete_event() {
         .find(|event| event.operation == MemoryEventOperation::Delete)
         .expect("delete event should exist");
     assert_eq!(delete_event.fact_id, Some(target_id));
-    assert_eq!(delete_event.previous_content.as_deref(), Some("remove this memory"));
+    assert_eq!(
+        delete_event.previous_content.as_deref(),
+        Some("remove this memory")
+    );
 }
 
 #[tokio::test]

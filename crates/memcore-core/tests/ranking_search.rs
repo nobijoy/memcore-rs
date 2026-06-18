@@ -5,7 +5,7 @@ use memcore_core::{
     Fact, FactStore, MemoryEngine, MemorySearchResult, MemorySource, MemoryType, RankingConfig,
     SearchMemoryInput, TenantContext, VectorRecord, VectorStore,
 };
-use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
+use memcore_providers::{MockEmbeddingProvider, MockLlmProvider, deterministic_embedding};
 use memcore_storage::{MockFactStore, MockVectorStore};
 use serde_json::json;
 use uuid::Uuid;
@@ -171,7 +171,6 @@ async fn search_results_are_sorted_by_score_descending() {
     }
 }
 
-
 #[tokio::test]
 async fn search_preserves_tenant_isolation_with_ranking() {
     let fact_store = Arc::new(MockFactStore::new());
@@ -234,12 +233,7 @@ fn apply_ranking_sorts_in_memory_results() {
         },
     ];
 
-    apply_ranking(
-        &mut results,
-        |_| Some(now),
-        now,
-        &RankingConfig::default(),
-    );
+    apply_ranking(&mut results, |_| Some(now), now, &RankingConfig::default());
 
     assert_eq!(results[0].content, "high");
     assert!(results[0].score >= results[1].score);

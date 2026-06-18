@@ -1,12 +1,12 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
 use memcore_core::ports::{ProviderUsageEventRecord, ProviderUsageStore};
 use uuid::Uuid;
 
-use super::types::ProviderUsageEvent;
 use super::ProviderUsageRecorder;
+use super::types::ProviderUsageEvent;
 
 /// Records usage in-memory and persists events without failing provider calls.
 pub struct PersistentProviderUsageRecorder {
@@ -128,8 +128,7 @@ mod tests {
     async fn records_to_inner_and_persistent_store() {
         let inner = InMemoryProviderUsageRecorder::new();
         let store = Arc::new(MockProviderUsageStore::new());
-        let recorder =
-            PersistentProviderUsageRecorder::new(inner.clone(), Some(store.clone()));
+        let recorder = PersistentProviderUsageRecorder::new(inner.clone(), Some(store.clone()));
 
         recorder.record_request(sample_event("org_persist"));
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -161,7 +160,8 @@ mod tests {
             async fn query_usage(
                 &self,
                 _query: memcore_core::ports::ProviderUsageQuery,
-            ) -> memcore_common::MemcoreResult<memcore_core::ports::ProviderUsageQueryResult> {
+            ) -> memcore_common::MemcoreResult<memcore_core::ports::ProviderUsageQueryResult>
+            {
                 Err(memcore_common::MemcoreError::StorageError(
                     "fail".to_string(),
                 ))
@@ -180,10 +180,8 @@ mod tests {
         }
 
         let inner = InMemoryProviderUsageRecorder::new();
-        let recorder = PersistentProviderUsageRecorder::new(
-            inner.clone(),
-            Some(Arc::new(FailingStore)),
-        );
+        let recorder =
+            PersistentProviderUsageRecorder::new(inner.clone(), Some(Arc::new(FailingStore)));
         recorder.record_request(sample_event("org_fail"));
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(recorder.snapshot().total_requests, 1);
@@ -194,8 +192,7 @@ mod tests {
     fn event_without_org_id_is_not_persisted() {
         let inner = InMemoryProviderUsageRecorder::new();
         let store = Arc::new(MockProviderUsageStore::new());
-        let recorder =
-            PersistentProviderUsageRecorder::new(inner.clone(), Some(store.clone()));
+        let recorder = PersistentProviderUsageRecorder::new(inner.clone(), Some(store.clone()));
         let mut event = sample_event("org_x");
         event.org_id = None;
         recorder.record_request(event);

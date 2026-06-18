@@ -4,7 +4,7 @@ use crate::ports::{FactSearchQuery, FactStore};
 use crate::{CandidateFact, Fact, TenantContext};
 
 use super::types::{
-    DeduplicationDecision, DEDUP_SEARCH_LIMIT, EXACT_DUPLICATE_THRESHOLD,
+    DEDUP_SEARCH_LIMIT, DeduplicationDecision, EXACT_DUPLICATE_THRESHOLD,
     HIGH_SIMILARITY_DUPLICATE_THRESHOLD, MODERATE_SIMILARITY_THRESHOLD,
 };
 
@@ -13,10 +13,7 @@ use super::types::{
 /// Rules: trim, lowercase, collapse internal whitespace, strip simple trailing punctuation.
 pub fn normalize_content(content: &str) -> String {
     let trimmed = content.trim().to_ascii_lowercase();
-    let collapsed: String = trimmed
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let collapsed: String = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
     strip_trailing_punctuation(&collapsed)
 }
 
@@ -131,7 +128,10 @@ mod tests {
 
     #[test]
     fn normalize_collapses_whitespace() {
-        assert_eq!(normalize_content("user   is   learning"), "user is learning");
+        assert_eq!(
+            normalize_content("user   is   learning"),
+            "user is learning"
+        );
     }
 
     #[test]
@@ -165,10 +165,7 @@ mod tests {
 
     #[test]
     fn token_overlap_is_one_for_equivalent_content() {
-        let overlap = token_overlap_ratio(
-            "User is learning Rust.",
-            "user is learning rust",
-        );
+        let overlap = token_overlap_ratio("User is learning Rust.", "user is learning rust");
         assert!((overlap - 1.0).abs() < f32::EPSILON);
     }
 

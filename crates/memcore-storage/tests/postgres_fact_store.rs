@@ -246,168 +246,184 @@ async fn search_facts_by_memory_type() {
 
 #[tokio::test]
 async fn tenant_isolation_prevents_cross_tenant_reads() {
-    with_postgres_store("tenant_isolation_prevents_cross_tenant_reads", |store| async move {
-        let tenant_a = tenant("org_pg_e", "user_pg_a");
-        let tenant_b = tenant("org_pg_e", "user_pg_b");
-        let fact = sample_fact(
-            "org_pg_e",
-            "user_pg_a",
-            "private",
-            MemoryType::Profile,
-            json!({}),
-            None,
-            None,
-        );
+    with_postgres_store(
+        "tenant_isolation_prevents_cross_tenant_reads",
+        |store| async move {
+            let tenant_a = tenant("org_pg_e", "user_pg_a");
+            let tenant_b = tenant("org_pg_e", "user_pg_b");
+            let fact = sample_fact(
+                "org_pg_e",
+                "user_pg_a",
+                "private",
+                MemoryType::Profile,
+                json!({}),
+                None,
+                None,
+            );
 
-        store
-            .insert_fact(&tenant_a, fact.clone())
-            .await
-            .expect("insert should succeed");
+            store
+                .insert_fact(&tenant_a, fact.clone())
+                .await
+                .expect("insert should succeed");
 
-        let cross = store
-            .get_fact(&tenant_b, fact.id)
-            .await
-            .expect("get should succeed");
-        assert!(cross.is_none());
-    })
+            let cross = store
+                .get_fact(&tenant_b, fact.id)
+                .await
+                .expect("get should succeed");
+            assert!(cross.is_none());
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn soft_delete_hides_fact_from_normal_search() {
-    with_postgres_store("soft_delete_hides_fact_from_normal_search", |store| async move {
-        let tenant = tenant("org_pg_f", "user_pg_a");
-        let fact = sample_fact(
-            "org_pg_f",
-            "user_pg_a",
-            "delete me",
-            MemoryType::Task,
-            json!({}),
-            None,
-            None,
-        );
+    with_postgres_store(
+        "soft_delete_hides_fact_from_normal_search",
+        |store| async move {
+            let tenant = tenant("org_pg_f", "user_pg_a");
+            let fact = sample_fact(
+                "org_pg_f",
+                "user_pg_a",
+                "delete me",
+                MemoryType::Task,
+                json!({}),
+                None,
+                None,
+            );
 
-        store
-            .insert_fact(&tenant, fact.clone())
-            .await
-            .expect("insert should succeed");
-        store
-            .soft_delete_fact(&tenant, fact.id)
-            .await
-            .expect("soft delete should succeed");
+            store
+                .insert_fact(&tenant, fact.clone())
+                .await
+                .expect("insert should succeed");
+            store
+                .soft_delete_fact(&tenant, fact.id)
+                .await
+                .expect("soft delete should succeed");
 
-        assert!(store
-            .get_fact(&tenant, fact.id)
-            .await
-            .expect("get should succeed")
-            .is_none());
+            assert!(
+                store
+                    .get_fact(&tenant, fact.id)
+                    .await
+                    .expect("get should succeed")
+                    .is_none()
+            );
 
-        let results = store
-            .search_facts(FactSearchQuery::new(tenant.clone(), 10))
-            .await
-            .expect("search should succeed");
-        assert!(results.is_empty());
-    })
+            let results = store
+                .search_facts(FactSearchQuery::new(tenant.clone(), 10))
+                .await
+                .expect("search should succeed");
+            assert!(results.is_empty());
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn include_deleted_returns_soft_deleted_fact() {
-    with_postgres_store("include_deleted_returns_soft_deleted_fact", |store| async move {
-        let tenant = tenant("org_pg_g", "user_pg_a");
-        let fact = sample_fact(
-            "org_pg_g",
-            "user_pg_a",
-            "deleted fact",
-            MemoryType::Task,
-            json!({}),
-            None,
-            None,
-        );
+    with_postgres_store(
+        "include_deleted_returns_soft_deleted_fact",
+        |store| async move {
+            let tenant = tenant("org_pg_g", "user_pg_a");
+            let fact = sample_fact(
+                "org_pg_g",
+                "user_pg_a",
+                "deleted fact",
+                MemoryType::Task,
+                json!({}),
+                None,
+                None,
+            );
 
-        store
-            .insert_fact(&tenant, fact.clone())
-            .await
-            .expect("insert should succeed");
-        store
-            .soft_delete_fact(&tenant, fact.id)
-            .await
-            .expect("soft delete should succeed");
+            store
+                .insert_fact(&tenant, fact.clone())
+                .await
+                .expect("insert should succeed");
+            store
+                .soft_delete_fact(&tenant, fact.id)
+                .await
+                .expect("soft delete should succeed");
 
-        let results = store
-            .search_facts(FactSearchQuery {
-                tenant,
-                memory_types: None,
-                query_text: None,
-                limit: 10,
-                cursor: None,
-                include_deleted: true,
-            })
-            .await
-            .expect("search should succeed");
+            let results = store
+                .search_facts(FactSearchQuery {
+                    tenant,
+                    memory_types: None,
+                    query_text: None,
+                    limit: 10,
+                    cursor: None,
+                    include_deleted: true,
+                })
+                .await
+                .expect("search should succeed");
 
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].id, fact.id);
-    })
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].id, fact.id);
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn delete_user_data_removes_only_target_user() {
-    with_postgres_store("delete_user_data_removes_only_target_user", |store| async move {
-        let tenant_a = tenant("org_pg_h", "user_pg_a");
-        let tenant_b = tenant("org_pg_h", "user_pg_b");
+    with_postgres_store(
+        "delete_user_data_removes_only_target_user",
+        |store| async move {
+            let tenant_a = tenant("org_pg_h", "user_pg_a");
+            let tenant_b = tenant("org_pg_h", "user_pg_b");
 
-        store
-            .insert_fact(
-                &tenant_a,
-                sample_fact(
-                    "org_pg_h",
-                    "user_pg_a",
-                    "user a",
-                    MemoryType::Profile,
-                    json!({}),
-                    None,
-                    None,
-                ),
-            )
-            .await
-            .expect("insert should succeed");
-        store
-            .insert_fact(
-                &tenant_b,
-                sample_fact(
-                    "org_pg_h",
-                    "user_pg_b",
-                    "user b",
-                    MemoryType::Profile,
-                    json!({}),
-                    None,
-                    None,
-                ),
-            )
-            .await
-            .expect("insert should succeed");
-
-        store
-            .delete_user_data(&tenant_a)
-            .await
-            .expect("delete should succeed");
-
-        assert!(store
-            .search_facts(FactSearchQuery::new(tenant_a, 10))
-            .await
-            .expect("search")
-            .is_empty());
-        assert_eq!(
             store
-                .search_facts(FactSearchQuery::new(tenant_b, 10))
+                .insert_fact(
+                    &tenant_a,
+                    sample_fact(
+                        "org_pg_h",
+                        "user_pg_a",
+                        "user a",
+                        MemoryType::Profile,
+                        json!({}),
+                        None,
+                        None,
+                    ),
+                )
                 .await
-                .expect("search")
-                .len(),
-            1
-        );
-    })
+                .expect("insert should succeed");
+            store
+                .insert_fact(
+                    &tenant_b,
+                    sample_fact(
+                        "org_pg_h",
+                        "user_pg_b",
+                        "user b",
+                        MemoryType::Profile,
+                        json!({}),
+                        None,
+                        None,
+                    ),
+                )
+                .await
+                .expect("insert should succeed");
+
+            store
+                .delete_user_data(&tenant_a)
+                .await
+                .expect("delete should succeed");
+
+            assert!(
+                store
+                    .search_facts(FactSearchQuery::new(tenant_a, 10))
+                    .await
+                    .expect("search")
+                    .is_empty()
+            );
+            assert_eq!(
+                store
+                    .search_facts(FactSearchQuery::new(tenant_b, 10))
+                    .await
+                    .expect("search")
+                    .len(),
+                1
+            );
+        },
+    )
     .await;
 }
 
@@ -443,39 +459,42 @@ async fn metadata_round_trip_works() {
 
 #[tokio::test]
 async fn valid_and_invalid_at_round_trip_works() {
-    with_postgres_store("valid_and_invalid_at_round_trip_works", |store| async move {
-        let tenant = tenant("org_pg_j", "user_pg_a");
-        let valid_at = Utc::now() - Duration::days(2);
-        let invalid_at = Utc::now() - Duration::days(1);
-        let fact = sample_fact(
-            "org_pg_j",
-            "user_pg_a",
-            "temporal fact",
-            MemoryType::Entity,
-            json!({}),
-            Some(valid_at),
-            Some(invalid_at),
-        );
+    with_postgres_store(
+        "valid_and_invalid_at_round_trip_works",
+        |store| async move {
+            let tenant = tenant("org_pg_j", "user_pg_a");
+            let valid_at = Utc::now() - Duration::days(2);
+            let invalid_at = Utc::now() - Duration::days(1);
+            let fact = sample_fact(
+                "org_pg_j",
+                "user_pg_a",
+                "temporal fact",
+                MemoryType::Entity,
+                json!({}),
+                Some(valid_at),
+                Some(invalid_at),
+            );
 
-        store
-            .insert_fact(&tenant, fact.clone())
-            .await
-            .expect("insert should succeed");
+            store
+                .insert_fact(&tenant, fact.clone())
+                .await
+                .expect("insert should succeed");
 
-        let fetched = store
-            .get_fact(&tenant, fact.id)
-            .await
-            .expect("get should succeed")
-            .expect("fact should exist");
+            let fetched = store
+                .get_fact(&tenant, fact.id)
+                .await
+                .expect("get should succeed")
+                .expect("fact should exist");
 
-        assert_eq!(
-            fetched.valid_at.map(|t| t.timestamp()),
-            Some(valid_at.timestamp())
-        );
-        assert_eq!(
-            fetched.invalid_at.map(|t| t.timestamp()),
-            Some(invalid_at.timestamp())
-        );
-    })
+            assert_eq!(
+                fetched.valid_at.map(|t| t.timestamp()),
+                Some(valid_at.timestamp())
+            );
+            assert_eq!(
+                fetched.invalid_at.map(|t| t.timestamp()),
+                Some(invalid_at.timestamp())
+            );
+        },
+    )
     .await;
 }

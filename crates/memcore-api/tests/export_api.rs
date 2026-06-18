@@ -3,7 +3,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{create_app, AppState};
+use memcore_api::{AppState, create_app};
 use memcore_config::Settings;
 use memcore_core::USER_EXPORT_FORMAT_VERSION;
 use tower::ServiceExt;
@@ -45,9 +45,7 @@ fn get_request(uri: &str, org_id: Option<&str>, with_auth: bool) -> Request<Body
         builder = builder.header(name, value);
     }
 
-    builder
-        .body(Body::empty())
-        .expect("request should build")
+    builder.body(Body::empty()).expect("request should build")
 }
 
 async fn response_parts(
@@ -102,11 +100,8 @@ async fn export_user_after_adding_memories() {
     let app = test_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
 
-    let (status, json) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), Some(ORG_A), true),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, get_request(&export_uri(USER_A, ""), Some(ORG_A), true)).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "success");
@@ -120,11 +115,8 @@ async fn export_includes_facts() {
     let app = test_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
 
-    let (status, json) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), Some(ORG_A), true),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, get_request(&export_uri(USER_A, ""), Some(ORG_A), true)).await;
 
     assert_eq!(status, StatusCode::OK);
     let facts = json["export"]["facts"]
@@ -139,11 +131,8 @@ async fn export_includes_memory_events_by_default() {
     let app = test_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
 
-    let (status, json) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), Some(ORG_A), true),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, get_request(&export_uri(USER_A, ""), Some(ORG_A), true)).await;
 
     assert_eq!(status, StatusCode::OK);
     let events = json["export"]["memory_events"]
@@ -179,11 +168,8 @@ async fn export_does_not_expose_input_text() {
     let app = test_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
 
-    let (status, json) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), Some(ORG_A), true),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, get_request(&export_uri(USER_A, ""), Some(ORG_A), true)).await;
 
     assert_eq!(status, StatusCode::OK);
     let events = json["export"]["memory_events"]
@@ -199,11 +185,8 @@ async fn export_does_not_expose_api_key_fields() {
     let app = test_app();
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
 
-    let (status, json) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), Some(ORG_A), true),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, get_request(&export_uri(USER_A, ""), Some(ORG_A), true)).await;
 
     assert_eq!(status, StatusCode::OK);
     let body = serde_json::to_string(&json).expect("serialize");
@@ -228,11 +211,7 @@ async fn export_requires_authorization_header() {
 async fn export_requires_organization_header() {
     let app = test_app();
 
-    let (status, _) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), None, true),
-    )
-    .await;
+    let (status, _) = response_parts(app, get_request(&export_uri(USER_A, ""), None, true)).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
@@ -243,11 +222,8 @@ async fn user_a_cannot_export_user_b_data_via_wrong_path() {
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT).await;
     seed_memory(&app, ORG_A, USER_B, "user b secret").await;
 
-    let (status, json) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), Some(ORG_A), true),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, get_request(&export_uri(USER_A, ""), Some(ORG_A), true)).await;
 
     assert_eq!(status, StatusCode::OK);
     let facts = json["export"]["facts"]
@@ -262,11 +238,8 @@ async fn org_a_cannot_export_org_b_data() {
     let app = test_app();
     seed_memory(&app, ORG_B, USER_A, "org b secret").await;
 
-    let (status, json) = response_parts(
-        app,
-        get_request(&export_uri(USER_A, ""), Some(ORG_A), true),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, get_request(&export_uri(USER_A, ""), Some(ORG_A), true)).await;
 
     assert_eq!(status, StatusCode::OK);
     let facts = json["export"]["facts"]

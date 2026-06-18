@@ -133,7 +133,10 @@ async fn protected_route_fails_with_empty_tenant_header() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
-    assert_eq!(json["error"]["message"], "X-Organization-ID cannot be empty");
+    assert_eq!(
+        json["error"]["message"],
+        "X-Organization-ID cannot be empty"
+    );
 }
 
 #[tokio::test]
@@ -203,7 +206,12 @@ async fn trimmed_tenant_header_is_used_by_handler() {
 
     let (status, json) = response_parts(
         test_app(),
-        protected_post("/api/v1/memories", &add_body, Some(org_with_whitespace), true),
+        protected_post(
+            "/api/v1/memories",
+            &add_body,
+            Some(org_with_whitespace),
+            true,
+        ),
     )
     .await;
 

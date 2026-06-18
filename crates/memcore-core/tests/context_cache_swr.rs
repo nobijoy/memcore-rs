@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 use memcore_core::{
-    build_context_cache_key, cached_entry_with_ttl, BuildContextInput, BuildContextOutput,
-    ContextBudgetUsage, ContextCache, ContextCacheConfig, ContextCacheUsage, ContextCompressionUsage,
-    InMemoryContextCache, MemoryEngine, TenantContext,
+    BuildContextInput, BuildContextOutput, ContextBudgetUsage, ContextCache, ContextCacheConfig,
+    ContextCacheUsage, ContextCompressionUsage, InMemoryContextCache, MemoryEngine, TenantContext,
+    build_context_cache_key, cached_entry_with_ttl,
 };
 use memcore_providers::{MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};
@@ -97,10 +97,7 @@ async fn refresh_stale_context_updates_cache_entry() {
         .expect("seed");
 
     let engine = engine_with_cache(cache.clone());
-    engine
-        .refresh_stale_context(input)
-        .await
-        .expect("refresh");
+    engine.refresh_stale_context(input).await.expect("refresh");
 
     let fresh = cache.get(&key).await.expect("get").expect("fresh");
     assert_ne!(fresh.context, "before refresh");

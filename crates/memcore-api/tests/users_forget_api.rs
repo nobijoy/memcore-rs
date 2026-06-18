@@ -44,9 +44,7 @@ fn delete_user_request(uri: &str, org_id: Option<&str>, with_auth: bool) -> Requ
         builder = builder.header(name, value);
     }
 
-    builder
-        .body(Body::empty())
-        .expect("request should build")
+    builder.body(Body::empty()).expect("request should build")
 }
 
 fn get_request(uri: &str, org_id: &str) -> Request<Body> {

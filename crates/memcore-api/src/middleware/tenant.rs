@@ -93,7 +93,7 @@ fn extract_organization(
 mod tests {
     use axum::http::HeaderMap;
 
-    use super::{extract_organization, ORG_HEADER};
+    use super::{ORG_HEADER, extract_organization};
 
     #[test]
     fn missing_header_returns_error() {

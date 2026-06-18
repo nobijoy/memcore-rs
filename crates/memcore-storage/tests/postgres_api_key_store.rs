@@ -101,38 +101,43 @@ async fn postgres_list_api_keys_by_org() {
 
 #[tokio::test]
 async fn postgres_insert_find_and_revoke_api_key() {
-    with_postgres_store("postgres_insert_find_and_revoke_api_key", |store| async move {
-        let record = ApiKeyRecord {
-            id: Uuid::new_v4(),
-            org_id: "org_pg_key".to_string(),
-            name: "pg-test".to_string(),
-            key_hash: hash_api_key("pepper", "pg-secret"),
-            scopes: vec![ApiKeyScope::MemoryRead, ApiKeyScope::AuditRead],
-            created_at: Utc::now(),
-            revoked_at: None,
-        };
+    with_postgres_store(
+        "postgres_insert_find_and_revoke_api_key",
+        |store| async move {
+            let record = ApiKeyRecord {
+                id: Uuid::new_v4(),
+                org_id: "org_pg_key".to_string(),
+                name: "pg-test".to_string(),
+                key_hash: hash_api_key("pepper", "pg-secret"),
+                scopes: vec![ApiKeyScope::MemoryRead, ApiKeyScope::AuditRead],
+                created_at: Utc::now(),
+                revoked_at: None,
+            };
 
-        store
-            .insert_api_key(record.clone())
-            .await
-            .expect("insert should succeed");
+            store
+                .insert_api_key(record.clone())
+                .await
+                .expect("insert should succeed");
 
-        let found = store
-            .find_by_hash(&record.key_hash)
-            .await
-            .expect("find should succeed")
-            .expect("record should exist");
-        assert_eq!(found.scopes, record.scopes);
+            let found = store
+                .find_by_hash(&record.key_hash)
+                .await
+                .expect("find should succeed")
+                .expect("record should exist");
+            assert_eq!(found.scopes, record.scopes);
 
-        store
-            .revoke_api_key("org_pg_key", record.id)
-            .await
-            .expect("revoke should succeed");
-        assert!(store
-            .find_by_hash(&record.key_hash)
-            .await
-            .expect("find should succeed")
-            .is_none());
-    })
+            store
+                .revoke_api_key("org_pg_key", record.id)
+                .await
+                .expect("revoke should succeed");
+            assert!(
+                store
+                    .find_by_hash(&record.key_hash)
+                    .await
+                    .expect("find should succeed")
+                    .is_none()
+            );
+        },
+    )
     .await;
 }

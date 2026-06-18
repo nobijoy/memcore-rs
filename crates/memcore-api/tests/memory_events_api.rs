@@ -44,9 +44,7 @@ fn get_request(uri: &str, org_id: Option<&str>, with_auth: bool) -> Request<Body
         builder = builder.header(name, value);
     }
 
-    builder
-        .body(Body::empty())
-        .expect("request should build")
+    builder.body(Body::empty()).expect("request should build")
 }
 
 async fn response_parts(
@@ -65,7 +63,12 @@ async fn response_parts(
     (status, json)
 }
 
-async fn seed_memory_for_user(app: &axum::Router, org_id: &str, user_id: &str, content: &str) -> Uuid {
+async fn seed_memory_for_user(
+    app: &axum::Router,
+    org_id: &str,
+    user_id: &str,
+    content: &str,
+) -> Uuid {
     let add_body = format!(
         r#"{{
           "user_id": "{user_id}",
@@ -107,11 +110,7 @@ async fn listing_events_after_adding_memory() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), Some(ORG_A), true),
     )
     .await;
 
@@ -127,15 +126,13 @@ async fn response_includes_events_array() {
 
     let (_, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), Some(ORG_A), true),
     )
     .await;
 
-    let events = json["events"].as_array().expect("events should be an array");
+    let events = json["events"]
+        .as_array()
+        .expect("events should be an array");
     assert!(!events.is_empty());
     assert!(events[0]["id"].is_string());
     assert_eq!(events[0]["operation"], "Add");
@@ -151,15 +148,13 @@ async fn response_does_not_expose_input_text() {
 
     let (_, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), Some(ORG_A), true),
     )
     .await;
 
-    let events = json["events"].as_array().expect("events should be an array");
+    let events = json["events"]
+        .as_array()
+        .expect("events should be an array");
     for event in events {
         assert!(
             event.get("input_text").is_none(),
@@ -276,11 +271,7 @@ async fn limit_defaults_correctly() {
 
     let (status, _) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), Some(ORG_A), true),
     )
     .await;
 
@@ -291,11 +282,7 @@ async fn limit_defaults_correctly() {
 async fn limit_above_max_returns_validation_error() {
     let (status, json) = response_parts(
         test_app(),
-        get_request(
-            &memory_events_uri(USER_A, "limit=200"),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, "limit=200"), Some(ORG_A), true),
     )
     .await;
 
@@ -326,11 +313,7 @@ async fn invalid_cursor_returns_validation_error() {
 async fn route_requires_authorization_header() {
     let (status, json) = response_parts(
         test_app(),
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            Some(ORG_A),
-            false,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), Some(ORG_A), false),
     )
     .await;
 
@@ -342,11 +325,7 @@ async fn route_requires_authorization_header() {
 async fn route_requires_organization_header() {
     let (status, json) = response_parts(
         test_app(),
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            None,
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), None, true),
     )
     .await;
 
@@ -361,11 +340,7 @@ async fn user_a_cannot_list_user_b_events() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_B, ""),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_B, ""), Some(ORG_A), true),
     )
     .await;
 
@@ -380,11 +355,7 @@ async fn org_a_cannot_list_org_b_events() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            Some(ORG_B),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), Some(ORG_B), true),
     )
     .await;
 
@@ -402,10 +373,7 @@ impl SqliteFileFixture {
         let temp_dir = tempfile::tempdir().expect("tempdir should be created");
         let db_path = temp_dir.path().join("memcore.db");
         std::fs::File::create(&db_path).expect("sqlite database file should be created");
-        let database_url = format!(
-            "sqlite:{}",
-            db_path.to_string_lossy().replace('\\', "/")
-        );
+        let database_url = format!("sqlite:{}", db_path.to_string_lossy().replace('\\', "/"));
         Self {
             _temp_dir: temp_dir,
             database_url,
@@ -434,11 +402,7 @@ async fn sqlite_backend_returns_persisted_audit_events_via_api() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, ""),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, ""), Some(ORG_A), true),
     )
     .await;
 
@@ -572,11 +536,7 @@ async fn keyword_search_finds_matching_event_content() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, "q=rust"),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, "q=rust"), Some(ORG_A), true),
     )
     .await;
 
@@ -594,11 +554,7 @@ async fn empty_q_behaves_like_no_search() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &memory_events_uri(USER_A, "q=%20"),
-            Some(ORG_A),
-            true,
-        ),
+        get_request(&memory_events_uri(USER_A, "q=%20"), Some(ORG_A), true),
     )
     .await;
 

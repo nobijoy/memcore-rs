@@ -160,10 +160,12 @@ async fn org_users_list_returns_only_requested_org() {
         .expect("list users");
 
     assert_eq!(output.users.len(), 2);
-    assert!(output
-        .users
-        .iter()
-        .all(|user| user.user_id == "user_1" || user.user_id == "user_2"));
+    assert!(
+        output
+            .users
+            .iter()
+            .all(|user| user.user_id == "user_1" || user.user_id == "user_2")
+    );
     assert!(output.next_cursor.is_none());
 }
 

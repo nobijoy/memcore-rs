@@ -62,11 +62,8 @@ const VALID_BODY: &str = r#"{
 
 #[tokio::test]
 async fn post_memories_succeeds_with_valid_request() {
-    let (status, json) = response_parts(
-        test_app(),
-        add_memory_request(VALID_BODY, Some("org_123")),
-    )
-    .await;
+    let (status, json) =
+        response_parts(test_app(), add_memory_request(VALID_BODY, Some("org_123"))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "success");
@@ -74,11 +71,8 @@ async fn post_memories_succeeds_with_valid_request() {
 
 #[tokio::test]
 async fn post_memories_response_includes_operation_summary() {
-    let (_, json) = response_parts(
-        test_app(),
-        add_memory_request(VALID_BODY, Some("org_123")),
-    )
-    .await;
+    let (_, json) =
+        response_parts(test_app(), add_memory_request(VALID_BODY, Some("org_123"))).await;
 
     assert_eq!(json["summary"]["added"], 1);
     assert_eq!(json["summary"]["updated"], 0);
@@ -88,13 +82,12 @@ async fn post_memories_response_includes_operation_summary() {
 
 #[tokio::test]
 async fn post_memories_response_includes_memories() {
-    let (_, json) = response_parts(
-        test_app(),
-        add_memory_request(VALID_BODY, Some("org_123")),
-    )
-    .await;
+    let (_, json) =
+        response_parts(test_app(), add_memory_request(VALID_BODY, Some("org_123"))).await;
 
-    let memories = json["memories"].as_array().expect("memories should be an array");
+    let memories = json["memories"]
+        .as_array()
+        .expect("memories should be an array");
     assert_eq!(memories.len(), 1);
     assert!(memories[0]["id"].is_string());
     assert_eq!(
@@ -108,18 +101,11 @@ async fn post_memories_response_includes_memories() {
 
 #[tokio::test]
 async fn missing_organization_header_returns_error() {
-    let (status, json) = response_parts(
-        test_app(),
-        add_memory_request(VALID_BODY, None),
-    )
-    .await;
+    let (status, json) = response_parts(test_app(), add_memory_request(VALID_BODY, None)).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
-    assert_eq!(
-        json["error"]["message"],
-        "missing X-Organization-ID header"
-    );
+    assert_eq!(json["error"]["message"], "missing X-Organization-ID header");
 }
 
 #[tokio::test]
@@ -130,11 +116,8 @@ async fn empty_user_id_returns_validation_error() {
       "metadata": {}
     }"#;
 
-    let (status, json) = response_parts(
-        test_app(),
-        add_memory_request(body, Some("org_123")),
-    )
-    .await;
+    let (status, json) =
+        response_parts(test_app(), add_memory_request(body, Some("org_123"))).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
@@ -149,11 +132,8 @@ async fn empty_messages_returns_validation_error() {
       "metadata": {}
     }"#;
 
-    let (status, json) = response_parts(
-        test_app(),
-        add_memory_request(body, Some("org_123")),
-    )
-    .await;
+    let (status, json) =
+        response_parts(test_app(), add_memory_request(body, Some("org_123"))).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
@@ -168,11 +148,8 @@ async fn invalid_role_returns_validation_error() {
       "metadata": {}
     }"#;
 
-    let (status, json) = response_parts(
-        test_app(),
-        add_memory_request(body, Some("org_123")),
-    )
-    .await;
+    let (status, json) =
+        response_parts(test_app(), add_memory_request(body, Some("org_123"))).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
@@ -188,19 +165,13 @@ async fn adding_same_memory_twice_does_not_duplicate_listed_memories() {
       "metadata": {}
     }"#;
 
-    let (first_status, first_json) = response_parts(
-        app.clone(),
-        add_memory_request(body, Some("org_dedup_api")),
-    )
-    .await;
+    let (first_status, first_json) =
+        response_parts(app.clone(), add_memory_request(body, Some("org_dedup_api"))).await;
     assert_eq!(first_status, StatusCode::OK);
     assert_eq!(first_json["summary"]["added"], 1);
 
-    let (second_status, second_json) = response_parts(
-        app.clone(),
-        add_memory_request(body, Some("org_dedup_api")),
-    )
-    .await;
+    let (second_status, second_json) =
+        response_parts(app.clone(), add_memory_request(body, Some("org_dedup_api"))).await;
     assert_eq!(second_status, StatusCode::OK);
     assert_eq!(second_json["summary"]["added"], 0);
     assert_eq!(second_json["summary"]["noop"], 1);

@@ -7,7 +7,7 @@ use memcore_common::MemcoreResult;
 use crate::ports::{LlmProvider, SummarizationInput};
 use crate::{Fact, MemorySource, TenantContext};
 
-use super::compression::{wrap_provider_summary, CompressedContext, SimpleContextCompressor};
+use super::compression::{CompressedContext, SimpleContextCompressor, wrap_provider_summary};
 use super::compression_options::ContextCompressionMode;
 use super::format_options::ContextFormat;
 use super::formatter::ContextMemoryItem;

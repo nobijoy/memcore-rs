@@ -62,7 +62,10 @@ fn scopes_from_json(value: &str) -> MemcoreResult<Vec<ApiKeyScope>> {
     let labels: Vec<String> = serde_json::from_str(value).map_err(|error| {
         MemcoreError::StorageError(format!("failed to deserialize api key scopes: {error}"))
     })?;
-    labels.iter().map(|label| api_key_scope_from_str(label)).collect()
+    labels
+        .iter()
+        .map(|label| api_key_scope_from_str(label))
+        .collect()
 }
 
 fn row_to_api_key_record(
@@ -194,7 +197,9 @@ impl ApiKeyStore for SqliteApiKeyStore {
         .map_err(|error| storage_error("failed to revoke api key", error))?;
 
         if result.rows_affected() == 0 {
-            return Err(MemcoreError::NotFound(format!("api key not found: {key_id}")));
+            return Err(MemcoreError::NotFound(format!(
+                "api key not found: {key_id}"
+            )));
         }
 
         Ok(())
@@ -206,9 +211,8 @@ impl ApiKeyStore for SqliteApiKeyStore {
     ) -> MemcoreResult<Vec<ApiKeyRecord>> {
         use crate::pagination::{fetch_limit, push_sqlite_desc_cursor};
 
-        let fetch = i64::try_from(fetch_limit(query.limit)).map_err(|error| {
-            storage_error("api key list limit out of range for sqlite", error)
-        })?;
+        let fetch = i64::try_from(fetch_limit(query.limit))
+            .map_err(|error| storage_error("api key list limit out of range for sqlite", error))?;
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             "SELECT id, org_id, name, key_hash, scopes, created_at, revoked_at FROM api_keys WHERE org_id = ",

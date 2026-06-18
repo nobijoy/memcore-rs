@@ -1,5 +1,5 @@
 use memcore_common::MemcoreResult;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::format_options::ContextFormat;
 use super::formatter::ContextMemoryItem;
@@ -97,8 +97,9 @@ pub fn format_summary_text(
             }
             lines.join("\n")
         }
-        ContextFormat::Json => serde_json::to_string(&json!({ "summary": bullets }))
-            .unwrap_or_default(),
+        ContextFormat::Json => {
+            serde_json::to_string(&json!({ "summary": bullets })).unwrap_or_default()
+        }
         ContextFormat::PlainText => {
             let mut lines = Vec::new();
             if include_summary_section {
@@ -185,8 +186,8 @@ pub fn effective_summary_budget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::token_estimator::SimpleTokenEstimator;
     use crate::MemoryType;
+    use crate::context::token_estimator::SimpleTokenEstimator;
     use chrono::Utc;
     use serde_json::json;
     use uuid::Uuid;

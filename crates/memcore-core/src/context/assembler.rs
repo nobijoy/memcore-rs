@@ -2,8 +2,8 @@ use crate::MemorySearchResult;
 
 use super::budget::{ContextBudget, ContextBudgetUsage};
 use super::compression::{
-    effective_summary_budget, merge_context_with_summary, CompressedContext,
-    SimpleContextCompressor,
+    CompressedContext, SimpleContextCompressor, effective_summary_budget,
+    merge_context_with_summary,
 };
 use super::compression_options::{
     ContextCompressionMode, ContextCompressionOptions, ContextCompressionUsage,
@@ -52,9 +52,7 @@ pub fn assemble_context_with_budget(
     let available = budget.available_tokens();
     let total_candidates = memories.len();
     let summary_reserve = if compression_options.mode.is_enabled() {
-        compression_options
-            .summary_max_tokens
-            .min(available)
+        compression_options.summary_max_tokens.min(available)
     } else {
         0
     };
@@ -328,10 +326,7 @@ mod tests {
     #[test]
     fn compression_disabled_preserves_skip_behavior() {
         let long_content = "x".repeat(4000);
-        let memories = vec![
-            sample_result(&long_content),
-            sample_result("tiny"),
-        ];
+        let memories = vec![sample_result(&long_content), sample_result("tiny")];
         let budget = ContextBudget {
             max_tokens: 120,
             reserved_tokens: 20,
@@ -354,7 +349,11 @@ mod tests {
     #[test]
     fn simple_extractive_adds_summary_section() {
         let memories: Vec<_> = (0..8)
-            .map(|index| sample_result(&format!("compression memory item {index} alpha bravo charlie delta")))
+            .map(|index| {
+                sample_result(&format!(
+                    "compression memory item {index} alpha bravo charlie delta"
+                ))
+            })
             .collect();
         let budget = ContextBudget {
             max_tokens: 50,

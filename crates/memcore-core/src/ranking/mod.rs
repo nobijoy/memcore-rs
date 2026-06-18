@@ -7,8 +7,8 @@ use std::cmp::Ordering;
 
 use crate::{MemorySearchResult, MemoryType};
 
-pub use rrf::{reciprocal_rank_fusion, RankedCandidate, RankingSource, RrfConfig};
-pub use scorer::{clamp01, freshness_score, memory_type_boost, MemoryRanker};
+pub use rrf::{RankedCandidate, RankingSource, RrfConfig, reciprocal_rank_fusion};
+pub use scorer::{MemoryRanker, clamp01, freshness_score, memory_type_boost};
 pub use types::RankingConfig;
 
 /// Computes the weighted metadata ranking score for a search hit.

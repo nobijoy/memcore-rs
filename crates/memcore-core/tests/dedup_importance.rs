@@ -112,7 +112,10 @@ async fn exact_duplicate_is_not_inserted() {
     assert_eq!(output.noop, 1);
 
     let listed = fact_store
-        .search_facts(memcore_core::FactSearchQuery::new(tenant("org_dedup", "user_a"), 10))
+        .search_facts(memcore_core::FactSearchQuery::new(
+            tenant("org_dedup", "user_a"),
+            10,
+        ))
         .await
         .expect("search");
     assert_eq!(listed.len(), 1);
@@ -487,26 +490,30 @@ async fn delete_operation_still_deletes_target_fact() {
     assert_eq!(output.deleted, 1);
     assert_eq!(output.added, 0);
 
-    assert!(fact_store
-        .get_fact(&tenant("org_dedup", "user_a"), existing.id)
-        .await
-        .expect("get")
-        .is_none());
+    assert!(
+        fact_store
+            .get_fact(&tenant("org_dedup", "user_a"), existing.id)
+            .await
+            .expect("get")
+            .is_none()
+    );
 }
 
 #[tokio::test]
 async fn vague_low_importance_fact_is_skipped() {
     let engine = engine_with(
         Arc::new(MockFactStore::new()),
-        MockLlmProvider::new().with_extraction_candidates(vec![CandidateFact::new(
-            "User said okay.",
-            MemoryType::Conversation,
-            0.9,
-            0.6,
-            None,
-            json!({}),
-        )
-        .expect("candidate")]),
+        MockLlmProvider::new().with_extraction_candidates(vec![
+            CandidateFact::new(
+                "User said okay.",
+                MemoryType::Conversation,
+                0.9,
+                0.6,
+                None,
+                json!({}),
+            )
+            .expect("candidate"),
+        ]),
         None,
     );
 
@@ -527,15 +534,17 @@ async fn vague_low_importance_fact_is_skipped() {
 async fn stable_memory_type_boost_allows_borderline_fact() {
     let engine = engine_with(
         Arc::new(MockFactStore::new()),
-        MockLlmProvider::new().with_extraction_candidates(vec![CandidateFact::new(
-            "User prefers Rust for backend services",
-            MemoryType::Preference,
-            0.9,
-            0.52,
-            None,
-            json!({}),
-        )
-        .expect("candidate")]),
+        MockLlmProvider::new().with_extraction_candidates(vec![
+            CandidateFact::new(
+                "User prefers Rust for backend services",
+                MemoryType::Preference,
+                0.9,
+                0.52,
+                None,
+                json!({}),
+            )
+            .expect("candidate"),
+        ]),
         None,
     )
     .with_min_importance(0.55);

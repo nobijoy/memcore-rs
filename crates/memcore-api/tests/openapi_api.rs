@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{create_app, AppState};
+use memcore_api::{AppState, create_app};
 use memcore_config::Settings;
 use tower::ServiceExt;
 
@@ -71,7 +71,11 @@ async fn openapi_json_is_valid_json_with_expected_paths() {
 
     let global_security = json.get("security");
     assert!(
-        global_security.is_none() || global_security.unwrap().as_array().is_some_and(|v| v.is_empty()),
+        global_security.is_none()
+            || global_security
+                .unwrap()
+                .as_array()
+                .is_some_and(|v| v.is_empty()),
         "OpenAPI should not require auth globally"
     );
 
@@ -80,7 +84,11 @@ async fn openapi_json_is_valid_json_with_expected_paths() {
     assert!(api_key_list_schema["properties"].get("raw_key").is_none());
 
     let memory_event_schema = &json["components"]["schemas"]["MemoryEventItemResponse"];
-    assert!(memory_event_schema["properties"].get("input_text").is_none());
+    assert!(
+        memory_event_schema["properties"]
+            .get("input_text")
+            .is_none()
+    );
 }
 
 #[tokio::test]

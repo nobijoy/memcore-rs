@@ -4,17 +4,18 @@ use chrono::Utc;
 use memcore_common::MemcoreError;
 use memcore_config::AuthMode;
 use memcore_core::{
-    build_page, parse_optional_cursor, ApiKeyListQuery, ApiKeyRecord, ApiKeyScope, PageCursor,
+    ApiKeyListQuery, ApiKeyRecord, ApiKeyScope, PageCursor, build_page, parse_optional_cursor,
 };
 use uuid::Uuid;
 
 use crate::dto::{
-    parse_create_api_key_request, ApiKeyItemResponse, CreateApiKeyRequest, CreateApiKeyResponse,
-    ListApiKeysQuery, ListApiKeysResponse, RevokeApiKeyResponse, MAX_LIST_API_KEYS_LIMIT,
+    ApiKeyItemResponse, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysQuery,
+    ListApiKeysResponse, MAX_LIST_API_KEYS_LIMIT, RevokeApiKeyResponse,
+    parse_create_api_key_request,
 };
 use crate::middleware::OrganizationContext;
-use crate::routes::common::{check_any_scope, ApiError};
-use crate::security::{generate_raw_api_key, hash_api_key_with_pepper, AuthContext};
+use crate::routes::common::{ApiError, check_any_scope};
+use crate::security::{AuthContext, generate_raw_api_key, hash_api_key_with_pepper};
 use crate::state::AppState;
 
 const DEV_MODE_PEPPER: &str = "memcore-dev-pepper";
@@ -66,10 +67,9 @@ pub async fn list_api_keys(
     )?;
 
     if query.limit == 0 {
-        return Err(MemcoreError::ValidationError(
-            "limit must be greater than 0".to_string(),
-        )
-        .into());
+        return Err(
+            MemcoreError::ValidationError("limit must be greater than 0".to_string()).into(),
+        );
     }
 
     if query.limit > MAX_LIST_API_KEYS_LIMIT {
@@ -142,8 +142,5 @@ fn resolve_api_key_pepper(state: &AppState) -> Result<&str, ApiError> {
         return Ok(DEV_MODE_PEPPER);
     }
 
-    Err(MemcoreError::Internal(
-        "api key pepper is not configured".to_string(),
-    )
-    .into())
+    Err(MemcoreError::Internal("api key pepper is not configured".to_string()).into())
 }

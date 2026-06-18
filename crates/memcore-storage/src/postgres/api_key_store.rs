@@ -24,7 +24,10 @@ fn scopes_to_strings(scopes: &[ApiKeyScope]) -> Vec<String> {
 }
 
 fn scopes_from_strings(values: Vec<String>) -> MemcoreResult<Vec<ApiKeyScope>> {
-    values.iter().map(|value| api_key_scope_from_str(value)).collect()
+    values
+        .iter()
+        .map(|value| api_key_scope_from_str(value))
+        .collect()
 }
 
 fn row_to_api_key_record(
@@ -142,7 +145,9 @@ impl ApiKeyStore for PostgresApiKeyStore {
         .map_err(|error| storage_error("failed to revoke api key", error))?;
 
         if result.rows_affected() == 0 {
-            return Err(MemcoreError::NotFound(format!("api key not found: {key_id}")));
+            return Err(MemcoreError::NotFound(format!(
+                "api key not found: {key_id}"
+            )));
         }
 
         Ok(())

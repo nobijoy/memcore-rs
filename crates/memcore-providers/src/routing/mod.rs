@@ -4,6 +4,4 @@ mod types;
 
 pub use metrics::{ProviderRoutingMetrics, ProviderRoutingMetricsSnapshot};
 pub use router::{ProviderCandidate, ProviderFallbackRouter};
-pub use types::{
-    circuit_key, ProviderCallContext, ProviderCapability, ProviderId,
-};
+pub use types::{ProviderCallContext, ProviderCapability, ProviderId, circuit_key};

@@ -20,10 +20,7 @@ impl SqliteFileFixture {
         let temp_dir = tempfile::tempdir().expect("tempdir should be created");
         let db_path = temp_dir.path().join("memcore.db");
         std::fs::File::create(&db_path).expect("sqlite database file should be created");
-        let database_url = format!(
-            "sqlite:{}",
-            db_path.to_string_lossy().replace('\\', "/")
-        );
+        let database_url = format!("sqlite:{}", db_path.to_string_lossy().replace('\\', "/"));
         Self {
             _temp_dir: temp_dir,
             database_url,
@@ -184,9 +181,7 @@ async fn delete_single_memory_soft_deletes_sqlite_fact() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let memory_id = list_json["memories"][0]["id"]
-        .as_str()
-        .expect("memory id");
+    let memory_id = list_json["memories"][0]["id"].as_str().expect("memory id");
     let memory_id = Uuid::parse_str(memory_id).expect("valid uuid");
 
     let (status, delete_json) = response_parts(
@@ -289,8 +284,8 @@ async fn forgetting_sqlite_user_does_not_delete_other_user_in_same_org() {
 #[tokio::test]
 async fn add_memory_records_audit_event_in_sqlite() {
     use memcore_core::{MemoryEventOperation, TenantContext};
-    use memcore_storage::{MemoryEventQuery, SqliteMemoryEventStore};
     use memcore_storage::traits::MemoryEventStore;
+    use memcore_storage::{MemoryEventQuery, SqliteMemoryEventStore};
 
     let fixture = SqliteFileFixture::new();
     let state = AppState::initialize(fixture.settings())
@@ -320,8 +315,8 @@ async fn add_memory_records_audit_event_in_sqlite() {
 #[tokio::test]
 async fn forget_user_records_audit_event_in_sqlite() {
     use memcore_core::{MemoryEventOperation, TenantContext};
-    use memcore_storage::{MemoryEventQuery, SqliteMemoryEventStore};
     use memcore_storage::traits::MemoryEventStore;
+    use memcore_storage::{MemoryEventQuery, SqliteMemoryEventStore};
 
     let fixture = SqliteFileFixture::new();
     let state = AppState::initialize(fixture.settings())

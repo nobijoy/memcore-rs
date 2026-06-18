@@ -171,13 +171,13 @@ mod tests {
             &[],
             &config,
         )[0]
-            .1;
+        .1;
         let rank_two = reciprocal_rank_fusion(
             &[candidate(fact_id, RankingSource::Semantic, 2)],
             &[],
             &config,
         )[0]
-            .1;
+        .1;
         assert!(rank_one > rank_two);
     }
 
@@ -232,13 +232,13 @@ mod tests {
                 keyword_weight: 1.0,
             },
         )[0]
-            .1;
+        .1;
         let default_semantic = reciprocal_rank_fusion(
             &[candidate(fact_id, RankingSource::Semantic, 1)],
             &[],
             &RrfConfig::default(),
         )[0]
-            .1;
+        .1;
         assert!(heavy_semantic > default_semantic);
     }
 

@@ -7,19 +7,16 @@ use memcore_common::MemcoreResult;
 use memcore_core::{CandidateFact, FactOperationDecision};
 
 use crate::circuit_breaker::ProviderCircuitBreaker;
-use crate::inputs::{
-    FactClassificationInput, FactExtractionInput, SummarizationInput,
-};
+use crate::inputs::{FactClassificationInput, FactExtractionInput, SummarizationInput};
 use crate::policy::ProviderExecutionPolicy;
 use crate::routing::{
-    ProviderCandidate, ProviderCapability, ProviderFallbackRouter,
-    ProviderRoutingMetrics,
+    ProviderCandidate, ProviderCapability, ProviderFallbackRouter, ProviderRoutingMetrics,
 };
 use crate::traits::{EmbeddingProvider, LlmProvider};
 use crate::usage::{
+    ProviderUsageAttributionSlot, ProviderUsageRecorder, TokenUsageSlot,
     estimate_embedding_batch_tokens, estimate_embedding_tokens, estimate_llm_classification_tokens,
     estimate_llm_extraction_tokens, estimate_llm_summarization_tokens, store_token_usage,
-    ProviderUsageAttributionSlot, ProviderUsageRecorder, TokenUsageSlot,
 };
 
 /// LLM provider with timeout/retry, circuit breaker, optional fallback routing, and usage recording.
@@ -90,10 +87,7 @@ fn store_estimated_usage(slot: Option<TokenUsageSlot>, usage: crate::usage::Prov
 
 #[async_trait]
 impl LlmProvider for ResilientLlmProvider {
-    async fn extract_facts(
-        &self,
-        input: FactExtractionInput,
-    ) -> MemcoreResult<Vec<CandidateFact>> {
+    async fn extract_facts(&self, input: FactExtractionInput) -> MemcoreResult<Vec<CandidateFact>> {
         self.router
             .execute_with_fallback(
                 ProviderCapability::Llm,
@@ -287,6 +281,6 @@ impl EmbeddingProvider for ResilientEmbeddingProvider {
 }
 
 pub use compat::{
-    build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
-    wrap_embedding_provider, wrap_llm_provider, PolicyEmbeddingProvider, PolicyLlmProvider,
+    PolicyEmbeddingProvider, PolicyLlmProvider, build_resilient_embedding_from_candidates,
+    build_resilient_llm_from_candidates, wrap_embedding_provider, wrap_llm_provider,
 };

@@ -4,7 +4,7 @@ use memcore_common::MemcoreError;
 use memcore_core::ApiKeyScope;
 
 use crate::response::ErrorBody;
-use crate::security::{ensure_any_scope, ensure_scope, AuthContext};
+use crate::security::{AuthContext, ensure_any_scope, ensure_scope};
 
 #[derive(Debug)]
 pub struct ApiError((axum::http::StatusCode, Json<ErrorBody>));

@@ -17,9 +17,7 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::{
-        CandidateFact, Fact, FactOperation, MemorySource, MemoryType, TenantContext,
-    };
+    use super::{CandidateFact, Fact, FactOperation, MemorySource, MemoryType, TenantContext};
     use memcore_common::MemcoreError;
 
     fn now() -> chrono::DateTime<Utc> {
@@ -77,8 +75,8 @@ mod tests {
 
     #[test]
     fn enum_serialization_uses_snake_case() {
-        let memory_type = serde_json::to_string(&MemoryType::Conversation)
-            .expect("memory type should serialize");
+        let memory_type =
+            serde_json::to_string(&MemoryType::Conversation).expect("memory type should serialize");
         assert_eq!(memory_type, "\"conversation\"");
 
         let operation = serde_json::to_string(&FactOperation::Summarize)
@@ -137,15 +135,9 @@ mod tests {
             MemcoreError::ValidationError("confidence must be between 0.0 and 1.0".to_string())
         );
 
-        let importance_error = CandidateFact::new(
-            "content",
-            MemoryType::Task,
-            0.5,
-            -0.1,
-            None,
-            json!({}),
-        )
-        .expect_err("invalid importance should fail");
+        let importance_error =
+            CandidateFact::new("content", MemoryType::Task, 0.5, -0.1, None, json!({}))
+                .expect_err("invalid importance should fail");
         assert_eq!(
             importance_error,
             MemcoreError::ValidationError("importance must be between 0.0 and 1.0".to_string())

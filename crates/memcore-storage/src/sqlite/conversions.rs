@@ -72,7 +72,9 @@ pub(crate) fn optional_datetime_to_str(value: Option<DateTime<Utc>>) -> Option<S
     value.map(datetime_to_str)
 }
 
-pub(crate) fn optional_datetime_from_str(value: Option<String>) -> MemcoreResult<Option<DateTime<Utc>>> {
+pub(crate) fn optional_datetime_from_str(
+    value: Option<String>,
+) -> MemcoreResult<Option<DateTime<Utc>>> {
     match value {
         Some(raw) => Ok(Some(datetime_from_str(&raw)?)),
         None => Ok(None),
@@ -120,11 +122,9 @@ pub(crate) fn optional_uuid_to_str(value: Option<Uuid>) -> Option<String> {
 
 pub(crate) fn optional_uuid_from_str(value: Option<String>) -> MemcoreResult<Option<Uuid>> {
     match value {
-        Some(raw) => Ok(Some(
-            Uuid::parse_str(&raw).map_err(|error| {
-                MemcoreError::StorageError(format!("invalid fact_id '{raw}': {error}"))
-            })?,
-        )),
+        Some(raw) => Ok(Some(Uuid::parse_str(&raw).map_err(|error| {
+            MemcoreError::StorageError(format!("invalid fact_id '{raw}': {error}"))
+        })?)),
         None => Ok(None),
     }
 }

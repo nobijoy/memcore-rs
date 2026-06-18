@@ -105,7 +105,11 @@ impl From<AddMemoryOutput> for AddMemoryResponse {
                 deleted: output.deleted,
                 noop: output.noop,
             },
-            memories: output.memories.iter().map(MemoryItemResponse::from).collect(),
+            memories: output
+                .memories
+                .iter()
+                .map(MemoryItemResponse::from)
+                .collect(),
         }
     }
 }
@@ -216,7 +220,11 @@ impl From<ListMemoriesOutput> for ListMemoriesResponse {
     fn from(output: ListMemoriesOutput) -> Self {
         Self {
             status: "success",
-            memories: output.memories.iter().map(ListMemoryItemResponse::from).collect(),
+            memories: output
+                .memories
+                .iter()
+                .map(ListMemoryItemResponse::from)
+                .collect(),
             next_cursor: output.next_cursor,
         }
     }

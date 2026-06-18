@@ -207,7 +207,9 @@ impl From<&MemorySearchResult> for ContextMemoryResponse {
     }
 }
 
-pub fn format_options_from_request(request: &BuildContextRequest) -> Result<ContextFormatOptions, MemcoreError> {
+pub fn format_options_from_request(
+    request: &BuildContextRequest,
+) -> Result<ContextFormatOptions, MemcoreError> {
     let mut options = ContextFormatOptions::default();
 
     if let Some(format) = &request.format {

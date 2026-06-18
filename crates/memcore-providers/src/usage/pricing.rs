@@ -78,14 +78,22 @@ mod tests {
 
     #[test]
     fn missing_token_usage_returns_none() {
-        assert!(ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), None, Some(100)).is_none());
-        assert!(ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), Some(100), None).is_none());
+        assert!(
+            ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), None, Some(100)).is_none()
+        );
+        assert!(
+            ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), Some(100), None).is_none()
+        );
     }
 
     #[test]
     fn llm_cost_uses_input_and_output_tokens() {
-        let cost = ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), Some(1_000_000), Some(500_000))
-            .expect("cost");
+        let cost = ProviderCostCalculator::estimate_cost_usd(
+            &sample_pricing(),
+            Some(1_000_000),
+            Some(500_000),
+        )
+        .expect("cost");
         assert!((cost - (0.40 + 0.80)).abs() < f64::EPSILON);
     }
 
@@ -104,8 +112,10 @@ mod tests {
 
     #[test]
     fn cost_calculation_is_deterministic() {
-        let a = ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), Some(10_000), Some(2_000));
-        let b = ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), Some(10_000), Some(2_000));
+        let a =
+            ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), Some(10_000), Some(2_000));
+        let b =
+            ProviderCostCalculator::estimate_cost_usd(&sample_pricing(), Some(10_000), Some(2_000));
         assert_eq!(a, b);
     }
 

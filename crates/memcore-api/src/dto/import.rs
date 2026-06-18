@@ -5,7 +5,7 @@ use memcore_core::{
 use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 
-use super::export::{user_memory_export_from_response, UserMemoryExportResponse};
+use super::export::{UserMemoryExportResponse, user_memory_export_from_response};
 
 fn default_restore_events_false() -> bool {
     false

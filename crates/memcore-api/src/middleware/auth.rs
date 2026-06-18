@@ -21,16 +21,18 @@ pub async fn require_api_key(
     }
 
     let result = match state.settings.auth_mode {
-        AuthMode::Dev => validate_dev_authorization(request.headers(), &state.settings.dev_api_key)
-            .map(|_| ()),
-        AuthMode::Database => match validate_database_authorization(&state, request.headers()).await
-        {
-            Ok(auth) => {
-                request.extensions_mut().insert(auth);
-                Ok(())
+        AuthMode::Dev => {
+            validate_dev_authorization(request.headers(), &state.settings.dev_api_key).map(|_| ())
+        }
+        AuthMode::Database => {
+            match validate_database_authorization(&state, request.headers()).await {
+                Ok(auth) => {
+                    request.extensions_mut().insert(auth);
+                    Ok(())
+                }
+                Err(error) => Err(error),
             }
-            Err(error) => Err(error),
-        },
+        }
     };
 
     match result {
@@ -50,11 +52,7 @@ fn validate_dev_authorization(
     let token = extract_bearer_token(headers)?;
 
     if token != expected_key {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            "UNAUTHORIZED",
-            "invalid api key",
-        ));
+        return Err((StatusCode::UNAUTHORIZED, "UNAUTHORIZED", "invalid api key"));
     }
 
     Ok(())
@@ -89,11 +87,7 @@ async fn validate_database_authorization(
             )
         })?
         .filter(|record| record.is_active())
-        .ok_or((
-            StatusCode::UNAUTHORIZED,
-            "UNAUTHORIZED",
-            "invalid api key",
-        ))?;
+        .ok_or((StatusCode::UNAUTHORIZED, "UNAUTHORIZED", "invalid api key"))?;
 
     Ok(AuthContext {
         org_id: record.org_id,
@@ -105,13 +99,11 @@ async fn validate_database_authorization(
 fn extract_bearer_token(
     headers: &HeaderMap,
 ) -> Result<&str, (StatusCode, &'static str, &'static str)> {
-    let header_value = headers
-        .get(AUTHORIZATION)
-        .ok_or((
-            StatusCode::UNAUTHORIZED,
-            "UNAUTHORIZED",
-            "missing authorization header",
-        ))?;
+    let header_value = headers.get(AUTHORIZATION).ok_or((
+        StatusCode::UNAUTHORIZED,
+        "UNAUTHORIZED",
+        "missing authorization header",
+    ))?;
 
     let header_str = header_value.to_str().map_err(|_| {
         (

@@ -4,10 +4,12 @@ use memcore_config::Settings;
 use memcore_core::{
     ContextCacheMetricsSnapshot, DEFAULT_LIST_ORG_USERS_LIMIT,
     DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput,
-    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryEvent, OrgPlanConfig,
-    OrgPlanLimits, OrgPlanTier, OrgQuotaLimits, OrgQuotaUsage, OrgSummaryInput, OrgSummaryOutput,
-    OrgUserSummary, QuotaCheckResult, QuotaLimitKind, QuotaViolation, SearchOrgMemoryEventsOutput,
-    validate_org_plan_metadata,
+    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryEvent,
+    OrgMemoryUsageSummary, OrgPlanConfig, OrgPlanLimits, OrgPlanTier, OrgQuotaLimits,
+    OrgQuotaUsage, OrgSummaryInput, OrgSummaryOutput, OrgUsageDashboardInput,
+    OrgUsageDashboardOutput, OrgUserSummary, ProviderUsageDailyBucket, ProviderUsageDailyOutput,
+    ProviderUsageDashboardSummary, QuotaCheckResult, QuotaLimitKind, QuotaViolation,
+    SearchOrgMemoryEventsOutput, resolve_org_usage_window, validate_org_plan_metadata,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,6 +49,23 @@ pub struct ListOrgUsersQuery {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct OrgQuotasQuery {
     pub user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct OrgUsageDateRangeQuery {
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    pub days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ProviderUsageDailyQueryParams {
+    pub provider_name: Option<String>,
+    pub model_name: Option<String>,
+    pub capability: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    pub days: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -107,6 +126,32 @@ pub struct OrgQuotaStatusBodyResponse {
     pub limits: OrgQuotaLimitsResponse,
     pub usage: OrgQuotaUsageResponse,
     pub violations: Vec<QuotaViolationResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgUsageDashboardResponse {
+    pub status: &'static str,
+    pub dashboard: OrgUsageDashboardBodyResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgUsageDashboardBodyResponse {
+    pub org_id: String,
+    pub generated_at: DateTime<Utc>,
+    pub window_start: DateTime<Utc>,
+    pub window_end: DateTime<Utc>,
+    pub plan: Option<OrgPlanResponse>,
+    pub quota: OrgQuotaStatusBodyResponse,
+    pub memory: OrgMemoryUsageSummaryResponse,
+    pub provider: ProviderUsageSummaryResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgMemoryUsageSummaryResponse {
+    pub total_users: u64,
+    pub total_memories: u64,
+    pub active_memories: u64,
+    pub deleted_memories: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -451,6 +496,36 @@ pub struct ProviderUsageEventItemResponse {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageDailyResponse {
+    pub status: &'static str,
+    pub usage: ProviderUsageDailyBodyResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageDailyBodyResponse {
+    pub org_id: String,
+    pub window_start: DateTime<Utc>,
+    pub window_end: DateTime<Utc>,
+    pub buckets: Vec<ProviderUsageDailyBucketResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderUsageDailyBucketResponse {
+    pub date: chrono::NaiveDate,
+    pub total_requests: u64,
+    pub total_successes: u64,
+    pub total_errors: u64,
+    pub total_retries: u64,
+    pub total_fallbacks: u64,
+    pub total_circuit_blocks: u64,
+    pub total_timeouts: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_tokens: u64,
+    pub total_estimated_cost_usd: Option<f64>,
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct ProviderUsageQueryParams {
     pub user_id: Option<String>,
@@ -500,6 +575,24 @@ fn status_label(status: memcore_core::ProviderCallStatus) -> String {
 
 impl From<memcore_core::ProviderUsagePersistedSummary> for ProviderUsageSummaryResponse {
     fn from(summary: memcore_core::ProviderUsagePersistedSummary) -> Self {
+        Self {
+            total_requests: summary.total_requests,
+            total_successes: summary.total_successes,
+            total_errors: summary.total_errors,
+            total_retries: summary.total_retries,
+            total_fallbacks: summary.total_fallbacks,
+            total_circuit_blocks: summary.total_circuit_blocks,
+            total_timeouts: summary.total_timeouts,
+            total_input_tokens: summary.total_input_tokens,
+            total_output_tokens: summary.total_output_tokens,
+            total_tokens: summary.total_tokens,
+            total_estimated_cost_usd: summary.total_estimated_cost_usd,
+        }
+    }
+}
+
+impl From<ProviderUsageDashboardSummary> for ProviderUsageSummaryResponse {
+    fn from(summary: ProviderUsageDashboardSummary) -> Self {
         Self {
             total_requests: summary.total_requests,
             total_successes: summary.total_successes,
@@ -674,6 +767,73 @@ impl From<OrgSummaryOutput> for OrgSummaryResponse {
     }
 }
 
+impl From<OrgMemoryUsageSummary> for OrgMemoryUsageSummaryResponse {
+    fn from(summary: OrgMemoryUsageSummary) -> Self {
+        Self {
+            total_users: summary.total_users,
+            total_memories: summary.total_memories,
+            active_memories: summary.active_memories,
+            deleted_memories: summary.deleted_memories,
+        }
+    }
+}
+
+impl From<OrgUsageDashboardOutput> for OrgUsageDashboardResponse {
+    fn from(output: OrgUsageDashboardOutput) -> Self {
+        let quota = org_quota_status_response(output.quota).quotas;
+        Self {
+            status: "success",
+            dashboard: OrgUsageDashboardBodyResponse {
+                org_id: output.org_id,
+                generated_at: output.generated_at,
+                window_start: output.window_start,
+                window_end: output.window_end,
+                plan: output.plan.map(OrgPlanResponse::from),
+                quota,
+                memory: output.memory.into(),
+                provider: output.provider.into(),
+            },
+        }
+    }
+}
+
+impl From<ProviderUsageDailyBucket> for ProviderUsageDailyBucketResponse {
+    fn from(bucket: ProviderUsageDailyBucket) -> Self {
+        Self {
+            date: bucket.date,
+            total_requests: bucket.total_requests,
+            total_successes: bucket.total_successes,
+            total_errors: bucket.total_errors,
+            total_retries: bucket.total_retries,
+            total_fallbacks: bucket.total_fallbacks,
+            total_circuit_blocks: bucket.total_circuit_blocks,
+            total_timeouts: bucket.total_timeouts,
+            total_input_tokens: bucket.total_input_tokens,
+            total_output_tokens: bucket.total_output_tokens,
+            total_tokens: bucket.total_tokens,
+            total_estimated_cost_usd: bucket.total_estimated_cost_usd,
+        }
+    }
+}
+
+impl From<ProviderUsageDailyOutput> for ProviderUsageDailyResponse {
+    fn from(output: ProviderUsageDailyOutput) -> Self {
+        Self {
+            status: "success",
+            usage: ProviderUsageDailyBodyResponse {
+                org_id: output.org_id,
+                window_start: output.window_start,
+                window_end: output.window_end,
+                buckets: output
+                    .buckets
+                    .into_iter()
+                    .map(ProviderUsageDailyBucketResponse::from)
+                    .collect(),
+            },
+        }
+    }
+}
+
 impl From<OrgUserSummary> for OrgUserSummaryResponse {
     fn from(summary: OrgUserSummary) -> Self {
         Self {
@@ -724,6 +884,32 @@ impl ListOrgUsersQuery {
 
 pub fn org_summary_input(org_id: String) -> OrgSummaryInput {
     OrgSummaryInput { org_id }
+}
+
+pub fn org_usage_dashboard_input(
+    org_id: String,
+    query: OrgUsageDateRangeQuery,
+) -> Result<OrgUsageDashboardInput, MemcoreError> {
+    let (created_after, created_before) = parse_org_usage_window(
+        query.created_after.as_ref(),
+        query.created_before.as_ref(),
+        query.days,
+    )?;
+    Ok(OrgUsageDashboardInput {
+        org_id,
+        created_after,
+        created_before,
+    })
+}
+
+pub fn parse_org_usage_window(
+    created_after: Option<&String>,
+    created_before: Option<&String>,
+    days: Option<u32>,
+) -> Result<(DateTime<Utc>, DateTime<Utc>), MemcoreError> {
+    let (created_after, created_before) =
+        crate::dto::memory_events::parse_event_date_filters(created_after, created_before)?;
+    resolve_org_usage_window(created_after, created_before, days, Utc::now())
 }
 
 pub fn validate_list_org_users_limit(limit: usize) -> Result<(), memcore_common::MemcoreError> {

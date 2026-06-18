@@ -220,7 +220,11 @@ impl From<UserMemoryExport> for ExportUserResponse {
                 user_id: export.user_id,
                 exported_at: export.exported_at,
                 format_version: export.format_version,
-                facts: export.facts.iter().map(ExportFactItemResponse::from).collect(),
+                facts: export
+                    .facts
+                    .iter()
+                    .map(ExportFactItemResponse::from)
+                    .collect(),
                 memory_events: export
                     .memory_events
                     .iter()

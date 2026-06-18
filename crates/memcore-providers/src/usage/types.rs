@@ -11,10 +11,7 @@ pub struct ProviderTokenUsage {
 }
 
 impl ProviderTokenUsage {
-    pub fn from_counts(
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-    ) -> Self {
+    pub fn from_counts(input_tokens: Option<u64>, output_tokens: Option<u64>) -> Self {
         let total_tokens = match (input_tokens, output_tokens) {
             (Some(input), Some(output)) => Some(input.saturating_add(output)),
             (Some(input), None) => Some(input),

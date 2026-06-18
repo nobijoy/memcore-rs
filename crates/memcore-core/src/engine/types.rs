@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{Fact, MemorySearchResult, TenantContext};
 use crate::ports::MemoryMessage;
+use crate::{Fact, MemorySearchResult, TenantContext};
 
 /// Default minimum importance for add-memory filtering until config is wired into core.
 pub const DEFAULT_MIN_IMPORTANCE: f32 = 0.55;

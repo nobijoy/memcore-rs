@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use memcore_common::MemcoreResult;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::ports::MemoryEventStore;
 use crate::{Fact, FactOperationDecision, MemoryEvent, MemoryEventOperation, TenantContext};
@@ -143,8 +143,8 @@ pub fn build_forget_user_event(
 
 /// Validates list query limits for memory audit events.
 pub fn normalize_event_list_limit(limit: usize) -> MemcoreResult<usize> {
-    use memcore_common::MemcoreError;
     use crate::ports::{DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT};
+    use memcore_common::MemcoreError;
 
     if limit == 0 {
         return Ok(DEFAULT_MEMORY_EVENT_LIST_LIMIT);

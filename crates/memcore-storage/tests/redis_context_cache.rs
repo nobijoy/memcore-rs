@@ -4,8 +4,8 @@ use std::env;
 
 use chrono::{Duration, Utc};
 use memcore_core::{
-    build_context_cache_key, cached_entry_with_ttl, BuildContextInput, BuildContextOutput,
-    ContextBudgetUsage, ContextCache, ContextCompressionUsage, TenantContext,
+    BuildContextInput, BuildContextOutput, ContextBudgetUsage, ContextCache,
+    ContextCompressionUsage, TenantContext, build_context_cache_key, cached_entry_with_ttl,
 };
 use memcore_storage::RedisContextCache;
 
@@ -96,15 +96,24 @@ async fn redis_invalidate_user_removes_only_matching_user_keys() {
     let key_b = build_context_cache_key(&sample_input("org_b", "user_a", "invalidate b"));
 
     cache
-        .set(key_a.clone(), cached_entry_with_ttl(&sample_output("a"), 120))
+        .set(
+            key_a.clone(),
+            cached_entry_with_ttl(&sample_output("a"), 120),
+        )
         .await
         .expect("set a");
     cache
-        .set(key_b.clone(), cached_entry_with_ttl(&sample_output("b"), 120))
+        .set(
+            key_b.clone(),
+            cached_entry_with_ttl(&sample_output("b"), 120),
+        )
         .await
         .expect("set b");
 
-    let removed = cache.invalidate_user("org_a", "user_a").await.expect("invalidate");
+    let removed = cache
+        .invalidate_user("org_a", "user_a")
+        .await
+        .expect("invalidate");
     assert_eq!(removed, 1);
     assert!(cache.get(&key_a).await.expect("get a").is_none());
     assert!(cache.get(&key_b).await.expect("get b").is_some());

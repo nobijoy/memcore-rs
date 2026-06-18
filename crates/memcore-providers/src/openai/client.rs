@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use memcore_common::{MemcoreError, MemcoreResult};
 use reqwest::{Client, StatusCode};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::types::{ApiErrorResponse, ResponsesCreateRequest, ResponsesCreateResponse};
@@ -113,10 +113,7 @@ impl OpenAiClient {
             .map_err(map_transport_error)?;
 
         let status = response.status();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(map_transport_error)?;
+        let bytes = response.bytes().await.map_err(map_transport_error)?;
 
         if status.is_success() {
             return serde_json::from_slice(&bytes).map_err(|err| {
@@ -156,10 +153,7 @@ fn map_http_error(status: StatusCode, body: &[u8]) -> MemcoreError {
         ));
     }
 
-    MemcoreError::ProviderError(format!(
-        "OpenAI API error with status {}",
-        status.as_u16()
-    ))
+    MemcoreError::ProviderError(format!("OpenAI API error with status {}", status.as_u16()))
 }
 
 #[cfg(test)]
@@ -178,8 +172,8 @@ mod tests {
 
     #[test]
     fn responses_request_includes_json_schema_format() {
-        let client =
-            OpenAiClient::new("test-key", "https://api.openai.com/v1").expect("client should build");
+        let client = OpenAiClient::new("test-key", "https://api.openai.com/v1")
+            .expect("client should build");
         let body = client.responses_request_body(
             "gpt-4.1-mini",
             "system instructions",

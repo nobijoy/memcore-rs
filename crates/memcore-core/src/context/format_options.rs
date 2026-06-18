@@ -91,7 +91,10 @@ mod tests {
             ContextFormat::parse("markdown").unwrap(),
             ContextFormat::Markdown
         );
-        assert_eq!(ContextFormat::parse("plain_text").unwrap(), ContextFormat::PlainText);
+        assert_eq!(
+            ContextFormat::parse("plain_text").unwrap(),
+            ContextFormat::PlainText
+        );
         assert_eq!(ContextFormat::parse("json").unwrap(), ContextFormat::Json);
     }
 

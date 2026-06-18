@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, EmbeddingDeduplicationConfig,
-    FactOperation, FactOperationDecision, FactStore, ForgetUserInput, ListMemoriesInput,
-    MemoryEngine, MemoryMessage, MemoryType, MessageRole, SearchMemoryInput, TenantContext,
-    VectorSearchQuery, VectorStore, EMPTY_CONTEXT_MESSAGE,
+    AddMemoryInput, BuildContextInput, CandidateFact, DeleteMemoryInput, EMPTY_CONTEXT_MESSAGE,
+    EmbeddingDeduplicationConfig, FactOperation, FactOperationDecision, FactStore, ForgetUserInput,
+    ListMemoriesInput, MemoryEngine, MemoryMessage, MemoryType, MessageRole, SearchMemoryInput,
+    TenantContext, VectorSearchQuery, VectorStore,
 };
-use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
+use memcore_providers::{MockEmbeddingProvider, MockLlmProvider, deterministic_embedding};
 use memcore_storage::{MockFactStore, MockVectorStore};
 use serde_json::json;
 
@@ -268,24 +268,10 @@ async fn candidate_below_importance_threshold_is_skipped() {
 
 #[tokio::test]
 async fn operation_summary_added_count_is_correct() {
-    let custom_a = CandidateFact::new(
-        "first",
-        MemoryType::Skill,
-        0.9,
-        0.8,
-        None,
-        json!({}),
-    )
-    .expect("candidate should be valid");
-    let custom_b = CandidateFact::new(
-        "second",
-        MemoryType::Preference,
-        0.85,
-        0.7,
-        None,
-        json!({}),
-    )
-    .expect("candidate should be valid");
+    let custom_a = CandidateFact::new("first", MemoryType::Skill, 0.9, 0.8, None, json!({}))
+        .expect("candidate should be valid");
+    let custom_b = CandidateFact::new("second", MemoryType::Preference, 0.85, 0.7, None, json!({}))
+        .expect("candidate should be valid");
 
     let engine = engine_with_mocks(
         Arc::new(MockFactStore::new()),
@@ -669,7 +655,8 @@ async fn delete_memory_soft_deletes_fact_and_removes_vector() {
     let vectors = vector_store
         .search_vectors(VectorSearchQuery {
             tenant: tenant.clone(),
-            embedding: deterministic_embedding("delete this memory", 4).expect("embedding should succeed"),
+            embedding: deterministic_embedding("delete this memory", 4)
+                .expect("embedding should succeed"),
             limit: 10,
             memory_types: None,
             metadata_filter: None,

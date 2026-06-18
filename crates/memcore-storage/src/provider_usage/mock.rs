@@ -1,15 +1,15 @@
+use std::collections::BTreeMap;
 use std::sync::RwLock;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
-use memcore_core::pagination::{
-    build_page, is_after_cursor_in_desc_order, PageCursor,
-};
+use memcore_core::ProviderUsageDailyBucket;
+use memcore_core::pagination::{PageCursor, build_page, is_after_cursor_in_desc_order};
 use memcore_core::ports::{
-    ProviderCallStatus, ProviderUsageEventRecord,
-    ProviderUsagePersistedSummary, ProviderUsageQuery, ProviderUsageQueryResult, ProviderUsageStore,
-    validate_provider_usage_limit,
+    ProviderCallStatus, ProviderUsageDailyQuery, ProviderUsageEventRecord,
+    ProviderUsagePersistedSummary, ProviderUsageQuery, ProviderUsageQueryResult,
+    ProviderUsageStore, validate_provider_usage_limit,
 };
 
 fn storage_error(context: impl Into<String>, error: impl std::fmt::Display) -> MemcoreError {
@@ -102,6 +102,63 @@ fn matches_query(event: &ProviderUsageEventRecord, query: &ProviderUsageQuery) -
     true
 }
 
+fn matches_daily_query(event: &ProviderUsageEventRecord, query: &ProviderUsageDailyQuery) -> bool {
+    if event.org_id != query.org_id {
+        return false;
+    }
+    if let Some(provider_name) = &query.provider_name {
+        if &event.provider_name != provider_name {
+            return false;
+        }
+    }
+    if let Some(model_name) = &query.model_name {
+        if event.model_name.as_deref() != Some(model_name.as_str()) {
+            return false;
+        }
+    }
+    if let Some(capability) = query.capability {
+        if event.capability != capability {
+            return false;
+        }
+    }
+    event.created_at >= query.created_after && event.created_at < query.created_before
+}
+
+fn add_event_to_bucket(bucket: &mut ProviderUsageDailyBucket, event: &ProviderUsageEventRecord) {
+    bucket.total_requests = bucket.total_requests.saturating_add(1);
+    match event.status {
+        ProviderCallStatus::Success => {
+            bucket.total_successes = bucket.total_successes.saturating_add(1);
+        }
+        ProviderCallStatus::Error => {
+            bucket.total_errors = bucket.total_errors.saturating_add(1);
+        }
+    }
+    bucket.total_retries = bucket.total_retries.saturating_add(event.retry_count);
+    if event.fallback_used {
+        bucket.total_fallbacks = bucket.total_fallbacks.saturating_add(1);
+    }
+    if event.circuit_blocked {
+        bucket.total_circuit_blocks = bucket.total_circuit_blocks.saturating_add(1);
+    }
+    if event.timed_out {
+        bucket.total_timeouts = bucket.total_timeouts.saturating_add(1);
+    }
+    bucket.total_input_tokens = bucket
+        .total_input_tokens
+        .saturating_add(event.input_tokens.unwrap_or(0));
+    bucket.total_output_tokens = bucket
+        .total_output_tokens
+        .saturating_add(event.output_tokens.unwrap_or(0));
+    bucket.total_tokens = bucket
+        .total_tokens
+        .saturating_add(event.total_tokens.unwrap_or(0));
+    if let Some(cost) = event.estimated_cost_usd {
+        bucket.total_estimated_cost_usd =
+            Some(bucket.total_estimated_cost_usd.unwrap_or(0.0) + cost);
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct MockProviderUsageStore {
     events: RwLock<Vec<ProviderUsageEventRecord>>,
@@ -165,6 +222,30 @@ impl ProviderUsageStore for MockProviderUsageStore {
             next_cursor: page.next_cursor,
             summary,
         })
+    }
+
+    async fn query_usage_daily(
+        &self,
+        query: ProviderUsageDailyQuery,
+    ) -> MemcoreResult<Vec<ProviderUsageDailyBucket>> {
+        let events = self
+            .events
+            .read()
+            .map_err(|_| storage_error("mock provider usage lock poisoned", "lock"))?;
+        let mut buckets: BTreeMap<chrono::NaiveDate, ProviderUsageDailyBucket> = BTreeMap::new();
+
+        for event in events
+            .iter()
+            .filter(|event| matches_daily_query(event, &query))
+        {
+            let date = event.created_at.date_naive();
+            let bucket = buckets
+                .entry(date)
+                .or_insert_with(|| ProviderUsageDailyBucket::empty(date));
+            add_event_to_bucket(bucket, event);
+        }
+
+        Ok(buckets.into_values().collect())
     }
 
     async fn delete_usage_events_older_than(
@@ -380,9 +461,9 @@ mod tests {
 
         let page2 = store
             .query_usage(ProviderUsageQuery {
-                cursor: page1.next_cursor.and_then(|cursor| {
-                    memcore_core::decode_cursor(&cursor).ok()
-                }),
+                cursor: page1
+                    .next_cursor
+                    .and_then(|cursor| memcore_core::decode_cursor(&cursor).ok()),
                 limit: 2,
                 ..ProviderUsageQuery::new("org_page", 2)
             })

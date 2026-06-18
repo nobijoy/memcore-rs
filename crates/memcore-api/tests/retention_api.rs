@@ -3,7 +3,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{create_app, AppState};
+use memcore_api::{AppState, create_app};
 use memcore_config::Settings;
 use tower::ServiceExt;
 

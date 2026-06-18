@@ -214,7 +214,10 @@ mod integration_tests {
             OpenAiEmbeddingProvider::new(client, "text-embedding-3-small", 4).expect("provider");
 
         let error = provider.embed_text("hello").await.expect_err("should fail");
-        assert!(matches!(error, memcore_common::MemcoreError::ProviderError(_)));
+        assert!(matches!(
+            error,
+            memcore_common::MemcoreError::ProviderError(_)
+        ));
         assert!(error.to_string().contains("unauthorized"));
     }
 
@@ -225,7 +228,10 @@ mod integration_tests {
         let client = OpenAiClient::new(api_key, "https://api.openai.com/v1").expect("client");
         let provider =
             OpenAiEmbeddingProvider::new(client, "text-embedding-3-small", 256).expect("provider");
-        let embedding = provider.embed_text("memcore smoke test").await.expect("embed");
+        let embedding = provider
+            .embed_text("memcore smoke test")
+            .await
+            .expect("embed");
         assert_eq!(embedding.len(), 256);
     }
 }

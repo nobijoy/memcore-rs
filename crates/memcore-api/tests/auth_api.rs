@@ -7,7 +7,7 @@ use memcore_api::{AppState, create_app};
 use memcore_config::Settings;
 use tower::ServiceExt;
 
-use common::{authorization_header, DEV_API_KEY};
+use common::{DEV_API_KEY, authorization_header};
 
 const VALID_ADD_BODY: &str = r#"{
   "user_id": "user_123",
@@ -25,12 +25,7 @@ fn test_app_auth_disabled() -> axum::Router {
     create_app(AppState::new(settings))
 }
 
-fn post_request(
-    uri: &str,
-    body: &str,
-    org_id: Option<&str>,
-    with_auth: bool,
-) -> Request<Body> {
+fn post_request(uri: &str, body: &str, org_id: Option<&str>, with_auth: bool) -> Request<Body> {
     let mut builder = Request::builder()
         .method("POST")
         .uri(uri)
@@ -166,7 +161,12 @@ async fn search_memory_requires_auth() {
 
     let (status, json) = response_parts(
         test_app(),
-        post_request("/api/v1/memories/search", search_body, Some("org_123"), false),
+        post_request(
+            "/api/v1/memories/search",
+            search_body,
+            Some("org_123"),
+            false,
+        ),
     )
     .await;
 

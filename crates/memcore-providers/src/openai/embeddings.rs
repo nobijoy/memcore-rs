@@ -23,7 +23,11 @@ pub fn default_embedding_dimensions_for_model(model: &str) -> usize {
 }
 
 impl OpenAiEmbeddingProvider {
-    pub fn new(client: OpenAiClient, model: impl Into<String>, dimensions: usize) -> MemcoreResult<Self> {
+    pub fn new(
+        client: OpenAiClient,
+        model: impl Into<String>,
+        dimensions: usize,
+    ) -> MemcoreResult<Self> {
         if dimensions == 0 {
             return Err(MemcoreError::ValidationError(
                 "embedding dimensions must be greater than 0".to_string(),
@@ -129,7 +133,10 @@ mod tests {
             default_embedding_dimensions_for_model("text-embedding-3-large"),
             3072
         );
-        assert_eq!(default_embedding_dimensions_for_model("unknown-model"), 1536);
+        assert_eq!(
+            default_embedding_dimensions_for_model("unknown-model"),
+            1536
+        );
     }
 
     #[test]

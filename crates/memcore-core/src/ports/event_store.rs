@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use memcore_common::MemcoreResult;
 use uuid::Uuid;
 
-use crate::{MemoryEvent, MemoryEventOperation, TenantContext};
 use crate::pagination::PageCursor;
+use crate::{MemoryEvent, MemoryEventOperation, TenantContext};
 
 /// Default limit for listing memory audit events.
 pub const DEFAULT_MEMORY_EVENT_LIST_LIMIT: usize = 50;

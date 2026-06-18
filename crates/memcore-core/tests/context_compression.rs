@@ -1,6 +1,7 @@
 use memcore_core::{
-    assemble_context_with_budget, ContextBudget, ContextCompressionMode, ContextCompressionOptions,
-    ContextFormat, ContextFormatOptions, MemorySearchResult, MemoryType, SimpleTokenEstimator,
+    ContextBudget, ContextCompressionMode, ContextCompressionOptions, ContextFormat,
+    ContextFormatOptions, MemorySearchResult, MemoryType, SimpleTokenEstimator,
+    assemble_context_with_budget,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -60,7 +61,12 @@ fn compression_summary_uses_skipped_memories_only() {
 #[test]
 fn compression_plain_text_markdown_and_json_modes() {
     let memories: Vec<_> = (0..6)
-        .map(|index| sample_result(&format!("compression format memory {index}"), MemoryType::Skill))
+        .map(|index| {
+            sample_result(
+                &format!("compression format memory {index}"),
+                MemoryType::Skill,
+            )
+        })
         .collect();
     let budget = ContextBudget {
         max_tokens: 70,
@@ -116,10 +122,7 @@ fn compression_does_not_expose_sensitive_metadata() {
         "input_text": "secret audit text",
         "api_key": "mc_live_secret"
     });
-    let memories = vec![
-        sample_result("tiny included", MemoryType::Profile),
-        skipped,
-    ];
+    let memories = vec![sample_result("tiny included", MemoryType::Profile), skipped];
     let budget = ContextBudget {
         max_tokens: 50,
         reserved_tokens: 5,
@@ -147,7 +150,12 @@ fn compression_does_not_expose_sensitive_metadata() {
 #[test]
 fn skipped_memories_count_unchanged_with_compression() {
     let memories: Vec<_> = (0..5)
-        .map(|index| sample_result(&format!("ranked memory item {index} extra words"), MemoryType::Skill))
+        .map(|index| {
+            sample_result(
+                &format!("ranked memory item {index} extra words"),
+                MemoryType::Skill,
+            )
+        })
         .collect();
     let budget = ContextBudget {
         max_tokens: 80,

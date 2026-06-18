@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use memcore_common::{sanitize_redis_url_for_display, MemcoreError, MemcoreResult};
+use memcore_common::{MemcoreError, MemcoreResult, sanitize_redis_url_for_display};
 use memcore_core::{CachedContextEntry, ContextCache, ContextCacheKey};
-use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 
 use super::keys::{redis_context_cache_key, redis_context_index_key};
 
@@ -21,9 +21,8 @@ impl RedisContextCache {
         key_prefix: impl Into<String>,
         ttl_seconds: u64,
     ) -> MemcoreResult<Self> {
-        let client = redis::Client::open(redis_url).map_err(|err| {
-            map_redis_error("failed to open redis client", err, redis_url)
-        })?;
+        let client = redis::Client::open(redis_url)
+            .map_err(|err| map_redis_error("failed to open redis client", err, redis_url))?;
         let manager = client
             .get_connection_manager()
             .await
@@ -57,12 +56,9 @@ impl ContextCache for RedisContextCache {
 
         let now = Utc::now();
         if entry.is_fully_expired(now) {
-            let _: () = conn
-                .del(&redis_key)
-                .await
-                .map_err(|err| {
-                    map_redis_command_error("context cache delete stale entry failed", err)
-                })?;
+            let _: () = conn.del(&redis_key).await.map_err(|err| {
+                map_redis_command_error("context cache delete stale entry failed", err)
+            })?;
             return Ok(None);
         }
 
@@ -91,12 +87,9 @@ impl ContextCache for RedisContextCache {
 
         let now = Utc::now();
         if entry.is_fully_expired(now) {
-            let _: () = conn
-                .del(&redis_key)
-                .await
-                .map_err(|err| {
-                    map_redis_command_error("context cache delete stale entry failed", err)
-                })?;
+            let _: () = conn.del(&redis_key).await.map_err(|err| {
+                map_redis_command_error("context cache delete stale entry failed", err)
+            })?;
             return Ok(None);
         }
 
@@ -179,7 +172,7 @@ fn map_redis_error(context: &str, err: redis::RedisError, redis_url: &str) -> Me
 mod serde_tests {
     use chrono::{Duration, Utc};
     use memcore_core::{
-        CachedContextEntry, ContextCompressionUsage, ContextBudgetUsage, MemorySearchResult,
+        CachedContextEntry, ContextBudgetUsage, ContextCompressionUsage, MemorySearchResult,
         MemoryType,
     };
     use uuid::Uuid;

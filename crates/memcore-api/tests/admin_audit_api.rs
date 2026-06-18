@@ -3,14 +3,14 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{create_app, AppState};
+use memcore_api::{AppState, create_app};
 use memcore_common::hash_api_key;
 use memcore_config::{AuthMode, Settings};
 use memcore_core::{ApiKeyRecord, ApiKeyScope};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{authorization_header, DEV_API_KEY};
+use common::{DEV_API_KEY, authorization_header};
 
 const ORG_A: &str = "org_admin_audit_a";
 const ORG_B: &str = "org_admin_audit_b";
@@ -87,9 +87,7 @@ fn get_request(uri: &str, org_id: Option<&str>, bearer: Option<&str>) -> Request
         builder = builder.header("Authorization", format!("Bearer {token}"));
     }
 
-    builder
-        .body(Body::empty())
-        .expect("request should build")
+    builder.body(Body::empty()).expect("request should build")
 }
 
 async fn response_parts(
@@ -161,11 +159,8 @@ fn admin_audit_uri(query: &str) -> String {
 #[tokio::test]
 async fn admin_audit_requires_authorization() {
     let app = dev_app();
-    let (status, _) = response_parts(
-        app,
-        get_request(&admin_audit_uri(""), Some(ORG_A), None),
-    )
-    .await;
+    let (status, _) =
+        response_parts(app, get_request(&admin_audit_uri(""), Some(ORG_A), None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -266,9 +261,11 @@ async fn admin_audit_fact_id_filter() {
     assert_eq!(status, StatusCode::OK);
     let events = json["events"].as_array().unwrap();
     assert!(!events.is_empty());
-    assert!(events
-        .iter()
-        .all(|event| event["fact_id"].as_str() == Some(fact_id.to_string().as_str())));
+    assert!(
+        events
+            .iter()
+            .all(|event| event["fact_id"].as_str() == Some(fact_id.to_string().as_str()))
+    );
 }
 
 #[tokio::test]
@@ -365,11 +362,13 @@ async fn org_a_cannot_see_org_b_audit_events() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(json["events"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|event| event["user_id"] != USER_B));
+    assert!(
+        json["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|event| event["user_id"] != USER_B)
+    );
 }
 
 #[tokio::test]
@@ -386,11 +385,7 @@ async fn database_auth_requires_admin_or_audit_scope() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &admin_audit_uri(""),
-            Some(ORG_A),
-            Some("memory-only-audit"),
-        ),
+        get_request(&admin_audit_uri(""), Some(ORG_A), Some("memory-only-audit")),
     )
     .await;
 
@@ -403,22 +398,14 @@ async fn database_auth_allows_audit_read_scope() {
     let state = AppState::initialize(database_auth_settings())
         .await
         .expect("app state should initialize");
-    seed_record(
-        &state,
-        audit_read_api_key_record(ORG_A, "audit-read-key"),
-    )
-    .await;
+    seed_record(&state, audit_read_api_key_record(ORG_A, "audit-read-key")).await;
     let app = create_app(state);
 
     seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, Some("audit-read-key")).await;
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &admin_audit_uri(""),
-            Some(ORG_A),
-            Some("audit-read-key"),
-        ),
+        get_request(&admin_audit_uri(""), Some(ORG_A), Some("audit-read-key")),
     )
     .await;
 
@@ -434,15 +421,18 @@ async fn database_auth_allows_admin_read_scope() {
     seed_record(&state, admin_api_key_record(ORG_A, "admin-read-audit")).await;
     let app = create_app(state);
 
-    seed_memory(&app, ORG_A, USER_A, MEMORY_CONTENT, Some("admin-read-audit")).await;
+    seed_memory(
+        &app,
+        ORG_A,
+        USER_A,
+        MEMORY_CONTENT,
+        Some("admin-read-audit"),
+    )
+    .await;
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &admin_audit_uri(""),
-            Some(ORG_A),
-            Some("admin-read-audit"),
-        ),
+        get_request(&admin_audit_uri(""), Some(ORG_A), Some("admin-read-audit")),
     )
     .await;
 
@@ -613,16 +603,26 @@ async fn admin_audit_invalid_date_range_returns_validation_error() {
 #[tokio::test]
 async fn admin_audit_keyword_search_finds_matching_events() {
     let app = dev_app();
-    seed_memory(&app, ORG_A, USER_A, "Rust audit keyword content", Some(DEV_API_KEY)).await;
-    seed_memory(&app, ORG_A, USER_B, "python only content", Some(DEV_API_KEY)).await;
+    seed_memory(
+        &app,
+        ORG_A,
+        USER_A,
+        "Rust audit keyword content",
+        Some(DEV_API_KEY),
+    )
+    .await;
+    seed_memory(
+        &app,
+        ORG_A,
+        USER_B,
+        "python only content",
+        Some(DEV_API_KEY),
+    )
+    .await;
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &admin_audit_uri("q=rust"),
-            Some(ORG_A),
-            Some(DEV_API_KEY),
-        ),
+        get_request(&admin_audit_uri("q=rust"), Some(ORG_A), Some(DEV_API_KEY)),
     )
     .await;
 
@@ -640,11 +640,7 @@ async fn admin_audit_empty_q_behaves_like_no_search() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            &admin_audit_uri("q=%20%20"),
-            Some(ORG_A),
-            Some(DEV_API_KEY),
-        ),
+        get_request(&admin_audit_uri("q=%20%20"), Some(ORG_A), Some(DEV_API_KEY)),
     )
     .await;
 

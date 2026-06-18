@@ -155,9 +155,11 @@ impl MemoryEventStore for PostgresMemoryEventStore {
         }
 
         builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
-        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
-            storage_error("event list limit out of range for postgres", error)
-        })?);
+        builder.push_bind(
+            i64::try_from(fetch_limit(query.limit)).map_err(|error| {
+                storage_error("event list limit out of range for postgres", error)
+            })?,
+        );
 
         let rows = builder
             .build()
@@ -264,13 +266,12 @@ impl MemoryEventStore for PostgresMemoryEventStore {
     }
 
     async fn count_events_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
-        let row = sqlx::query(
-            "SELECT COUNT(*)::bigint AS count FROM memory_events WHERE org_id = $1",
-        )
-        .bind(org_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|error| storage_error("failed to count events by org", error))?;
+        let row =
+            sqlx::query("SELECT COUNT(*)::bigint AS count FROM memory_events WHERE org_id = $1")
+                .bind(org_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|error| storage_error("failed to count events by org", error))?;
 
         let count: i64 = row
             .try_get("count")

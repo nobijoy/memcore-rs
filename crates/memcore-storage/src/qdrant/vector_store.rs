@@ -2,14 +2,14 @@
 
 use async_trait::async_trait;
 use memcore_common::{MemcoreError, MemcoreResult};
-use memcore_core::{MemoryType, TenantContext};
 use memcore_core::ports::{VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore};
+use memcore_core::{MemoryType, TenantContext};
 use qdrant_client::Payload;
 use qdrant_client::Qdrant;
 use qdrant_client::qdrant::{
-    value::Kind, Condition, CountPointsBuilder, CreateCollectionBuilder, DeletePointsBuilder,
-    Distance, Filter, PointStruct, QueryPointsBuilder, UpsertPointsBuilder, Value as QdrantValue,
-    VectorParamsBuilder,
+    Condition, CountPointsBuilder, CreateCollectionBuilder, DeletePointsBuilder, Distance, Filter,
+    PointStruct, QueryPointsBuilder, UpsertPointsBuilder, Value as QdrantValue,
+    VectorParamsBuilder, value::Kind,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -132,7 +132,9 @@ fn map_string(payload: &HashMap<String, QdrantValue>, key: &str) -> MemcoreResul
     value_string(value)
 }
 
-fn scored_point_to_result(point: qdrant_client::qdrant::ScoredPoint) -> MemcoreResult<VectorSearchResult> {
+fn scored_point_to_result(
+    point: qdrant_client::qdrant::ScoredPoint,
+) -> MemcoreResult<VectorSearchResult> {
     if point.payload.is_empty() {
         return Err(storage_error(
             "missing qdrant point payload",
@@ -144,9 +146,8 @@ fn scored_point_to_result(point: qdrant_client::qdrant::ScoredPoint) -> MemcoreR
         .map_err(|error| storage_error("invalid fact_id uuid in qdrant payload", error))?;
     let memory_type = memory_type_from_str(&map_string(&point.payload, PAYLOAD_MEMORY_TYPE)?)?;
     let metadata: serde_json::Value =
-        serde_json::from_str(&map_string(&point.payload, PAYLOAD_METADATA)?).map_err(|error| {
-            storage_error("invalid metadata json in qdrant payload", error)
-        })?;
+        serde_json::from_str(&map_string(&point.payload, PAYLOAD_METADATA)?)
+            .map_err(|error| storage_error("invalid metadata json in qdrant payload", error))?;
 
     Ok(VectorSearchResult {
         fact_id,
@@ -230,8 +231,10 @@ async fn ensure_collection(
 
     client
         .create_collection(
-            CreateCollectionBuilder::new(collection_name)
-                .vectors_config(VectorParamsBuilder::new(dimensions as u64, Distance::Cosine)),
+            CreateCollectionBuilder::new(collection_name).vectors_config(VectorParamsBuilder::new(
+                dimensions as u64,
+                Distance::Cosine,
+            )),
         )
         .await
         .map_err(|error| storage_error("failed to create qdrant collection", error))?;
@@ -263,9 +266,7 @@ impl VectorStore for QdrantVectorStore {
         let point = PointStruct::new(record.id.to_string(), record.embedding, payload);
 
         self.client
-            .upsert_points(
-                UpsertPointsBuilder::new(&self.collection_name, vec![point]).wait(true),
-            )
+            .upsert_points(UpsertPointsBuilder::new(&self.collection_name, vec![point]).wait(true))
             .await
             .map_err(|error| storage_error("failed to upsert qdrant vector", error))?;
 
@@ -309,11 +310,7 @@ impl VectorStore for QdrantVectorStore {
         Ok(results)
     }
 
-    async fn delete_by_fact_id(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()> {
+    async fn delete_by_fact_id(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()> {
         let filter = tenant_fact_filter(tenant, fact_id);
         if self.count_matching(filter.clone()).await? == 0 {
             return Err(MemcoreError::NotFound(format!(

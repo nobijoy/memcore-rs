@@ -3,14 +3,14 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{create_app, AppState};
+use memcore_api::{AppState, create_app};
 use memcore_common::hash_api_key;
 use memcore_config::{AuthMode, Settings};
 use memcore_core::{ApiKeyRecord, ApiKeyScope};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{authorization_header, DEV_API_KEY};
+use common::{DEV_API_KEY, authorization_header};
 
 const ORG_A: &str = "org_admin_api_a";
 const ORG_B: &str = "org_admin_api_b";
@@ -68,11 +68,7 @@ async fn database_app_with_admin(org_id: &str, raw_key: &str) -> axum::Router {
     let state = AppState::initialize(database_auth_settings())
         .await
         .expect("app state should initialize");
-    seed_record(
-        &state,
-        admin_api_key_record(org_id, raw_key, "admin-key"),
-    )
-    .await;
+    seed_record(&state, admin_api_key_record(org_id, raw_key, "admin-key")).await;
     create_app(state)
 }
 
@@ -87,9 +83,7 @@ fn get_request(uri: &str, org_id: Option<&str>, bearer: Option<&str>) -> Request
         builder = builder.header("Authorization", format!("Bearer {token}"));
     }
 
-    builder
-        .body(Body::empty())
-        .expect("request should build")
+    builder.body(Body::empty()).expect("request should build")
 }
 
 fn post_memory(uri: &str, body: &str, org_id: &str, bearer: Option<&str>) -> Request<Body> {
@@ -290,11 +284,7 @@ async fn org_users_returns_only_current_org_users() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            "/api/v1/admin/org/users",
-            Some(ORG_A),
-            Some(DEV_API_KEY),
-        ),
+        get_request("/api/v1/admin/org/users", Some(ORG_A), Some(DEV_API_KEY)),
     )
     .await;
 
@@ -313,11 +303,7 @@ async fn org_users_limit_defaults_to_fifty() {
 
     let (status, json) = response_parts(
         app,
-        get_request(
-            "/api/v1/admin/org/users",
-            Some(ORG_A),
-            Some(DEV_API_KEY),
-        ),
+        get_request("/api/v1/admin/org/users", Some(ORG_A), Some(DEV_API_KEY)),
     )
     .await;
 

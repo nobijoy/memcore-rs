@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::admin::ProviderUsageDailyBucket;
 use crate::pagination::PageCursor;
 
 pub const DEFAULT_PROVIDER_USAGE_LIMIT: usize = 50;
@@ -90,6 +91,33 @@ impl ProviderUsageQuery {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderUsageDailyQuery {
+    pub org_id: String,
+    pub provider_name: Option<String>,
+    pub model_name: Option<String>,
+    pub capability: Option<ProviderUsageCapability>,
+    pub created_after: DateTime<Utc>,
+    pub created_before: DateTime<Utc>,
+}
+
+impl ProviderUsageDailyQuery {
+    pub fn new(
+        org_id: impl Into<String>,
+        created_after: DateTime<Utc>,
+        created_before: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            org_id: org_id.into(),
+            provider_name: None,
+            model_name: None,
+            capability: None,
+            created_after,
+            created_before,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderUsagePersistedSummary {
     pub total_requests: u64,
@@ -138,6 +166,11 @@ pub trait ProviderUsageStore: Send + Sync {
         &self,
         query: ProviderUsageQuery,
     ) -> MemcoreResult<ProviderUsageQueryResult>;
+
+    async fn query_usage_daily(
+        &self,
+        query: ProviderUsageDailyQuery,
+    ) -> MemcoreResult<Vec<ProviderUsageDailyBucket>>;
 
     /// Count or delete persisted usage events with `created_at` strictly before `cutoff` for `org_id`.
     async fn delete_usage_events_older_than(

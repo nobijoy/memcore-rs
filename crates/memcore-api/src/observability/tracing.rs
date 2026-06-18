@@ -40,9 +40,7 @@ pub async fn observe_request_lifecycle(
     insert_response_request_id_header(&mut response, &header_name, &request_id);
 
     if state.settings.metrics_enabled {
-        state
-            .metrics
-            .record_request(&path, status, latency_ms);
+        state.metrics.record_request(&path, status, latency_ms);
     }
 
     if status >= 400 {
@@ -86,7 +84,9 @@ pub async fn log_protected_request(request: Request, next: Next) -> Response {
     let status = response.status().as_u16();
 
     if let Some(org_id) = org_id {
-        response.extensions_mut().insert(LoggedOrgId(org_id.clone()));
+        response
+            .extensions_mut()
+            .insert(LoggedOrgId(org_id.clone()));
         tracing::debug!(
             request_id = request_id.as_deref(),
             method = %method,

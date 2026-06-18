@@ -87,11 +87,9 @@ async fn seed_memory(app: &axum::Router, org_id: &str, user_id: &str, content: &
 #[tokio::test]
 async fn app_starts_with_lancedb_vector_store() {
     let dir = TempDir::new().expect("temp dir should be created");
-    let state = AppState::initialize(Settings::lancedb_with_path(
-        dir.path().to_string_lossy(),
-    ))
-    .await
-    .expect("initialization should succeed");
+    let state = AppState::initialize(Settings::lancedb_with_path(dir.path().to_string_lossy()))
+        .await
+        .expect("initialization should succeed");
 
     assert_eq!(state.settings.vector_backend, VectorBackend::LanceDb);
     drop(state);
@@ -158,17 +156,11 @@ async fn build_context_works_with_lancedb_backed_search() {
         }}"#
     );
 
-    let (status, json) = response_parts(
-        app,
-        post_request("/api/v1/context", &context_body, ORG_A),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, post_request("/api/v1/context", &context_body, ORG_A)).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(json["context"]
-        .as_str()
-        .unwrap()
-        .contains(MEMORY_CONTENT));
+    assert!(json["context"].as_str().unwrap().contains(MEMORY_CONTENT));
 }
 
 #[tokio::test]
@@ -188,9 +180,7 @@ async fn delete_single_memory_removes_lancedb_vector() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let memory_id = add_json["memories"][0]["id"]
-        .as_str()
-        .expect("memory id");
+    let memory_id = add_json["memories"][0]["id"].as_str().expect("memory id");
     let memory_id = Uuid::parse_str(memory_id).expect("valid uuid");
 
     let (status, _) = response_parts(
@@ -300,11 +290,8 @@ async fn lancedb_context_empty_when_no_vectors_for_tenant() {
         }}"#
     );
 
-    let (status, json) = response_parts(
-        app,
-        post_request("/api/v1/context", &context_body, ORG_A),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, post_request("/api/v1/context", &context_body, ORG_A)).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["context"], EMPTY_CONTEXT_MESSAGE);

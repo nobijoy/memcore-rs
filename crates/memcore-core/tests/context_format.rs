@@ -1,6 +1,6 @@
 use memcore_core::{
-    assemble_context_with_budget, ContextBudget, ContextCompressionOptions, ContextFormat,
-    ContextFormatOptions, MemorySearchResult, MemoryType, SimpleTokenEstimator,
+    ContextBudget, ContextCompressionOptions, ContextFormat, ContextFormatOptions,
+    MemorySearchResult, MemoryType, SimpleTokenEstimator, assemble_context_with_budget,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -73,7 +73,10 @@ fn flat_format_preserves_ranked_order_without_sections() {
 
 #[test]
 fn json_format_returns_string_context_payload() {
-    let memories = vec![sample_result("User is building memcore.", MemoryType::Project)];
+    let memories = vec![sample_result(
+        "User is building memcore.",
+        MemoryType::Project,
+    )];
     let options = ContextFormatOptions {
         format: ContextFormat::Json,
         ..ContextFormatOptions::default()
@@ -96,7 +99,10 @@ fn json_format_returns_string_context_payload() {
 
 #[test]
 fn metadata_flags_affect_formatted_output() {
-    let memories = vec![sample_result("User is building memcore.", MemoryType::Project)];
+    let memories = vec![sample_result(
+        "User is building memcore.",
+        MemoryType::Project,
+    )];
     let options = ContextFormatOptions {
         format: ContextFormat::Markdown,
         include_scores: true,

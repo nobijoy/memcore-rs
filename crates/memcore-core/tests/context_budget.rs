@@ -4,7 +4,7 @@ use memcore_core::{
     BuildContextInput, ContextBudget, Fact, FactStore, MemoryEngine, MemorySource, MemoryType,
     TenantContext, VectorRecord, VectorStore,
 };
-use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
+use memcore_providers::{MockEmbeddingProvider, MockLlmProvider, deterministic_embedding};
 use memcore_storage::{MockFactStore, MockVectorStore};
 use serde_json::json;
 use uuid::Uuid;

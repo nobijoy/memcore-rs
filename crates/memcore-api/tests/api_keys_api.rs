@@ -11,7 +11,7 @@ use memcore_core::{ApiKeyRecord, ApiKeyScope};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{authorization_header, DEV_API_KEY};
+use common::{DEV_API_KEY, authorization_header};
 
 const ORG_A: &str = "org_api_keys_a";
 const ORG_B: &str = "org_api_keys_b";
@@ -97,11 +97,7 @@ async fn database_app_with_admin(org_id: &str, raw_key: &str) -> axum::Router {
     let state = AppState::initialize(database_auth_settings())
         .await
         .expect("app state should initialize");
-    seed_record(
-        &state,
-        admin_api_key_record(org_id, raw_key, "admin-key"),
-    )
-    .await;
+    seed_record(&state, admin_api_key_record(org_id, raw_key, "admin-key")).await;
     create_app(state)
 }
 
@@ -257,11 +253,7 @@ async fn revoked_api_key_cannot_authenticate_in_database_mode() {
         .expect("app state should initialize");
 
     let admin_raw = "admin-bootstrap";
-    seed_record(
-        &state,
-        admin_api_key_record(ORG_A, admin_raw, "admin"),
-    )
-    .await;
+    seed_record(&state, admin_api_key_record(ORG_A, admin_raw, "admin")).await;
 
     let app = create_app(state.clone());
     let (create_status, create_json) = response_parts(
@@ -327,7 +319,13 @@ async fn invalid_scope_returns_validation_error() {
     let body = r#"{"name": "bad", "scopes": ["NotARealScope"]}"#;
     let (status, json) = response_parts(
         dev_app(),
-        request("POST", "/api/v1/api-keys", Some(body), ORG_A, Some(DEV_API_KEY)),
+        request(
+            "POST",
+            "/api/v1/api-keys",
+            Some(body),
+            ORG_A,
+            Some(DEV_API_KEY),
+        ),
     )
     .await;
 
@@ -341,7 +339,13 @@ async fn empty_name_returns_validation_error() {
     let body = r#"{"name": "   ", "scopes": ["MemoryRead"]}"#;
     let (status, json) = response_parts(
         dev_app(),
-        request("POST", "/api/v1/api-keys", Some(body), ORG_A, Some(DEV_API_KEY)),
+        request(
+            "POST",
+            "/api/v1/api-keys",
+            Some(body),
+            ORG_A,
+            Some(DEV_API_KEY),
+        ),
     )
     .await;
 
@@ -355,7 +359,13 @@ async fn empty_scopes_returns_validation_error() {
     let body = r#"{"name": "valid", "scopes": []}"#;
     let (status, json) = response_parts(
         dev_app(),
-        request("POST", "/api/v1/api-keys", Some(body), ORG_A, Some(DEV_API_KEY)),
+        request(
+            "POST",
+            "/api/v1/api-keys",
+            Some(body),
+            ORG_A,
+            Some(DEV_API_KEY),
+        ),
     )
     .await;
 
@@ -388,21 +398,9 @@ async fn org_a_cannot_list_org_b_keys() {
     let state = AppState::initialize(database_auth_settings())
         .await
         .expect("app state should initialize");
-    seed_record(
-        &state,
-        admin_api_key_record(ORG_A, "admin-a", "admin-a"),
-    )
-    .await;
-    seed_record(
-        &state,
-        admin_api_key_record(ORG_B, "admin-b", "admin-b"),
-    )
-    .await;
-    seed_record(
-        &state,
-        memory_only_api_key_record(ORG_B, "memory-b-only"),
-    )
-    .await;
+    seed_record(&state, admin_api_key_record(ORG_A, "admin-a", "admin-a")).await;
+    seed_record(&state, admin_api_key_record(ORG_B, "admin-b", "admin-b")).await;
+    seed_record(&state, memory_only_api_key_record(ORG_B, "memory-b-only")).await;
 
     let app = create_app(state);
     let (status, json) = response_parts(
@@ -449,11 +447,7 @@ async fn database_auth_requires_admin_write_for_create_and_revoke() {
     let state = AppState::initialize(database_auth_settings())
         .await
         .expect("app state should initialize");
-    seed_record(
-        &state,
-        read_only_api_key_record(ORG_A, "read-only-key"),
-    )
-    .await;
+    seed_record(&state, read_only_api_key_record(ORG_A, "read-only-key")).await;
     let app = create_app(state);
 
     let (create_status, create_json) = response_parts(
@@ -491,11 +485,7 @@ async fn database_auth_requires_admin_read_or_write_for_list() {
     let state = AppState::initialize(database_auth_settings())
         .await
         .expect("app state should initialize");
-    seed_record(
-        &state,
-        memory_only_api_key_record(ORG_A, "memory-only-key"),
-    )
-    .await;
+    seed_record(&state, memory_only_api_key_record(ORG_A, "memory-only-key")).await;
     let app = create_app(state);
 
     let (status, json) = response_parts(
@@ -561,7 +551,13 @@ async fn existing_protected_route_auth_still_works() {
     }"#;
     let (status, json) = response_parts(
         dev_app(),
-        request("POST", "/api/v1/memories", Some(body), ORG_A, Some(DEV_API_KEY)),
+        request(
+            "POST",
+            "/api/v1/memories",
+            Some(body),
+            ORG_A,
+            Some(DEV_API_KEY),
+        ),
     )
     .await;
 

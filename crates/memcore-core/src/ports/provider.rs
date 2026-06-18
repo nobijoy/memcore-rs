@@ -42,10 +42,7 @@ pub struct SummarizationInput {
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
-    async fn extract_facts(
-        &self,
-        input: FactExtractionInput,
-    ) -> MemcoreResult<Vec<CandidateFact>>;
+    async fn extract_facts(&self, input: FactExtractionInput) -> MemcoreResult<Vec<CandidateFact>>;
 
     async fn classify_fact_operation(
         &self,

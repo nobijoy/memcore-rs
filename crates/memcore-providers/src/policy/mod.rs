@@ -2,10 +2,10 @@ mod execute;
 mod retry;
 mod timeout;
 
-pub use execute::{execute_provider_call, ProviderExecutionFailure, ProviderExecutionOutcome};
+pub use execute::{ProviderExecutionFailure, ProviderExecutionOutcome, execute_provider_call};
 pub use retry::{
-    backoff_duration, is_provider_health_failure, is_retryable_provider_error,
-    ProviderRetryDecision, retry_decision_for,
+    ProviderRetryDecision, backoff_duration, is_provider_health_failure,
+    is_retryable_provider_error, retry_decision_for,
 };
 pub use timeout::provider_timeout_error;
 

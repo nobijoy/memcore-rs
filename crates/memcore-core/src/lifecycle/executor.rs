@@ -4,7 +4,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::ports::{EmbeddingProvider, FactStore, VectorRecord, VectorStore};
-use crate::{CandidateFact, Fact, FactOperation, FactOperationDecision, MemorySource, TenantContext};
+use crate::{
+    CandidateFact, Fact, FactOperation, FactOperationDecision, MemorySource, TenantContext,
+};
 
 /// Outcome of applying a lifecycle operation to a candidate fact.
 #[derive(Debug, Clone, PartialEq)]

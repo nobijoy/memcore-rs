@@ -42,10 +42,7 @@ async fn insert_event_at(
         json!({}),
     );
     event.created_at = created_at;
-    store
-        .record_event(&tenant, event)
-        .await
-        .expect("record");
+    store.record_event(&tenant, event).await.expect("record");
 }
 
 #[tokio::test]

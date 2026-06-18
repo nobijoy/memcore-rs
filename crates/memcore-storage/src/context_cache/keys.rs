@@ -1,4 +1,4 @@
-use memcore_core::{stable_sha256_hex, ContextCacheKey};
+use memcore_core::{ContextCacheKey, stable_sha256_hex};
 
 /// Builds the Redis cache key for a tenant-scoped context entry.
 ///

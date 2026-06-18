@@ -12,9 +12,7 @@ pub fn new_token_usage_slot() -> TokenUsageSlot {
 }
 
 pub fn take_token_usage(slot: &TokenUsageSlot) -> Option<ProviderTokenUsage> {
-    slot.lock()
-        .ok()
-        .and_then(|mut guard| guard.take())
+    slot.lock().ok().and_then(|mut guard| guard.take())
 }
 
 pub fn store_token_usage(slot: &TokenUsageSlot, usage: ProviderTokenUsage) {
@@ -43,8 +41,8 @@ pub fn estimate_llm_classification_tokens(
     candidate_content: &str,
     existing_count: usize,
 ) -> ProviderTokenUsage {
-    let input_tokens = estimate_tokens_from_text(candidate_content)
-        .saturating_add(existing_count as u64 * 20);
+    let input_tokens =
+        estimate_tokens_from_text(candidate_content).saturating_add(existing_count as u64 * 20);
     ProviderTokenUsage::from_counts(Some(input_tokens), Some(32))
 }
 
@@ -64,7 +62,10 @@ pub fn estimate_embedding_tokens(text: &str) -> ProviderTokenUsage {
 }
 
 pub fn estimate_embedding_batch_tokens(texts: &[String]) -> ProviderTokenUsage {
-    let total: u64 = texts.iter().map(|text| estimate_tokens_from_text(text)).sum();
+    let total: u64 = texts
+        .iter()
+        .map(|text| estimate_tokens_from_text(text))
+        .sum();
     ProviderTokenUsage::from_counts(Some(total), None)
 }
 
@@ -74,7 +75,10 @@ mod tests {
 
     #[test]
     fn estimate_tokens_from_text_is_deterministic() {
-        assert_eq!(estimate_tokens_from_text("hello"), estimate_tokens_from_text("hello"));
+        assert_eq!(
+            estimate_tokens_from_text("hello"),
+            estimate_tokens_from_text("hello")
+        );
         assert!(estimate_tokens_from_text("abcd") >= 1);
     }
 }

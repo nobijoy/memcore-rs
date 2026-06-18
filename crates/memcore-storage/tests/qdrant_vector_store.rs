@@ -149,209 +149,221 @@ async fn qdrant_search_respects_org_isolation() {
 
 #[tokio::test]
 async fn qdrant_search_respects_user_isolation() {
-    with_qdrant_store("qdrant_search_respects_user_isolation", |store| async move {
-        let tenant_a = tenant("org_qdrant_a", "user_a");
-        let tenant_b = tenant("org_qdrant_a", "user_b");
+    with_qdrant_store(
+        "qdrant_search_respects_user_isolation",
+        |store| async move {
+            let tenant_a = tenant("org_qdrant_a", "user_a");
+            let tenant_b = tenant("org_qdrant_a", "user_b");
 
-        store
-            .upsert_vector(
-                &tenant_a,
-                sample_record(
-                    "org_qdrant_a",
-                    "user_a",
-                    Uuid::new_v4(),
-                    "user a only",
-                    MemoryType::Skill,
-                    json!({}),
-                    [0.0, 1.0, 0.0, 0.0],
-                ),
-            )
-            .await
-            .expect("upsert should succeed");
+            store
+                .upsert_vector(
+                    &tenant_a,
+                    sample_record(
+                        "org_qdrant_a",
+                        "user_a",
+                        Uuid::new_v4(),
+                        "user a only",
+                        MemoryType::Skill,
+                        json!({}),
+                        [0.0, 1.0, 0.0, 0.0],
+                    ),
+                )
+                .await
+                .expect("upsert should succeed");
 
-        let results = store
-            .search_vectors(VectorSearchQuery {
-                tenant: tenant_b,
-                embedding: embedding([0.0, 1.0, 0.0, 0.0]),
-                limit: 5,
-                memory_types: None,
-                metadata_filter: None,
-            })
-            .await
-            .expect("search should succeed");
+            let results = store
+                .search_vectors(VectorSearchQuery {
+                    tenant: tenant_b,
+                    embedding: embedding([0.0, 1.0, 0.0, 0.0]),
+                    limit: 5,
+                    memory_types: None,
+                    metadata_filter: None,
+                })
+                .await
+                .expect("search should succeed");
 
-        assert!(results.is_empty());
-    })
+            assert!(results.is_empty());
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn qdrant_upsert_same_fact_id_replaces_record() {
-    with_qdrant_store("qdrant_upsert_same_fact_id_replaces_record", |store| async move {
-        let tenant = tenant("org_qdrant_a", "user_a");
-        let fact_id = Uuid::new_v4();
+    with_qdrant_store(
+        "qdrant_upsert_same_fact_id_replaces_record",
+        |store| async move {
+            let tenant = tenant("org_qdrant_a", "user_a");
+            let fact_id = Uuid::new_v4();
 
-        store
-            .upsert_vector(
-                &tenant,
-                sample_record(
-                    "org_qdrant_a",
-                    "user_a",
-                    fact_id,
-                    "first version",
-                    MemoryType::Skill,
-                    json!({}),
-                    [0.1, 0.1, 0.1, 0.1],
-                ),
-            )
-            .await
-            .expect("first upsert should succeed");
+            store
+                .upsert_vector(
+                    &tenant,
+                    sample_record(
+                        "org_qdrant_a",
+                        "user_a",
+                        fact_id,
+                        "first version",
+                        MemoryType::Skill,
+                        json!({}),
+                        [0.1, 0.1, 0.1, 0.1],
+                    ),
+                )
+                .await
+                .expect("first upsert should succeed");
 
-        store
-            .upsert_vector(
-                &tenant,
-                sample_record(
-                    "org_qdrant_a",
-                    "user_a",
-                    fact_id,
-                    "second version",
-                    MemoryType::Project,
-                    json!({"v": 2}),
-                    [0.9, 0.9, 0.9, 0.9],
-                ),
-            )
-            .await
-            .expect("second upsert should succeed");
+            store
+                .upsert_vector(
+                    &tenant,
+                    sample_record(
+                        "org_qdrant_a",
+                        "user_a",
+                        fact_id,
+                        "second version",
+                        MemoryType::Project,
+                        json!({"v": 2}),
+                        [0.9, 0.9, 0.9, 0.9],
+                    ),
+                )
+                .await
+                .expect("second upsert should succeed");
 
-        let results = store
-            .search_vectors(VectorSearchQuery {
-                tenant,
-                embedding: embedding([0.9, 0.9, 0.9, 0.9]),
-                limit: 10,
-                memory_types: None,
-                metadata_filter: None,
-            })
-            .await
-            .expect("search should succeed");
+            let results = store
+                .search_vectors(VectorSearchQuery {
+                    tenant,
+                    embedding: embedding([0.9, 0.9, 0.9, 0.9]),
+                    limit: 10,
+                    memory_types: None,
+                    metadata_filter: None,
+                })
+                .await
+                .expect("search should succeed");
 
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].fact_id, fact_id);
-        assert_eq!(results[0].content, "second version");
-        assert_eq!(results[0].memory_type, MemoryType::Project);
-    })
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].fact_id, fact_id);
+            assert_eq!(results[0].content, "second version");
+            assert_eq!(results[0].memory_type, MemoryType::Project);
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn qdrant_delete_by_fact_id_removes_tenant_scoped_record() {
-    with_qdrant_store("qdrant_delete_by_fact_id_removes_tenant_scoped_record", |store| async move {
-        let tenant = tenant("org_qdrant_a", "user_a");
-        let fact_id = Uuid::new_v4();
+    with_qdrant_store(
+        "qdrant_delete_by_fact_id_removes_tenant_scoped_record",
+        |store| async move {
+            let tenant = tenant("org_qdrant_a", "user_a");
+            let fact_id = Uuid::new_v4();
 
-        store
-            .upsert_vector(
-                &tenant,
-                sample_record(
-                    "org_qdrant_a",
-                    "user_a",
-                    fact_id,
-                    "to delete",
-                    MemoryType::Skill,
-                    json!({}),
-                    [0.2, 0.2, 0.2, 0.2],
-                ),
-            )
-            .await
-            .expect("upsert should succeed");
+            store
+                .upsert_vector(
+                    &tenant,
+                    sample_record(
+                        "org_qdrant_a",
+                        "user_a",
+                        fact_id,
+                        "to delete",
+                        MemoryType::Skill,
+                        json!({}),
+                        [0.2, 0.2, 0.2, 0.2],
+                    ),
+                )
+                .await
+                .expect("upsert should succeed");
 
-        store
-            .delete_by_fact_id(&tenant, fact_id)
-            .await
-            .expect("delete should succeed");
+            store
+                .delete_by_fact_id(&tenant, fact_id)
+                .await
+                .expect("delete should succeed");
 
-        let results = store
-            .search_vectors(VectorSearchQuery {
-                tenant,
-                embedding: embedding([0.2, 0.2, 0.2, 0.2]),
-                limit: 5,
-                memory_types: None,
-                metadata_filter: None,
-            })
-            .await
-            .expect("search should succeed");
+            let results = store
+                .search_vectors(VectorSearchQuery {
+                    tenant,
+                    embedding: embedding([0.2, 0.2, 0.2, 0.2]),
+                    limit: 5,
+                    memory_types: None,
+                    metadata_filter: None,
+                })
+                .await
+                .expect("search should succeed");
 
-        assert!(results.is_empty());
-    })
+            assert!(results.is_empty());
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn qdrant_delete_by_user_removes_only_that_user_vectors() {
-    with_qdrant_store("qdrant_delete_by_user_removes_only_that_user_vectors", |store| async move {
-        let tenant_a = tenant("org_qdrant_a", "user_a");
-        let tenant_b = tenant("org_qdrant_a", "user_b");
+    with_qdrant_store(
+        "qdrant_delete_by_user_removes_only_that_user_vectors",
+        |store| async move {
+            let tenant_a = tenant("org_qdrant_a", "user_a");
+            let tenant_b = tenant("org_qdrant_a", "user_b");
 
-        store
-            .upsert_vector(
-                &tenant_a,
-                sample_record(
-                    "org_qdrant_a",
-                    "user_a",
-                    Uuid::new_v4(),
-                    "user a",
-                    MemoryType::Skill,
-                    json!({}),
-                    [0.3, 0.3, 0.3, 0.3],
-                ),
-            )
-            .await
-            .expect("upsert a should succeed");
+            store
+                .upsert_vector(
+                    &tenant_a,
+                    sample_record(
+                        "org_qdrant_a",
+                        "user_a",
+                        Uuid::new_v4(),
+                        "user a",
+                        MemoryType::Skill,
+                        json!({}),
+                        [0.3, 0.3, 0.3, 0.3],
+                    ),
+                )
+                .await
+                .expect("upsert a should succeed");
 
-        store
-            .upsert_vector(
-                &tenant_b,
-                sample_record(
-                    "org_qdrant_a",
-                    "user_b",
-                    Uuid::new_v4(),
-                    "user b",
-                    MemoryType::Skill,
-                    json!({}),
-                    [0.4, 0.4, 0.4, 0.4],
-                ),
-            )
-            .await
-            .expect("upsert b should succeed");
+            store
+                .upsert_vector(
+                    &tenant_b,
+                    sample_record(
+                        "org_qdrant_a",
+                        "user_b",
+                        Uuid::new_v4(),
+                        "user b",
+                        MemoryType::Skill,
+                        json!({}),
+                        [0.4, 0.4, 0.4, 0.4],
+                    ),
+                )
+                .await
+                .expect("upsert b should succeed");
 
-        store
-            .delete_by_user(&tenant_a)
-            .await
-            .expect("delete user should succeed");
+            store
+                .delete_by_user(&tenant_a)
+                .await
+                .expect("delete user should succeed");
 
-        let results_a = store
-            .search_vectors(VectorSearchQuery {
-                tenant: tenant_a,
-                embedding: embedding([0.3, 0.3, 0.3, 0.3]),
-                limit: 5,
-                memory_types: None,
-                metadata_filter: None,
-            })
-            .await
-            .expect("search a should succeed");
-        assert!(results_a.is_empty());
+            let results_a = store
+                .search_vectors(VectorSearchQuery {
+                    tenant: tenant_a,
+                    embedding: embedding([0.3, 0.3, 0.3, 0.3]),
+                    limit: 5,
+                    memory_types: None,
+                    metadata_filter: None,
+                })
+                .await
+                .expect("search a should succeed");
+            assert!(results_a.is_empty());
 
-        let results_b = store
-            .search_vectors(VectorSearchQuery {
-                tenant: tenant_b,
-                embedding: embedding([0.4, 0.4, 0.4, 0.4]),
-                limit: 5,
-                memory_types: None,
-                metadata_filter: None,
-            })
-            .await
-            .expect("search b should succeed");
-        assert_eq!(results_b.len(), 1);
-    })
+            let results_b = store
+                .search_vectors(VectorSearchQuery {
+                    tenant: tenant_b,
+                    embedding: embedding([0.4, 0.4, 0.4, 0.4]),
+                    limit: 5,
+                    memory_types: None,
+                    metadata_filter: None,
+                })
+                .await
+                .expect("search b should succeed");
+            assert_eq!(results_b.len(), 1);
+        },
+    )
     .await;
 }
 

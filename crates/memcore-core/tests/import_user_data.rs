@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use memcore_common::MemcoreError;
 use memcore_core::{
     AddMemoryInput, ExportUserDataInput, ImportMode, ImportUserDataInput, ListMemoriesInput,
     MemoryEngine, MemoryMessage, MemorySource, MemoryType, MessageRole, SearchMemoryInput,
     TenantContext, USER_EXPORT_FORMAT_VERSION, UserMemoryExport,
 };
-use memcore_common::MemcoreError;
 use memcore_providers::{MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockMemoryEventStore, MockVectorStore};
 use serde_json::json;
@@ -112,7 +112,9 @@ async fn import_replace_removes_previous_user_facts() {
         .expect("add should succeed");
 
     let mut export = UserMemoryExport::new("org_a", "user_a", vec![], vec![]);
-    export.facts.push(manual_fact("org_a", "user_a", "replacement"));
+    export
+        .facts
+        .push(manual_fact("org_a", "user_a", "replacement"));
 
     let output = engine
         .import_user_data(ImportUserDataInput {
@@ -549,11 +551,9 @@ async fn dry_run_does_not_create_vectors() {
     let source = engine_with_events();
     let export = seed_export(&source, "org_a", "user_a").await;
 
-    let embedding = Arc::new(
-        MockEmbeddingProvider::new(4).with_fail_error(MemcoreError::ProviderError(
-            "embedding should not be called".to_string(),
-        )),
-    );
+    let embedding = Arc::new(MockEmbeddingProvider::new(4).with_fail_error(
+        MemcoreError::ProviderError("embedding should not be called".to_string()),
+    ));
     let target = MemoryEngine::new(
         Arc::new(MockFactStore::new()),
         Arc::new(MockVectorStore::new()),
@@ -611,11 +611,13 @@ async fn dry_run_detects_org_id_mismatch() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output
-        .validation
-        .errors
-        .iter()
-        .any(|issue| issue.code == "ORG_ID_MISMATCH"));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| issue.code == "ORG_ID_MISMATCH")
+    );
 }
 
 #[tokio::test]
@@ -636,11 +638,13 @@ async fn dry_run_detects_user_id_mismatch() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output
-        .validation
-        .errors
-        .iter()
-        .any(|issue| issue.code == "USER_ID_MISMATCH"));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| issue.code == "USER_ID_MISMATCH")
+    );
 }
 
 #[tokio::test]
@@ -661,11 +665,13 @@ async fn dry_run_detects_fact_tenant_mismatch() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output
-        .validation
-        .errors
-        .iter()
-        .any(|issue| issue.code == "FACT_TENANT_MISMATCH"));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| issue.code == "FACT_TENANT_MISMATCH")
+    );
 }
 
 #[tokio::test]
@@ -686,9 +692,13 @@ async fn dry_run_detects_unsupported_format_version() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output.validation.errors.iter().any(|issue| {
-        issue.code == "UNSUPPORTED_FORMAT_VERSION"
-    }));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| { issue.code == "UNSUPPORTED_FORMAT_VERSION" })
+    );
 }
 
 #[tokio::test]
@@ -725,11 +735,13 @@ async fn dry_run_detects_empty_fact_content() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output
-        .validation
-        .errors
-        .iter()
-        .any(|issue| issue.code == "EMPTY_FACT_CONTENT"));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| issue.code == "EMPTY_FACT_CONTENT")
+    );
 }
 
 #[tokio::test]
@@ -751,11 +763,13 @@ async fn dry_run_detects_invalid_confidence() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output
-        .validation
-        .errors
-        .iter()
-        .any(|issue| issue.code == "INVALID_CONFIDENCE"));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| issue.code == "INVALID_CONFIDENCE")
+    );
 }
 
 #[tokio::test]
@@ -777,11 +791,13 @@ async fn dry_run_detects_invalid_importance() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output
-        .validation
-        .errors
-        .iter()
-        .any(|issue| issue.code == "INVALID_IMPORTANCE"));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| issue.code == "INVALID_IMPORTANCE")
+    );
 }
 
 #[tokio::test]
@@ -808,11 +824,13 @@ async fn dry_run_with_restore_events_validates_events() {
         .expect("dry-run should return summary");
 
     assert!(!output.validation.valid);
-    assert!(output
-        .validation
-        .errors
-        .iter()
-        .any(|issue| issue.code == "EVENT_TENANT_MISMATCH"));
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .any(|issue| issue.code == "EVENT_TENANT_MISMATCH")
+    );
 }
 
 #[tokio::test]

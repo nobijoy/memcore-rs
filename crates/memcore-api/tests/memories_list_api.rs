@@ -43,9 +43,7 @@ fn get_request(uri: &str, org_id: Option<&str>, with_auth: bool) -> Request<Body
         builder = builder.header(name, value);
     }
 
-    builder
-        .body(Body::empty())
-        .expect("request should build")
+    builder.body(Body::empty()).expect("request should build")
 }
 
 async fn response_parts(
@@ -117,7 +115,9 @@ async fn list_response_contains_memories_array() {
     )
     .await;
 
-    let memories = json["memories"].as_array().expect("memories should be an array");
+    let memories = json["memories"]
+        .as_array()
+        .expect("memories should be an array");
     assert_eq!(memories[0]["content"], MEMORY_CONTENT);
     assert!(memories[0]["id"].is_string());
     assert_eq!(memories[0]["memory_type"], "Conversation");
@@ -145,11 +145,7 @@ async fn list_route_requires_authorization_header() {
 async fn list_route_requires_organization_header() {
     let (status, json) = response_parts(
         test_app(),
-        get_request(
-            &format!("/api/v1/users/{USER_A}/memories"),
-            None,
-            true,
-        ),
+        get_request(&format!("/api/v1/users/{USER_A}/memories"), None, true),
     )
     .await;
 
@@ -171,10 +167,12 @@ async fn invalid_memory_type_returns_validation_error() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
-    assert!(json["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("invalid memory type"));
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid memory type")
+    );
 }
 
 #[tokio::test]
@@ -302,11 +300,13 @@ async fn keyword_search_finds_matching_content() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["memories"].as_array().unwrap().len(), 1);
-    assert!(json["memories"][0]["content"]
-        .as_str()
-        .unwrap()
-        .to_ascii_lowercase()
-        .contains("rust"));
+    assert!(
+        json["memories"][0]["content"]
+            .as_str()
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("rust")
+    );
 }
 
 #[tokio::test]

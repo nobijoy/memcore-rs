@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use super::pricing::{lookup_pricing, ProviderCostCalculator};
+use super::pricing::{ProviderCostCalculator, lookup_pricing};
 use super::types::{
     ProviderCallStatus, ProviderUsageCapability, ProviderUsageEvent, ProviderUsageRecord,
     ProviderUsageSnapshot, UsageAggregateKey,
@@ -61,14 +61,14 @@ impl InMemoryProviderUsageRecorder {
                 record.input_tokens = Some(record.input_tokens.unwrap_or(0).saturating_add(input));
             }
             if let Some(output) = event.output_tokens {
-                record.output_tokens = Some(record.output_tokens.unwrap_or(0).saturating_add(output));
+                record.output_tokens =
+                    Some(record.output_tokens.unwrap_or(0).saturating_add(output));
             }
             if let Some(total) = total_tokens {
                 record.total_tokens = Some(record.total_tokens.unwrap_or(0).saturating_add(total));
             }
             if let Some(cost) = event.estimated_cost_usd {
-                record.estimated_cost_usd =
-                    Some(record.estimated_cost_usd.unwrap_or(0.0) + cost);
+                record.estimated_cost_usd = Some(record.estimated_cost_usd.unwrap_or(0.0) + cost);
             }
             return;
         }

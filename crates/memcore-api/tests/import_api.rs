@@ -3,7 +3,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{create_app, AppState};
+use memcore_api::{AppState, create_app};
 use memcore_config::Settings;
 use memcore_core::USER_EXPORT_FORMAT_VERSION;
 use tower::ServiceExt;
@@ -170,11 +170,8 @@ async fn imported_memories_are_searchable() {
 
     let import_uri = format!("/api/v1/users/{USER_A}/import");
     let body = import_body(&export, "append", false);
-    let (import_status, _) = response_parts(
-        app.clone(),
-        post_request(&import_uri, &body, ORG_A, true),
-    )
-    .await;
+    let (import_status, _) =
+        response_parts(app.clone(), post_request(&import_uri, &body, ORG_A, true)).await;
     assert_eq!(import_status, StatusCode::OK);
 
     let search_body = format!(
@@ -514,11 +511,13 @@ async fn dry_run_invalid_payload_returns_validation_summary() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["summary"]["validation"]["valid"], false);
-    assert!(json["summary"]["validation"]["errors"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|issue| issue["code"] == "USER_ID_MISMATCH"));
+    assert!(
+        json["summary"]["validation"]["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "USER_ID_MISMATCH")
+    );
 }
 
 #[tokio::test]

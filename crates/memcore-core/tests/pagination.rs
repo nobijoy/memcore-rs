@@ -1,6 +1,6 @@
 use chrono::Utc;
 use memcore_common::MemcoreError;
-use memcore_core::{decode_cursor, encode_cursor, parse_optional_cursor, PageCursor};
+use memcore_core::{PageCursor, decode_cursor, encode_cursor, parse_optional_cursor};
 use uuid::Uuid;
 
 #[test]

@@ -4,9 +4,7 @@ use std::sync::RwLock;
 
 use async_trait::async_trait;
 use memcore_common::{MemcoreError, MemcoreResult};
-use memcore_core::{
-    CandidateFact, FactOperation, FactOperationDecision, MemoryType,
-};
+use memcore_core::{CandidateFact, FactOperation, FactOperationDecision, MemoryType};
 
 use memcore_core::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, LlmProvider, MemoryMessage,
@@ -99,10 +97,7 @@ impl MockLlmProvider {
     }
 
     pub fn with_summary_prefix(self, prefix: impl Into<String>) -> Self {
-        *self
-            .summary_prefix
-            .write()
-            .expect("summary lock poisoned") = prefix.into();
+        *self.summary_prefix.write().expect("summary lock poisoned") = prefix.into();
         self
     }
 
@@ -157,10 +152,7 @@ impl MockLlmProvider {
 
 #[async_trait]
 impl LlmProvider for MockLlmProvider {
-    async fn extract_facts(
-        &self,
-        input: FactExtractionInput,
-    ) -> MemcoreResult<Vec<CandidateFact>> {
+    async fn extract_facts(&self, input: FactExtractionInput) -> MemcoreResult<Vec<CandidateFact>> {
         check_fail(&self.fail_with.read().expect("fail lock poisoned"))?;
 
         *self
@@ -276,7 +268,10 @@ impl EmbeddingProvider for MockEmbeddingProvider {
 
     async fn embed_batch(&self, texts: Vec<String>) -> MemcoreResult<Vec<Vec<f32>>> {
         check_fail(&self.fail_with.read().expect("fail lock poisoned"))?;
-        texts.iter().map(|text| deterministic_embedding(text, self.dimensions)).collect()
+        texts
+            .iter()
+            .map(|text| deterministic_embedding(text, self.dimensions))
+            .collect()
     }
 
     fn dimensions(&self) -> usize {
@@ -306,7 +301,8 @@ mod tests {
         MockEmbeddingProvider, MockLlmProvider, deterministic_embedding, embedding_signature,
     };
     use crate::inputs::{
-        FactClassificationInput, FactExtractionInput, MemoryMessage, MessageRole, SummarizationInput,
+        FactClassificationInput, FactExtractionInput, MemoryMessage, MessageRole,
+        SummarizationInput,
     };
     use crate::traits::{EmbeddingProvider, LlmProvider};
 
@@ -420,10 +416,7 @@ mod tests {
         let provider = MockLlmProvider::new().with_summary_prefix("summary: ");
         let input = SummarizationInput {
             tenant: tenant(),
-            facts: vec![
-                sample_fact("Fact one"),
-                sample_fact("Fact two"),
-            ],
+            facts: vec![sample_fact("Fact one"), sample_fact("Fact two")],
             max_tokens: None,
         };
 
@@ -476,8 +469,7 @@ mod tests {
 
         let semantic_a =
             "The user prefers working with Rust programming language for backend services.";
-        let semantic_b =
-            "The user prefers working with Rust coding language for backend services.";
+        let semantic_b = "The user prefers working with Rust coding language for backend services.";
         let sa = deterministic_embedding(semantic_a, dims).expect("sa");
         let sb = deterministic_embedding(semantic_b, dims).expect("sb");
         let semantic_sim: f32 = sa.iter().zip(sb.iter()).map(|(x, y)| x * y).sum();

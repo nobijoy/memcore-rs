@@ -9,8 +9,9 @@ use crate::dto::{
     CreateApiKeyResponse, DeleteMemoryResponse, DeleteOrgPlanResponse, ExportUserResponse,
     ForgetUserResponse, GetOrgPlanResponse, ImportUserDataRequest, ImportUserDataResponse,
     ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse, ListOrgUsersResponse,
-    OrgQuotaStatusResponse, OrgSummaryResponse, ProviderUsageResponse, RevokeApiKeyResponse,
-    SearchMemoryRequest, SearchMemoryResponse, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
+    OrgQuotaStatusResponse, OrgSummaryResponse, OrgUsageDashboardResponse,
+    ProviderUsageDailyResponse, ProviderUsageResponse, RevokeApiKeyResponse, SearchMemoryRequest,
+    SearchMemoryResponse, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
     UpsertOrgPlanResponse,
 };
 use crate::response::ErrorBody;
@@ -536,6 +537,55 @@ pub fn delete_org_plan() {}
     )
 )]
 pub fn get_provider_usage() {}
+
+/// Dashboard-ready organization usage summary over a UTC time window.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/usage/dashboard",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+        ("created_after" = Option<String>, Query, description = "Inclusive RFC3339 lower bound. Must be paired with created_before."),
+        ("created_before" = Option<String>, Query, description = "Exclusive RFC3339 upper bound. Must be paired with created_after."),
+        ("days" = Option<u32>, Query, description = "Relative UTC window ending now (default 30, max 90). Ignored when both timestamps are provided."),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization usage dashboard", body = OrgUsageDashboardResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_org_usage_dashboard() {}
+
+/// Daily provider usage buckets over a UTC time window. Does not expose prompts or memory content.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/usage/provider/daily",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+        ("provider_name" = Option<String>, Query, description = "Filter by provider name"),
+        ("model_name" = Option<String>, Query, description = "Filter by model name"),
+        ("capability" = Option<String>, Query, description = "Filter by capability: llm, embedding, summarization"),
+        ("created_after" = Option<String>, Query, description = "Inclusive RFC3339 lower bound. Must be paired with created_before."),
+        ("created_before" = Option<String>, Query, description = "Exclusive RFC3339 upper bound. Must be paired with created_after."),
+        ("days" = Option<u32>, Query, description = "Relative UTC window ending now (default 30, max 90). Ignored when both timestamps are provided."),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Daily provider usage buckets", body = ProviderUsageDailyResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_provider_usage_daily() {}
 
 /// Apply org-scoped provider usage event retention cleanup. `dry_run` defaults to `true`.
 #[utoipa::path(

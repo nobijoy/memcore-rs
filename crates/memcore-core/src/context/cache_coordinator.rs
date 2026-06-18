@@ -94,10 +94,7 @@ impl ContextCacheCoordinator {
 
     #[cfg(test)]
     pub(crate) fn inflight_lock_count(&self) -> usize {
-        self.inflight
-            .try_lock()
-            .map(|map| map.len())
-            .unwrap_or(0)
+        self.inflight.try_lock().map(|map| map.len()).unwrap_or(0)
     }
 
     pub async fn get_or_compute<F, Fut>(
@@ -146,11 +143,7 @@ impl ContextCacheCoordinator {
     }
 
     /// Recomputes and stores a cache entry, coalescing with stampede protection.
-    pub async fn refresh_entry<F, Fut>(
-        &self,
-        key: ContextCacheKey,
-        compute: F,
-    ) -> MemcoreResult<()>
+    pub async fn refresh_entry<F, Fut>(&self, key: ContextCacheKey, compute: F) -> MemcoreResult<()>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = MemcoreResult<CachedContextEntry>>,
@@ -341,12 +334,14 @@ mod tests {
     use tokio::sync::Barrier;
 
     use super::*;
+    use crate::TenantContext;
     use crate::context::budget::ContextBudgetUsage;
     use crate::context::compression_options::ContextCompressionUsage;
     use crate::context::format_options::ContextFormat;
-    use crate::context::{build_context_cache_key, InMemoryContextCache, InMemoryContextCacheMetrics};
     use crate::context::types::BuildContextInput;
-    use crate::TenantContext;
+    use crate::context::{
+        InMemoryContextCache, InMemoryContextCacheMetrics, build_context_cache_key,
+    };
 
     fn cache_config(stampede_enabled: bool) -> ContextCacheConfig {
         ContextCacheConfig {
@@ -997,8 +992,7 @@ mod tests {
             .set(key.clone(), stale_entry("stale"))
             .await
             .expect("seed");
-        let coordinator =
-            ContextCacheCoordinator::new(cache, config, metrics.clone());
+        let coordinator = ContextCacheCoordinator::new(cache, config, metrics.clone());
 
         let _ = coordinator
             .get_or_compute(key, || async { Ok(sample_entry("nope")) })
@@ -1020,8 +1014,7 @@ mod tests {
             .set(key.clone(), stale_entry("old"))
             .await
             .expect("seed");
-        let coordinator =
-            ContextCacheCoordinator::new(cache, config, metrics.clone());
+        let coordinator = ContextCacheCoordinator::new(cache, config, metrics.clone());
 
         coordinator
             .refresh_entry(key, || async { Ok(sample_entry("new")) })

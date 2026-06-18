@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use memcore_common::MemcoreResult;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::MemorySearchResult;
@@ -70,9 +70,15 @@ impl ContextFormatter {
         }
 
         let context = match options.format {
-            ContextFormat::PlainText => Self::format_plain(memories, options, legacy_include_fact_metadata),
-            ContextFormat::Markdown => Self::format_markdown(memories, options, legacy_include_fact_metadata),
-            ContextFormat::Json => Self::format_json(memories, options, legacy_include_fact_metadata)?,
+            ContextFormat::PlainText => {
+                Self::format_plain(memories, options, legacy_include_fact_metadata)
+            }
+            ContextFormat::Markdown => {
+                Self::format_markdown(memories, options, legacy_include_fact_metadata)
+            }
+            ContextFormat::Json => {
+                Self::format_json(memories, options, legacy_include_fact_metadata)?
+            }
         };
 
         Ok(FormattedContext { context })
@@ -146,7 +152,10 @@ impl ContextFormatter {
         line
     }
 
-    fn plain_metadata_suffix(memory: &ContextMemoryItem, options: &ContextFormatOptions) -> Option<String> {
+    fn plain_metadata_suffix(
+        memory: &ContextMemoryItem,
+        options: &ContextFormatOptions,
+    ) -> Option<String> {
         let parts = Self::metadata_parts(memory, options);
         if parts.is_empty() {
             return None;
@@ -353,11 +362,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn sample_item(
-        content: &str,
-        memory_type: MemoryType,
-        score: f32,
-    ) -> ContextMemoryItem {
+    fn sample_item(content: &str, memory_type: MemoryType, score: f32) -> ContextMemoryItem {
         ContextMemoryItem {
             fact_id: Uuid::new_v4(),
             content: content.to_string(),
@@ -374,7 +379,11 @@ mod tests {
     fn markdown_format_without_sections() {
         let items = vec![
             sample_item("User is building memcore.", MemoryType::Project, 0.9),
-            sample_item("User prefers concise explanations.", MemoryType::Preference, 0.8),
+            sample_item(
+                "User prefers concise explanations.",
+                MemoryType::Preference,
+                0.8,
+            ),
         ];
         let options = ContextFormatOptions {
             format: ContextFormat::Markdown,
@@ -390,7 +399,11 @@ mod tests {
     fn markdown_format_with_sections() {
         let items = vec![
             sample_item("User is a full-stack developer.", MemoryType::Profile, 0.9),
-            sample_item("User prefers concise technical explanations.", MemoryType::Preference, 0.8),
+            sample_item(
+                "User prefers concise technical explanations.",
+                MemoryType::Preference,
+                0.8,
+            ),
             sample_item("User is building memcore.", MemoryType::Project, 0.7),
         ];
         let options = ContextFormatOptions::structured_markdown();
@@ -405,7 +418,11 @@ mod tests {
 
     #[test]
     fn plain_text_format_with_sections() {
-        let items = vec![sample_item("User is a developer.", MemoryType::Profile, 0.9)];
+        let items = vec![sample_item(
+            "User is a developer.",
+            MemoryType::Profile,
+            0.9,
+        )];
         let options = ContextFormatOptions {
             format: ContextFormat::PlainText,
             section_by_memory_type: true,
@@ -418,7 +435,11 @@ mod tests {
 
     #[test]
     fn json_format_without_sections() {
-        let items = vec![sample_item("User is building memcore.", MemoryType::Project, 0.82)];
+        let items = vec![sample_item(
+            "User is building memcore.",
+            MemoryType::Project,
+            0.82,
+        )];
         let options = ContextFormatOptions {
             format: ContextFormat::Json,
             ..ContextFormatOptions::default()
@@ -431,7 +452,11 @@ mod tests {
 
     #[test]
     fn json_format_with_sections() {
-        let items = vec![sample_item("User is a developer.", MemoryType::Profile, 0.9)];
+        let items = vec![sample_item(
+            "User is a developer.",
+            MemoryType::Profile,
+            0.9,
+        )];
         let options = ContextFormatOptions {
             format: ContextFormat::Json,
             section_by_memory_type: true,

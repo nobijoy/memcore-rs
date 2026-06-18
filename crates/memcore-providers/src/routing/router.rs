@@ -5,14 +5,14 @@ use std::time::Instant;
 use memcore_common::{MemcoreError, MemcoreResult};
 
 use crate::circuit_breaker::{CircuitState, ProviderCircuitBreaker};
-use crate::policy::{execute_provider_call, is_provider_health_failure, ProviderExecutionPolicy};
+use crate::policy::{ProviderExecutionPolicy, execute_provider_call, is_provider_health_failure};
 use crate::usage::{
-    estimate_event_cost, take_token_usage, ProviderCallStatus, ProviderUsageAttributionSlot,
-    ProviderUsageCapability, ProviderUsageEvent, ProviderUsageRecorder, TokenUsageSlot,
+    ProviderCallStatus, ProviderUsageAttributionSlot, ProviderUsageCapability, ProviderUsageEvent,
+    ProviderUsageRecorder, TokenUsageSlot, estimate_event_cost, take_token_usage,
 };
 
 use super::metrics::ProviderRoutingMetrics;
-use super::types::{circuit_key, ProviderCapability, ProviderId};
+use super::types::{ProviderCapability, ProviderId, circuit_key};
 
 #[derive(Debug, Clone)]
 pub struct ProviderCandidate<P> {
@@ -210,10 +210,7 @@ impl ProviderFallbackRouter {
             let started = Instant::now();
             let token_slot = candidate.token_usage_slot.clone();
             let result = execute_provider_call(operation_name, &self.policy, || {
-                call(
-                    candidate.provider.clone(),
-                    token_slot.clone(),
-                )
+                call(candidate.provider.clone(), token_slot.clone())
             })
             .await;
 
@@ -335,8 +332,8 @@ impl ProviderFallbackRouter {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use memcore_common::MemcoreError;
 
@@ -344,11 +341,13 @@ mod tests {
     use crate::circuit_breaker::CircuitBreakerConfig;
     use crate::policy::ProviderExecutionPolicy;
     use crate::usage::InMemoryProviderUsageRecorder;
-    use crate::{circuit_key, ProviderId};
+    use crate::{ProviderId, circuit_key};
 
     fn test_router(usage: Option<Arc<dyn ProviderUsageRecorder>>) -> ProviderFallbackRouter {
         ProviderFallbackRouter::new(
-            Arc::new(ProviderCircuitBreaker::new(CircuitBreakerConfig::for_tests())),
+            Arc::new(ProviderCircuitBreaker::new(
+                CircuitBreakerConfig::for_tests(),
+            )),
             ProviderExecutionPolicy::for_tests(),
             Some(ProviderRoutingMetrics::new()),
             usage,
@@ -483,7 +482,10 @@ mod tests {
         );
         let primary_ptr = Arc::as_ptr(&primary.provider);
         let fallback_counter = fallback.provider.clone();
-        let key = circuit_key(&ProviderId::new("primary", ProviderCapability::Llm), "test_op");
+        let key = circuit_key(
+            &ProviderId::new("primary", ProviderCapability::Llm),
+            "test_op",
+        );
         breaker.record_failure(&key);
 
         let result = router

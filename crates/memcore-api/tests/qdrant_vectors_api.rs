@@ -170,13 +170,12 @@ async fn build_context_works_with_qdrant_when_server_available() {
         }}"#
     );
 
-    let (status, json) = response_parts(
-        app,
-        post_request("/api/v1/context", &context_body, ORG_A),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, post_request("/api/v1/context", &context_body, ORG_A)).await;
 
     assert_eq!(status, StatusCode::OK);
-    let context = json["context"].as_str().expect("context should be a string");
+    let context = json["context"]
+        .as_str()
+        .expect("context should be a string");
     assert_ne!(context, EMPTY_CONTEXT_MESSAGE);
 }

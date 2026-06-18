@@ -143,30 +143,33 @@ async fn list_events_returns_tenant_events() {
 
 #[tokio::test]
 async fn tenant_isolation_prevents_cross_tenant_list() {
-    with_postgres_store("tenant_isolation_prevents_cross_tenant_list", |store| async move {
-        let tenant_a = tenant("org_pg_evt_d", "user_pg_evt_d");
-        let tenant_b = tenant("org_pg_evt_d", "user_pg_evt_e");
+    with_postgres_store(
+        "tenant_isolation_prevents_cross_tenant_list",
+        |store| async move {
+            let tenant_a = tenant("org_pg_evt_d", "user_pg_evt_d");
+            let tenant_b = tenant("org_pg_evt_d", "user_pg_evt_e");
 
-        store
-            .record_event(
-                &tenant_a,
-                sample_event(
-                    "org_pg_evt_d",
-                    "user_pg_evt_d",
-                    None,
-                    MemoryEventOperation::Add,
-                    json!({}),
-                ),
-            )
-            .await
-            .expect("record should succeed");
+            store
+                .record_event(
+                    &tenant_a,
+                    sample_event(
+                        "org_pg_evt_d",
+                        "user_pg_evt_d",
+                        None,
+                        MemoryEventOperation::Add,
+                        json!({}),
+                    ),
+                )
+                .await
+                .expect("record should succeed");
 
-        let listed_b = store
-            .list_events(MemoryEventQuery::new(tenant_b, 10))
-            .await
-            .expect("list should succeed");
-        assert!(listed_b.is_empty());
-    })
+            let listed_b = store
+                .list_events(MemoryEventQuery::new(tenant_b, 10))
+                .await
+                .expect("list should succeed");
+            assert!(listed_b.is_empty());
+        },
+    )
     .await;
 }
 
@@ -376,21 +379,24 @@ async fn optional_fields_null_works() {
 
 #[tokio::test]
 async fn mismatched_tenant_is_rejected_on_record() {
-    with_postgres_store("mismatched_tenant_is_rejected_on_record", |store| async move {
-        let tenant_b = tenant("org_pg_evt_l", "user_pg_evt_m");
-        let event = sample_event(
-            "org_pg_evt_l",
-            "user_pg_evt_l",
-            None,
-            MemoryEventOperation::Add,
-            json!({}),
-        );
+    with_postgres_store(
+        "mismatched_tenant_is_rejected_on_record",
+        |store| async move {
+            let tenant_b = tenant("org_pg_evt_l", "user_pg_evt_m");
+            let event = sample_event(
+                "org_pg_evt_l",
+                "user_pg_evt_l",
+                None,
+                MemoryEventOperation::Add,
+                json!({}),
+            );
 
-        let error = store
-            .record_event(&tenant_b, event)
-            .await
-            .expect_err("cross-tenant record should fail");
-        assert_eq!(error, MemcoreError::Forbidden);
-    })
+            let error = store
+                .record_event(&tenant_b, event)
+                .await
+                .expect_err("cross-tenant record should fail");
+            assert_eq!(error, MemcoreError::Forbidden);
+        },
+    )
     .await;
 }

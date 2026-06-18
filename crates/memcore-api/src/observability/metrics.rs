@@ -26,7 +26,8 @@ impl Metrics {
 
         match path {
             "/api/v1/memories" => {
-                self.memory_add_requests_total.fetch_add(1, Ordering::Relaxed);
+                self.memory_add_requests_total
+                    .fetch_add(1, Ordering::Relaxed);
             }
             "/api/v1/memories/search" => {
                 self.memory_search_requests_total

@@ -87,9 +87,24 @@ async fn insert_event(
 #[tokio::test]
 async fn memory_list_q_finds_matching_content() {
     let fact_store = Arc::new(MockFactStore::new());
-    insert_fact(&fact_store, "org_kw", "user_a", "learning Rust async", MemoryType::Skill, None)
-        .await;
-    insert_fact(&fact_store, "org_kw", "user_a", "python basics", MemoryType::Skill, None).await;
+    insert_fact(
+        &fact_store,
+        "org_kw",
+        "user_a",
+        "learning Rust async",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
+    insert_fact(
+        &fact_store,
+        "org_kw",
+        "user_a",
+        "python basics",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
 
     let engine = engine_with_stores(fact_store, Arc::new(MockMemoryEventStore::new()));
     let output = engine
@@ -105,13 +120,26 @@ async fn memory_list_q_finds_matching_content() {
         .expect("list");
 
     assert_eq!(output.memories.len(), 1);
-    assert!(output.memories[0].content.to_ascii_lowercase().contains("rust"));
+    assert!(
+        output.memories[0]
+            .content
+            .to_ascii_lowercase()
+            .contains("rust")
+    );
 }
 
 #[tokio::test]
 async fn memory_list_q_is_case_insensitive() {
     let fact_store = Arc::new(MockFactStore::new());
-    insert_fact(&fact_store, "org_kw", "user_a", "RUST programming", MemoryType::Skill, None).await;
+    insert_fact(
+        &fact_store,
+        "org_kw",
+        "user_a",
+        "RUST programming",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
 
     let engine = engine_with_stores(fact_store, Arc::new(MockMemoryEventStore::new()));
     let output = engine
@@ -132,8 +160,24 @@ async fn memory_list_q_is_case_insensitive() {
 #[tokio::test]
 async fn memory_list_q_does_not_return_other_users_facts() {
     let fact_store = Arc::new(MockFactStore::new());
-    insert_fact(&fact_store, "org_kw", "user_a", "rust for user a", MemoryType::Skill, None).await;
-    insert_fact(&fact_store, "org_kw", "user_b", "rust for user b", MemoryType::Skill, None).await;
+    insert_fact(
+        &fact_store,
+        "org_kw",
+        "user_a",
+        "rust for user a",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
+    insert_fact(
+        &fact_store,
+        "org_kw",
+        "user_b",
+        "rust for user b",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
 
     let engine = engine_with_stores(fact_store, Arc::new(MockMemoryEventStore::new()));
     let output = engine
@@ -155,8 +199,24 @@ async fn memory_list_q_does_not_return_other_users_facts() {
 #[tokio::test]
 async fn memory_list_q_does_not_return_other_orgs_facts() {
     let fact_store = Arc::new(MockFactStore::new());
-    insert_fact(&fact_store, "org_a", "user_a", "rust org a", MemoryType::Skill, None).await;
-    insert_fact(&fact_store, "org_b", "user_a", "rust org b", MemoryType::Skill, None).await;
+    insert_fact(
+        &fact_store,
+        "org_a",
+        "user_a",
+        "rust org a",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
+    insert_fact(
+        &fact_store,
+        "org_b",
+        "user_a",
+        "rust org b",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
 
     let engine = engine_with_stores(fact_store, Arc::new(MockMemoryEventStore::new()));
     let output = engine
@@ -178,7 +238,15 @@ async fn memory_list_q_does_not_return_other_orgs_facts() {
 #[tokio::test]
 async fn memory_type_filter_works_with_q() {
     let fact_store = Arc::new(MockFactStore::new());
-    insert_fact(&fact_store, "org_kw", "user_a", "rust skill", MemoryType::Skill, None).await;
+    insert_fact(
+        &fact_store,
+        "org_kw",
+        "user_a",
+        "rust skill",
+        MemoryType::Skill,
+        None,
+    )
+    .await;
     insert_fact(
         &fact_store,
         "org_kw",

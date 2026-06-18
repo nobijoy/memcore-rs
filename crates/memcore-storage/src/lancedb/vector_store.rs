@@ -2,21 +2,20 @@
 
 use std::sync::Arc;
 
+use arrow_array::types::Float32Type;
 use arrow_array::{
     Array, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator, StringArray,
 };
-use arrow_array::types::Float32Type;
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use lancedb::query::{ExecutableQuery, QueryBase, Select};
 use lancedb::Table;
+use lancedb::query::{ExecutableQuery, QueryBase, Select};
 use memcore_common::{MemcoreError, MemcoreResult};
-use memcore_core::{MemoryType, TenantContext};
 use memcore_core::ports::{VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore};
+use memcore_core::{MemoryType, TenantContext};
 use serde_json::Value;
 use uuid::Uuid;
-
 
 fn memory_type_to_str(value: MemoryType) -> &'static str {
     match value {
@@ -162,11 +161,8 @@ impl LanceDbVectorStore {
         }
 
         let schema = Self::schema(dimensions);
-        let embedding_values: Vec<Option<f32>> = record
-            .embedding
-            .iter()
-            .map(|v| Some(*v))
-            .collect();
+        let embedding_values: Vec<Option<f32>> =
+            record.embedding.iter().map(|v| Some(*v)).collect();
         let embedding_list = FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
             std::iter::once(Some(embedding_values)),
             dimensions as i32,
@@ -180,7 +176,9 @@ impl LanceDbVectorStore {
                 Arc::new(StringArray::from(vec![record.org_id.clone()])),
                 Arc::new(StringArray::from(vec![record.user_id.clone()])),
                 Arc::new(StringArray::from(vec![record.content.clone()])),
-                Arc::new(StringArray::from(vec![memory_type_to_str(record.memory_type).to_string()])),
+                Arc::new(StringArray::from(vec![
+                    memory_type_to_str(record.memory_type).to_string(),
+                ])),
                 Arc::new(embedding_list),
                 Arc::new(StringArray::from(vec![record.metadata.to_string()])),
             ],
@@ -385,11 +383,7 @@ impl VectorStore for LanceDbVectorStore {
         Ok(results)
     }
 
-    async fn delete_by_fact_id(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()> {
+    async fn delete_by_fact_id(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()> {
         let predicate = format!(
             "{} AND {} = '{}'",
             tenant_filter(tenant),

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::export::UserMemoryExport;
 use crate::TenantContext;
+use crate::export::UserMemoryExport;
 
 /// How imported facts are merged with existing user data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use memcore_common::MemcoreError;
 use memcore_core::{
-    ListMemoryEventsOutput, MemoryEvent, MemoryEventOperation, DEFAULT_LIST_MEMORY_EVENTS_LIMIT,
+    DEFAULT_LIST_MEMORY_EVENTS_LIMIT, ListMemoryEventsOutput, MemoryEvent, MemoryEventOperation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -87,13 +87,19 @@ impl From<ListMemoryEventsOutput> for ListMemoryEventsResponse {
     fn from(output: ListMemoryEventsOutput) -> Self {
         Self {
             status: "success",
-            events: output.events.iter().map(MemoryEventItemResponse::from).collect(),
+            events: output
+                .events
+                .iter()
+                .map(MemoryEventItemResponse::from)
+                .collect(),
             next_cursor: output.next_cursor,
         }
     }
 }
 
-pub fn parse_memory_event_operation_label(label: &str) -> Result<MemoryEventOperation, MemcoreError> {
+pub fn parse_memory_event_operation_label(
+    label: &str,
+) -> Result<MemoryEventOperation, MemcoreError> {
     match label.trim() {
         "Add" => Ok(MemoryEventOperation::Add),
         "Update" => Ok(MemoryEventOperation::Update),
@@ -137,22 +143,17 @@ mod timestamp_tests {
 
     #[test]
     fn parse_created_after_accepts_rfc3339() {
-        let (after, before) = parse_event_date_filters(
-            Some(&"2026-01-01T00:00:00Z".to_string()),
-            None,
-        )
-        .expect("parse");
+        let (after, before) =
+            parse_event_date_filters(Some(&"2026-01-01T00:00:00Z".to_string()), None)
+                .expect("parse");
         assert!(after.is_some());
         assert!(before.is_none());
     }
 
     #[test]
     fn invalid_created_before_returns_validation_error() {
-        let error = parse_event_date_filters(
-            None,
-            Some(&"not-a-timestamp".to_string()),
-        )
-        .expect_err("invalid");
+        let error = parse_event_date_filters(None, Some(&"not-a-timestamp".to_string()))
+            .expect_err("invalid");
         assert_eq!(
             error,
             MemcoreError::ValidationError("invalid created_before timestamp".to_string())

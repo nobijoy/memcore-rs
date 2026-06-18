@@ -7,8 +7,10 @@ use memcore_common::MemcoreResult;
 
 use crate::admin::{
     DEFAULT_LIST_ORG_USERS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput, MAX_LIST_ORG_USERS_LIMIT,
-    MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, OrgSummaryInput, OrgSummaryOutput,
-    SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
+    MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, OrgMemoryUsageSummary, OrgSummaryInput, OrgSummaryOutput,
+    OrgUsageDashboardInput, OrgUsageDashboardOutput, ProviderUsageDailyInput,
+    ProviderUsageDailyOutput, SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
+    empty_provider_usage_summary,
 };
 use crate::audit::{
     build_add_event, build_delete_event, build_forget_user_event, build_import_replace_event,
@@ -29,12 +31,12 @@ use crate::lifecycle::{
     LifecycleApplyResult, LifecycleContext, apply_fact_operation, find_related_facts,
 };
 use crate::pagination::{PageCursor, build_page, parse_optional_cursor};
-use crate::ports::MemoryMessage;
+use crate::ports::{DEFAULT_PROVIDER_USAGE_LIMIT, MemoryMessage};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgPlanStore,
-    OrgUserListQuery, ProviderUsageAttributionSlot, ProviderUsageStore, VectorRecord, VectorStore,
-    validate_event_date_range,
+    OrgUserListQuery, ProviderUsageAttributionSlot, ProviderUsageDailyQuery, ProviderUsageQuery,
+    ProviderUsageStore, VectorRecord, VectorStore, validate_event_date_range,
 };
 use crate::privacy::redact_messages_for_extraction;
 use crate::quota::{
@@ -971,6 +973,95 @@ impl MemoryEngine {
         }
 
         self.quota_service().get_org_quota_status(input).await
+    }
+
+    pub async fn get_org_usage_dashboard(
+        &self,
+        input: OrgUsageDashboardInput,
+    ) -> MemcoreResult<OrgUsageDashboardOutput> {
+        validate_org_id(&input.org_id)?;
+        validate_event_date_range(Some(input.created_after), Some(input.created_before))?;
+
+        let plan = match &self.org_plan_store {
+            Some(store) => store.get_org_plan(&input.org_id).await?,
+            None => None,
+        };
+        let quota = self
+            .get_org_quota_status(GetOrgQuotaStatusInput {
+                org_id: input.org_id.clone(),
+                user_id: None,
+            })
+            .await?;
+
+        let active_memories = self.fact_store.count_facts_by_org(&input.org_id).await? as u64;
+        let memory = OrgMemoryUsageSummary {
+            total_users: self.fact_store.count_users_by_org(&input.org_id).await? as u64,
+            total_memories: active_memories,
+            active_memories,
+            deleted_memories: None,
+        };
+
+        let provider = match &self.provider_usage_store {
+            Some(store) => {
+                let result = store
+                    .query_usage(ProviderUsageQuery {
+                        org_id: input.org_id.clone(),
+                        user_id: None,
+                        provider_name: None,
+                        model_name: None,
+                        capability: None,
+                        operation_name: None,
+                        created_after: Some(input.created_after),
+                        created_before: Some(input.created_before),
+                        limit: DEFAULT_PROVIDER_USAGE_LIMIT,
+                        cursor: None,
+                    })
+                    .await?;
+                result.summary.into()
+            }
+            None => empty_provider_usage_summary(),
+        };
+
+        Ok(OrgUsageDashboardOutput {
+            org_id: input.org_id,
+            generated_at: Utc::now(),
+            window_start: input.created_after,
+            window_end: input.created_before,
+            plan,
+            quota,
+            memory,
+            provider,
+        })
+    }
+
+    pub async fn get_provider_usage_daily(
+        &self,
+        input: ProviderUsageDailyInput,
+    ) -> MemcoreResult<ProviderUsageDailyOutput> {
+        validate_org_id(&input.org_id)?;
+        validate_event_date_range(Some(input.created_after), Some(input.created_before))?;
+
+        let buckets = match &self.provider_usage_store {
+            Some(store) => {
+                let mut query = ProviderUsageDailyQuery::new(
+                    input.org_id.clone(),
+                    input.created_after,
+                    input.created_before,
+                );
+                query.provider_name = input.provider_name;
+                query.model_name = input.model_name;
+                query.capability = input.capability;
+                store.query_usage_daily(query).await?
+            }
+            None => Vec::new(),
+        };
+
+        Ok(ProviderUsageDailyOutput {
+            org_id: input.org_id,
+            window_start: input.created_after,
+            window_end: input.created_before,
+            buckets,
+        })
     }
 
     pub async fn resolve_org_quota_limits(

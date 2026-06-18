@@ -4,10 +4,7 @@ pub fn sqlite_like_pattern(query: &str) -> String {
     format!("%{}%", query.to_ascii_lowercase())
 }
 
-pub fn push_sqlite_fact_keyword_filter(
-    builder: &mut QueryBuilder<Sqlite>,
-    query_text: &str,
-) {
+pub fn push_sqlite_fact_keyword_filter(builder: &mut QueryBuilder<Sqlite>, query_text: &str) {
     let pattern = sqlite_like_pattern(query_text);
     builder.push(" AND (LOWER(content) LIKE ");
     builder.push_bind(pattern.clone());

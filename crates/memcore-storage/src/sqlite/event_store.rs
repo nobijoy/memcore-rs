@@ -5,11 +5,11 @@ use memcore_core::{MemoryEvent, TenantContext};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::{QueryBuilder, Row, Sqlite};
 
-use memcore_core::ports::{MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery};
 use crate::sqlite::conversions::{
     datetime_to_str, memory_event_operation_to_str, metadata_to_str, optional_uuid_to_str,
     row_to_memory_event,
 };
+use memcore_core::ports::{MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery};
 
 fn storage_error(context: impl Into<String>, error: impl std::fmt::Display) -> MemcoreError {
     MemcoreError::StorageError(format!("{}: {error}", context.into()))
@@ -173,9 +173,11 @@ impl MemoryEventStore for SqliteMemoryEventStore {
         }
 
         builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
-        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
-            storage_error("event list limit out of range for sqlite", error)
-        })?);
+        builder.push_bind(
+            i64::try_from(fetch_limit(query.limit)).map_err(|error| {
+                storage_error("event list limit out of range for sqlite", error)
+            })?,
+        );
 
         let rows = builder
             .build()
@@ -284,13 +286,11 @@ impl MemoryEventStore for SqliteMemoryEventStore {
     }
 
     async fn count_events_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
-        let row = sqlx::query(
-            "SELECT COUNT(*) as count FROM memory_events WHERE org_id = ?",
-        )
-        .bind(org_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|error| storage_error("failed to count events by org", error))?;
+        let row = sqlx::query("SELECT COUNT(*) as count FROM memory_events WHERE org_id = ?")
+            .bind(org_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| storage_error("failed to count events by org", error))?;
 
         let count: i64 = row
             .try_get("count")
@@ -706,10 +706,7 @@ mod tests {
             .expect("record");
 
         let all = store
-            .list_events_by_org(OrgMemoryEventQuery::new(
-                "org_sqlite_audit".to_string(),
-                10,
-            ))
+            .list_events_by_org(OrgMemoryEventQuery::new("org_sqlite_audit".to_string(), 10))
             .await
             .expect("list by org");
         assert_eq!(all.len(), 2);
@@ -739,18 +736,9 @@ mod tests {
         user_id: &str,
         created_at: chrono::DateTime<Utc>,
     ) {
-        let mut event = sample_event(
-            org_id,
-            user_id,
-            None,
-            MemoryEventOperation::Add,
-            json!({}),
-        );
+        let mut event = sample_event(org_id, user_id, None, MemoryEventOperation::Add, json!({}));
         event.created_at = created_at;
-        store
-            .record_event(tenant, event)
-            .await
-            .expect("record");
+        store.record_event(tenant, event).await.expect("record");
     }
 
     #[tokio::test]
@@ -883,11 +871,29 @@ mod tests {
         let tenant_a = tenant("org_kw_admin", "user_alpha");
         let tenant_b = tenant("org_kw_admin", "user_beta");
         store
-            .record_event(&tenant_a, sample_event("org_kw_admin", "user_alpha", None, MemoryEventOperation::Add, json!({})))
+            .record_event(
+                &tenant_a,
+                sample_event(
+                    "org_kw_admin",
+                    "user_alpha",
+                    None,
+                    MemoryEventOperation::Add,
+                    json!({}),
+                ),
+            )
             .await
             .expect("record");
         store
-            .record_event(&tenant_b, sample_event("org_kw_admin", "user_beta", None, MemoryEventOperation::Add, json!({})))
+            .record_event(
+                &tenant_b,
+                sample_event(
+                    "org_kw_admin",
+                    "user_beta",
+                    None,
+                    MemoryEventOperation::Add,
+                    json!({}),
+                ),
+            )
             .await
             .expect("record");
 

@@ -5,11 +5,11 @@ use axum::extract::{Extension, State};
 use memcore_core::{ApiKeyScope, BuildContextInput, ContextBudget};
 
 use crate::dto::{
-    compression_options_from_request, format_options_from_request, BuildContextRequest,
-    BuildContextResponse, validate_build_context_request,
+    BuildContextRequest, BuildContextResponse, compression_options_from_request,
+    format_options_from_request, validate_build_context_request,
 };
 use crate::middleware::OrganizationContext;
-use crate::routes::common::{check_scope, ApiError};
+use crate::routes::common::{ApiError, check_scope};
 use crate::security::AuthContext;
 use crate::state::AppState;
 
@@ -19,7 +19,10 @@ pub async fn build_context(
     auth: Option<Extension<AuthContext>>,
     Json(request): Json<BuildContextRequest>,
 ) -> Result<Json<BuildContextResponse>, ApiError> {
-    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryRead)?;
+    check_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        ApiKeyScope::MemoryRead,
+    )?;
     validate_build_context_request(&request)?;
 
     let format_options = format_options_from_request(&request)?;
@@ -27,7 +30,8 @@ pub async fn build_context(
         max_tokens: request.max_tokens,
         reserved_tokens: request.reserved_tokens,
     };
-    let compression_options = compression_options_from_request(&request, budget.available_tokens())?;
+    let compression_options =
+        compression_options_from_request(&request, budget.available_tokens())?;
     let user_id = request.user_id.clone();
     let tenant = organization.tenant_with_user_id(request.user_id)?;
     let memory_types = request.filters.parse_memory_types()?;
@@ -44,7 +48,10 @@ pub async fn build_context(
     };
 
     let started_at = Instant::now();
-    let output = state.memory_engine.build_context(build_input.clone()).await?;
+    let output = state
+        .memory_engine
+        .build_context(build_input.clone())
+        .await?;
     let duration_ms = started_at.elapsed().as_millis() as u64;
 
     tracing::debug!(

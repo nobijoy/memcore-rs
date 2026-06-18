@@ -103,7 +103,12 @@ async fn dev_auth_still_works() {
     let app = create_app(AppState::new(Settings::default()));
     let (status, _) = response_parts(
         app,
-        post_request("/api/v1/memories", VALID_ADD_BODY, "org_dev", Some(DEV_API_KEY)),
+        post_request(
+            "/api/v1/memories",
+            VALID_ADD_BODY,
+            "org_dev",
+            Some(DEV_API_KEY),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -114,12 +119,7 @@ async fn database_auth_succeeds_with_valid_stored_key() {
     let app = database_auth_app().await;
     let (status, _) = response_parts(
         app,
-        post_request(
-            "/api/v1/memories",
-            VALID_ADD_BODY,
-            ORG_A,
-            Some(RAW_API_KEY),
-        ),
+        post_request("/api/v1/memories", VALID_ADD_BODY, ORG_A, Some(RAW_API_KEY)),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -175,12 +175,7 @@ async fn database_auth_allows_matching_org_header() {
     let app = database_auth_app().await;
     let (status, _) = response_parts(
         app,
-        post_request(
-            "/api/v1/memories",
-            VALID_ADD_BODY,
-            ORG_A,
-            Some(RAW_API_KEY),
-        ),
+        post_request("/api/v1/memories", VALID_ADD_BODY, ORG_A, Some(RAW_API_KEY)),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

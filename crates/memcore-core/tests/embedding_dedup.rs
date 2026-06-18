@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -9,14 +9,13 @@ use memcore_core::{
     MemoryEngine, MemoryEventOperation, MemoryEventStore, MemoryMessage, MemorySource, MemoryType,
     MessageRole, TenantContext, VectorRecord, VectorStore,
 };
-use memcore_providers::{deterministic_embedding, MockEmbeddingProvider, MockLlmProvider};
+use memcore_providers::{MockEmbeddingProvider, MockLlmProvider, deterministic_embedding};
 use memcore_storage::{MockFactStore, MockMemoryEventStore, MockVectorStore};
 use serde_json::json;
 use uuid::Uuid;
 
 /// Candidate text used for embedding-duplicate scenarios (distinct from stored fact content).
-const EMBEDDING_CANDIDATE: &str =
-    "User enjoys outdoor recreation activities in nature on weekends";
+const EMBEDDING_CANDIDATE: &str = "User enjoys outdoor recreation activities in nature on weekends";
 
 /// Fact content that passes text dedup but shares embedding with `EMBEDDING_CANDIDATE` via vector store.
 const EMBEDDING_EXISTING_FACT_CONTENT: &str =
@@ -246,7 +245,10 @@ async fn embedding_duplicate_is_not_inserted() {
     assert_eq!(output.noop, 1);
 
     let listed = fact_store
-        .search_facts(memcore_core::FactSearchQuery::new(tenant("org_embed", "user_a"), 10))
+        .search_facts(memcore_core::FactSearchQuery::new(
+            tenant("org_embed", "user_a"),
+            10,
+        ))
         .await
         .expect("search");
     assert_eq!(listed.len(), 1);
@@ -705,9 +707,11 @@ async fn embedding_dedup_failure_returns_error_without_insert() {
         Arc::new(MockLlmProvider::new().with_extraction_candidates(vec![
             high_importance_candidate("Some new memory content", MemoryType::Skill),
         ])),
-        Arc::new(MockEmbeddingProvider::new(4).with_fail_error(MemcoreError::ProviderError(
-            "embedding unavailable".to_string(),
-        ))),
+        Arc::new(
+            MockEmbeddingProvider::new(4).with_fail_error(MemcoreError::ProviderError(
+                "embedding unavailable".to_string(),
+            )),
+        ),
     );
 
     let error = engine
@@ -722,7 +726,10 @@ async fn embedding_dedup_failure_returns_error_without_insert() {
     assert!(matches!(error, MemcoreError::ProviderError(_)));
 
     let listed = fact_store
-        .search_facts(memcore_core::FactSearchQuery::new(tenant("org_embed", "user_a"), 10))
+        .search_facts(memcore_core::FactSearchQuery::new(
+            tenant("org_embed", "user_a"),
+            10,
+        ))
         .await
         .expect("search");
     assert!(listed.is_empty());

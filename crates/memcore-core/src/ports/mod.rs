@@ -18,8 +18,9 @@ pub use provider::{
 pub use provider_usage::{
     DEFAULT_PROVIDER_USAGE_LIMIT, MAX_PROVIDER_USAGE_LIMIT, ProviderCallStatus,
     ProviderUsageAttribution, ProviderUsageAttributionSlot, ProviderUsageCapability,
-    ProviderUsageEventRecord, ProviderUsagePersistedSummary, ProviderUsageQuery,
-    ProviderUsageQueryResult, ProviderUsageStore, validate_provider_usage_limit,
+    ProviderUsageDailyQuery, ProviderUsageEventRecord, ProviderUsagePersistedSummary,
+    ProviderUsageQuery, ProviderUsageQueryResult, ProviderUsageStore,
+    validate_provider_usage_limit,
 };
 pub use storage::{
     FactSearchQuery, FactStore, OrgUserListQuery, OrgUserSummary, RetentionPruneResult,

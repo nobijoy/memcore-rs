@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
 use memcore_common::MemcoreError;
-use memcore_core::{
-    AddMemoryInput, MemoryEngine, MemoryMessage, MessageRole, TenantContext,
-};
+use memcore_core::{AddMemoryInput, MemoryEngine, MemoryMessage, MessageRole, TenantContext};
 use memcore_providers::{
-    build_resilient_llm_from_candidates, new_token_usage_slot, provider_usage_recorder,
     CircuitBreakerConfig, InMemoryProviderUsageRecorder, MockLlmProvider, ProviderCandidate,
     ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
-    ProviderUsageRecorder,
+    ProviderUsageRecorder, build_resilient_llm_from_candidates, new_token_usage_slot,
+    provider_usage_recorder,
 };
 use memcore_storage::{MockFactStore, MockVectorStore};
 use serde_json::json;
@@ -39,7 +37,9 @@ async fn successful_mock_llm_call_records_usage() {
             Some(new_token_usage_slot()),
         )],
         vec![],
-        Arc::new(ProviderCircuitBreaker::new(CircuitBreakerConfig::for_tests())),
+        Arc::new(ProviderCircuitBreaker::new(
+            CircuitBreakerConfig::for_tests(),
+        )),
         fast_policy(),
         false,
         None,
@@ -69,7 +69,12 @@ async fn successful_mock_llm_call_records_usage() {
 
     let snapshot = usage.snapshot();
     assert!(snapshot.total_successes >= 1);
-    assert!(snapshot.records.iter().any(|r| r.input_tokens.unwrap_or(0) > 0));
+    assert!(
+        snapshot
+            .records
+            .iter()
+            .any(|r| r.input_tokens.unwrap_or(0) > 0)
+    );
 }
 
 #[tokio::test]
@@ -78,14 +83,18 @@ async fn failed_mock_llm_call_records_error_without_prompt_content() {
     let llm = build_resilient_llm_from_candidates(
         vec![ProviderCandidate::new(
             ProviderId::new("mock", ProviderCapability::Llm),
-            Arc::new(MockLlmProvider::new().with_fail_error(MemcoreError::ProviderError(
-                "OpenAI API error (500): internal".to_string(),
-            ))),
+            Arc::new(
+                MockLlmProvider::new().with_fail_error(MemcoreError::ProviderError(
+                    "OpenAI API error (500): internal".to_string(),
+                )),
+            ),
             Some("mock-llm".to_string()),
             None,
         )],
         vec![],
-        Arc::new(ProviderCircuitBreaker::new(CircuitBreakerConfig::for_tests())),
+        Arc::new(ProviderCircuitBreaker::new(
+            CircuitBreakerConfig::for_tests(),
+        )),
         fast_policy(),
         false,
         None,

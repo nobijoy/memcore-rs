@@ -42,7 +42,11 @@ impl CircuitBreakerConfig {
         reset_timeout_seconds: u64,
         half_open_max_calls: usize,
     ) -> MemcoreResult<Self> {
-        validate_circuit_breaker_config(failure_threshold, reset_timeout_seconds, half_open_max_calls)?;
+        validate_circuit_breaker_config(
+            failure_threshold,
+            reset_timeout_seconds,
+            half_open_max_calls,
+        )?;
         Ok(Self {
             enabled,
             failure_threshold,
@@ -125,15 +129,18 @@ impl ProviderCircuitBreaker {
         }
 
         let circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
-        circuits.get(key).map(|entry| CircuitBreakerSnapshot {
-            state: entry.state,
-            failure_count: entry.failure_count,
-            opened_at: entry.opened_at,
-        }).unwrap_or(CircuitBreakerSnapshot {
-            state: CircuitState::Closed,
-            failure_count: 0,
-            opened_at: None,
-        })
+        circuits
+            .get(key)
+            .map(|entry| CircuitBreakerSnapshot {
+                state: entry.state,
+                failure_count: entry.failure_count,
+                opened_at: entry.opened_at,
+            })
+            .unwrap_or(CircuitBreakerSnapshot {
+                state: CircuitState::Closed,
+                failure_count: 0,
+                opened_at: None,
+            })
     }
 
     pub fn check_allow(&self, key: &str) -> MemcoreResult<CircuitState> {
@@ -142,7 +149,9 @@ impl ProviderCircuitBreaker {
         }
 
         let mut circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
-        let entry = circuits.entry(key.to_string()).or_insert_with(CircuitEntry::new);
+        let entry = circuits
+            .entry(key.to_string())
+            .or_insert_with(CircuitEntry::new);
         Self::maybe_transition_open_to_half_open(entry, &self.config);
 
         match entry.state {
@@ -167,7 +176,9 @@ impl ProviderCircuitBreaker {
         }
 
         let mut circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
-        let entry = circuits.entry(key.to_string()).or_insert_with(CircuitEntry::new);
+        let entry = circuits
+            .entry(key.to_string())
+            .or_insert_with(CircuitEntry::new);
         let previous = entry.state;
         entry.state = CircuitState::Closed;
         entry.failure_count = 0;
@@ -175,7 +186,11 @@ impl ProviderCircuitBreaker {
         entry.half_open_calls = 0;
 
         if previous == CircuitState::HalfOpen {
-            tracing::debug!(circuit_key = key, circuit_state = "closed", "circuit closed after half-open success");
+            tracing::debug!(
+                circuit_key = key,
+                circuit_state = "closed",
+                "circuit closed after half-open success"
+            );
         }
     }
 
@@ -185,7 +200,9 @@ impl ProviderCircuitBreaker {
         }
 
         let mut circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
-        let entry = circuits.entry(key.to_string()).or_insert_with(CircuitEntry::new);
+        let entry = circuits
+            .entry(key.to_string())
+            .or_insert_with(CircuitEntry::new);
 
         match entry.state {
             CircuitState::Closed => {
@@ -227,7 +244,10 @@ impl ProviderCircuitBreaker {
         if elapsed.to_std().unwrap_or(config.reset_timeout) >= config.reset_timeout {
             entry.state = CircuitState::HalfOpen;
             entry.half_open_calls = 0;
-            tracing::debug!(circuit_state = "half_open", "circuit transitioned to half-open");
+            tracing::debug!(
+                circuit_state = "half_open",
+                "circuit transitioned to half-open"
+            );
         }
     }
 }
@@ -237,17 +257,14 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{circuit_key, ProviderCapability, ProviderId};
+    use crate::{ProviderCapability, ProviderId, circuit_key};
 
     fn breaker() -> ProviderCircuitBreaker {
         ProviderCircuitBreaker::new(CircuitBreakerConfig::for_tests())
     }
 
     fn key(name: &str, op: &str) -> String {
-        circuit_key(
-            &ProviderId::new(name, ProviderCapability::Llm),
-            op,
-        )
+        circuit_key(&ProviderId::new(name, ProviderCapability::Llm), op)
     }
 
     #[test]

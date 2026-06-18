@@ -195,7 +195,12 @@ async fn cutoff_is_computed_from_retention_days() {
         .expect("apply");
 
     let expected_cutoff = Utc::now() - chrono::Duration::days(5);
-    let delta = (output.cutoff - expected_cutoff).num_seconds().unsigned_abs();
-    assert!(delta < 5, "cutoff should be approximately now - retention_days");
+    let delta = (output.cutoff - expected_cutoff)
+        .num_seconds()
+        .unsigned_abs();
+    assert!(
+        delta < 5,
+        "cutoff should be approximately now - retention_days"
+    );
     assert_eq!(output.matched_events, 1);
 }

@@ -6,19 +6,17 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{TimeZone, Utc};
 use http_body_util::BodyExt;
-use memcore_api::{
-    create_app, create_mock_memory_engine_with_wiring, AppState, ProviderWiring,
-};
+use memcore_api::{AppState, ProviderWiring, create_app, create_mock_memory_engine_with_wiring};
+use memcore_common::hash_api_key;
 use memcore_config::{AuthMode, Settings};
 use memcore_core::{
     ApiKeyRecord, ApiKeyScope, ProviderCallStatus, ProviderUsageCapability,
     ProviderUsageEventRecord, ProviderUsageStore,
 };
-use memcore_common::hash_api_key;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{authorization_header, DEV_API_KEY};
+use common::{DEV_API_KEY, authorization_header};
 
 const ORG_A: &str = "org_pu_retention_a";
 const ORG_B: &str = "org_pu_retention_b";
@@ -54,9 +52,8 @@ fn persistence_app() -> (axum::Router, Arc<dyn ProviderUsageStore>) {
     settings.provider_usage_persistence_enabled = true;
     let wiring = ProviderWiring::for_mock_tests(&settings);
     let store = wiring.usage_store.clone().expect("mock store");
-    let engine = Arc::new(
-        create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"),
-    );
+    let engine =
+        Arc::new(create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"));
     let app = create_app(AppState::with_memory_engine_provider_usage_and_store(
         settings,
         engine,
@@ -78,9 +75,7 @@ fn post_retention(body: &str, org_id: Option<&str>, with_auth: bool) -> Request<
         let (name, value) = authorization_header();
         builder = builder.header(name, value);
     }
-    builder
-        .body(Body::from(body.to_string()))
-        .expect("request")
+    builder.body(Body::from(body.to_string())).expect("request")
 }
 
 async fn response_parts(
@@ -126,11 +121,8 @@ async fn endpoint_requires_auth() {
 #[tokio::test]
 async fn endpoint_requires_organization_header() {
     let (app, _) = persistence_app();
-    let (status, _) = response_parts(
-        app,
-        post_retention(r#"{"retention_days":30}"#, None, true),
-    )
-    .await;
+    let (status, _) =
+        response_parts(app, post_retention(r#"{"retention_days":30}"#, None, true)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
@@ -157,11 +149,7 @@ async fn dry_run_does_not_delete_events() {
 
     let (status, _) = response_parts(
         app.clone(),
-        post_retention(
-            r#"{"dry_run":true,"retention_days":30}"#,
-            Some(ORG_A),
-            true,
-        ),
+        post_retention(r#"{"dry_run":true,"retention_days":30}"#, Some(ORG_A), true),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -220,11 +208,7 @@ async fn retention_days_zero_disables_cleanup() {
 
     let (status, json) = response_parts(
         app,
-        post_retention(
-            r#"{"dry_run":false,"retention_days":0}"#,
-            Some(ORG_A),
-            true,
-        ),
+        post_retention(r#"{"dry_run":false,"retention_days":0}"#, Some(ORG_A), true),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -243,11 +227,7 @@ async fn invalid_retention_days_returns_validation_error() {
     let (app, _) = persistence_app();
     let (status, _) = response_parts(
         app,
-        post_retention(
-            r#"{"dry_run":true,"retention_days":-1}"#,
-            Some(ORG_A),
-            true,
-        ),
+        post_retention(r#"{"dry_run":true,"retention_days":-1}"#, Some(ORG_A), true),
     )
     .await;
     assert!(
@@ -287,9 +267,7 @@ async fn endpoint_requires_admin_write_in_database_auth_mode() {
     settings.api_key_pepper = Some(API_KEY_PEPPER.to_string());
     settings.provider_usage_persistence_enabled = true;
 
-    let state = AppState::initialize(settings)
-        .await
-        .expect("initialize");
+    let state = AppState::initialize(settings).await.expect("initialize");
     state
         .api_key_store
         .insert_api_key(ApiKeyRecord {

@@ -29,8 +29,14 @@ mod tests {
     #[test]
     fn empty_q_treated_as_none() {
         assert_eq!(parse_keyword_query(None).expect("parse"), None);
-        assert_eq!(parse_keyword_query(Some(String::new())).expect("parse"), None);
-        assert_eq!(parse_keyword_query(Some("   ".to_string())).expect("parse"), None);
+        assert_eq!(
+            parse_keyword_query(Some(String::new())).expect("parse"),
+            None
+        );
+        assert_eq!(
+            parse_keyword_query(Some("   ".to_string())).expect("parse"),
+            None
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@ use crate::dto::{
     ForgetUserResponse, ImportUserDataRequest, ImportUserDataResponse,
 };
 use crate::middleware::OrganizationContext;
-use crate::routes::common::{check_any_scope, check_scope, ApiError};
+use crate::routes::common::{ApiError, check_any_scope, check_scope};
 use crate::security::AuthContext;
 use crate::state::AppState;
 
@@ -18,12 +18,12 @@ pub async fn forget_user(
     auth: Option<Extension<AuthContext>>,
     Path(user_id): Path<String>,
 ) -> Result<Json<ForgetUserResponse>, ApiError> {
-    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::UserDelete)?;
+    check_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        ApiKeyScope::UserDelete,
+    )?;
     if user_id.trim().is_empty() {
-        return Err(MemcoreError::ValidationError(
-            "user_id cannot be empty".to_string(),
-        )
-        .into());
+        return Err(MemcoreError::ValidationError("user_id cannot be empty".to_string()).into());
     }
 
     let tenant = TenantContext::new(organization.org_id, user_id)?;
@@ -53,10 +53,7 @@ pub async fn export_user_data(
     )?;
 
     if user_id.trim().is_empty() {
-        return Err(MemcoreError::ValidationError(
-            "user_id cannot be empty".to_string(),
-        )
-        .into());
+        return Err(MemcoreError::ValidationError("user_id cannot be empty".to_string()).into());
     }
 
     let tenant = TenantContext::new(organization.org_id, user_id)?;
@@ -86,10 +83,7 @@ pub async fn import_user_data(
     )?;
 
     if user_id.trim().is_empty() {
-        return Err(MemcoreError::ValidationError(
-            "user_id cannot be empty".to_string(),
-        )
-        .into());
+        return Err(MemcoreError::ValidationError("user_id cannot be empty".to_string()).into());
     }
 
     let tenant = TenantContext::new(organization.org_id, user_id)?;
@@ -115,10 +109,7 @@ pub async fn apply_retention(
     )?;
 
     if user_id.trim().is_empty() {
-        return Err(MemcoreError::ValidationError(
-            "user_id cannot be empty".to_string(),
-        )
-        .into());
+        return Err(MemcoreError::ValidationError("user_id cannot be empty".to_string()).into());
     }
 
     let tenant = TenantContext::new(organization.org_id, user_id)?;

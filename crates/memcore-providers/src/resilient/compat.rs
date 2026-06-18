@@ -6,11 +6,14 @@ use crate::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
 use crate::policy::ProviderExecutionPolicy;
 use crate::routing::{ProviderCandidate, ProviderCapability, ProviderId, ProviderRoutingMetrics};
 use crate::traits::{EmbeddingProvider, LlmProvider};
-use crate::usage::{new_token_usage_slot, NoopProviderUsageRecorder, ProviderUsageRecorder};
+use crate::usage::{NoopProviderUsageRecorder, ProviderUsageRecorder, new_token_usage_slot};
 
 use super::{build_resilient_embedding_provider, build_resilient_llm_provider};
 
-pub use super::{ResilientEmbeddingProvider as PolicyEmbeddingProvider, ResilientLlmProvider as PolicyLlmProvider};
+pub use super::{
+    ResilientEmbeddingProvider as PolicyEmbeddingProvider,
+    ResilientLlmProvider as PolicyLlmProvider,
+};
 
 fn disabled_circuit_breaker() -> Arc<ProviderCircuitBreaker> {
     Arc::new(ProviderCircuitBreaker::new(CircuitBreakerConfig {

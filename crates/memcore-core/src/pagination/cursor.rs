@@ -33,9 +33,8 @@ pub fn parse_optional_cursor(cursor: Option<String>) -> MemcoreResult<Option<Pag
 
 /// Encodes a cursor payload as opaque base64url JSON.
 pub fn encode_cursor(cursor: &PageCursor) -> MemcoreResult<String> {
-    let json = serde_json::to_string(cursor).map_err(|error| {
-        MemcoreError::Internal(format!("failed to encode cursor: {error}"))
-    })?;
+    let json = serde_json::to_string(cursor)
+        .map_err(|error| MemcoreError::Internal(format!("failed to encode cursor: {error}")))?;
     Ok(URL_SAFE_NO_PAD.encode(json.as_bytes()))
 }
 
@@ -48,13 +47,12 @@ pub fn decode_cursor(cursor: &str) -> MemcoreResult<PageCursor> {
         ));
     }
 
-    let bytes = URL_SAFE_NO_PAD.decode(trimmed).map_err(|_| {
-        MemcoreError::ValidationError(INVALID_CURSOR_MESSAGE.to_string())
-    })?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(trimmed)
+        .map_err(|_| MemcoreError::ValidationError(INVALID_CURSOR_MESSAGE.to_string()))?;
 
-    serde_json::from_slice(&bytes).map_err(|_| {
-        MemcoreError::ValidationError(INVALID_CURSOR_MESSAGE.to_string())
-    })
+    serde_json::from_slice(&bytes)
+        .map_err(|_| MemcoreError::ValidationError(INVALID_CURSOR_MESSAGE.to_string()))
 }
 
 /// Builds a page from an over-fetched item list (`limit + 1` items max).

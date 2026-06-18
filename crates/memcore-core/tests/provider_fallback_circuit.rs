@@ -5,11 +5,11 @@ use memcore_core::{
     AddMemoryInput, MemoryEngine, MemoryMessage, MessageRole, SearchMemoryInput, TenantContext,
 };
 use memcore_providers::{
+    CircuitBreakerConfig, InMemoryProviderUsageRecorder, MockEmbeddingProvider, MockLlmProvider,
+    ProviderCandidate, ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy,
+    ProviderId, ProviderRoutingMetrics, ProviderUsageRecorder,
     build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
-    provider_usage_recorder, CircuitBreakerConfig, InMemoryProviderUsageRecorder,
-    MockEmbeddingProvider, MockLlmProvider, ProviderCandidate, ProviderCapability,
-    ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId, ProviderRoutingMetrics,
-    ProviderUsageRecorder,
+    provider_usage_recorder,
 };
 use memcore_storage::{MockFactStore, MockVectorStore};
 use serde_json::json;
@@ -30,10 +30,15 @@ fn fast_policy() -> ProviderExecutionPolicy {
 }
 
 fn test_circuit_breaker() -> Arc<ProviderCircuitBreaker> {
-    Arc::new(ProviderCircuitBreaker::new(CircuitBreakerConfig::for_tests()))
+    Arc::new(ProviderCircuitBreaker::new(
+        CircuitBreakerConfig::for_tests(),
+    ))
 }
 
-fn llm_candidate(name: &str, provider: Arc<MockLlmProvider>) -> ProviderCandidate<Arc<dyn memcore_core::LlmProvider>> {
+fn llm_candidate(
+    name: &str,
+    provider: Arc<MockLlmProvider>,
+) -> ProviderCandidate<Arc<dyn memcore_core::LlmProvider>> {
     ProviderCandidate::new(
         ProviderId::new(name, ProviderCapability::Llm),
         provider as Arc<dyn memcore_core::LlmProvider>,
@@ -56,13 +61,18 @@ fn embedding_candidate(
 
 #[tokio::test]
 async fn llm_extraction_falls_back_to_healthy_mock_provider() {
-    let failing = Arc::new(MockLlmProvider::new().with_fail_error(MemcoreError::ProviderError(
-        "OpenAI API error (503): unavailable".to_string(),
-    )));
+    let failing = Arc::new(
+        MockLlmProvider::new().with_fail_error(MemcoreError::ProviderError(
+            "OpenAI API error (503): unavailable".to_string(),
+        )),
+    );
     let healthy = Arc::new(MockLlmProvider::new());
     let usage = InMemoryProviderUsageRecorder::new();
     let llm = build_resilient_llm_from_candidates(
-        vec![llm_candidate("primary", failing), llm_candidate("secondary", healthy)],
+        vec![
+            llm_candidate("primary", failing),
+            llm_candidate("secondary", healthy),
+        ],
         vec![],
         test_circuit_breaker(),
         fast_policy(),
@@ -101,11 +111,9 @@ async fn llm_extraction_falls_back_to_healthy_mock_provider() {
 
 #[tokio::test]
 async fn embedding_search_falls_back_to_healthy_mock_provider() {
-    let failing = Arc::new(
-        MockEmbeddingProvider::new(4).with_fail_error(MemcoreError::ProviderError(
-            "OpenAI API error (500): internal".to_string(),
-        )),
-    );
+    let failing = Arc::new(MockEmbeddingProvider::new(4).with_fail_error(
+        MemcoreError::ProviderError("OpenAI API error (500): internal".to_string()),
+    ));
     let healthy = Arc::new(MockEmbeddingProvider::new(4));
     let usage = provider_usage_recorder(true);
     let embedding = build_resilient_embedding_from_candidates(

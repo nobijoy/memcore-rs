@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use memcore_common::{MemcoreError, MemcoreResult};
 
-use super::retry::{backoff_duration, retry_decision_for, ProviderRetryDecision};
-use super::timeout::provider_timeout_error;
 use super::ProviderExecutionPolicy;
+use super::retry::{ProviderRetryDecision, backoff_duration, retry_decision_for};
+use super::timeout::provider_timeout_error;
 
 /// Result of a provider call including retry attempt metadata.
 #[derive(Debug, Clone)]
@@ -64,10 +64,7 @@ where
                 });
             }
             Ok(Err(error)) => {
-                let retryable = matches!(
-                    retry_decision_for(&error),
-                    ProviderRetryDecision::Retry
-                );
+                let retryable = matches!(retry_decision_for(&error), ProviderRetryDecision::Retry);
                 tracing::warn!(
                     operation_name = operation_name,
                     attempt_number = attempt_number,
@@ -91,10 +88,7 @@ where
             Err(_elapsed) => {
                 any_timed_out = true;
                 let error = provider_timeout_error();
-                let retryable = matches!(
-                    retry_decision_for(&error),
-                    ProviderRetryDecision::Retry
-                );
+                let retryable = matches!(retry_decision_for(&error), ProviderRetryDecision::Retry);
                 tracing::warn!(
                     operation_name = operation_name,
                     attempt_number = attempt_number,
@@ -143,9 +137,7 @@ where
             timed_out: any_timed_out,
         }),
         None => Err(ProviderExecutionFailure {
-            error: MemcoreError::Internal(format!(
-                "{operation_name} failed without an error"
-            )),
+            error: MemcoreError::Internal(format!("{operation_name} failed without an error")),
             attempts: attempts_made,
             retries: attempts_made.saturating_sub(1),
             timed_out: any_timed_out,
@@ -155,8 +147,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use memcore_common::MemcoreError;

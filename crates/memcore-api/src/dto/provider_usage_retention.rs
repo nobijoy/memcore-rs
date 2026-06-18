@@ -1,8 +1,6 @@
 use chrono::{DateTime, Utc};
 use memcore_config::Settings;
-use memcore_core::{
-    ApplyProviderUsageRetentionInput, ApplyProviderUsageRetentionOutput,
-};
+use memcore_core::{ApplyProviderUsageRetentionInput, ApplyProviderUsageRetentionOutput};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -52,15 +50,16 @@ impl From<ApplyProviderUsageRetentionOutput> for ApplyProviderUsageRetentionResp
     }
 }
 
-pub fn resolve_provider_usage_retention_days(
-    override_days: Option<u32>,
-    default_days: u32,
-) -> u32 {
+pub fn resolve_provider_usage_retention_days(override_days: Option<u32>, default_days: u32) -> u32 {
     override_days.unwrap_or(default_days)
 }
 
 impl ApplyProviderUsageRetentionRequest {
-    pub fn into_input(self, org_id: String, settings: &Settings) -> ApplyProviderUsageRetentionInput {
+    pub fn into_input(
+        self,
+        org_id: String,
+        settings: &Settings,
+    ) -> ApplyProviderUsageRetentionInput {
         ApplyProviderUsageRetentionInput {
             org_id,
             retention_days: resolve_provider_usage_retention_days(

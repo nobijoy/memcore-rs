@@ -43,10 +43,7 @@ impl ImportanceScorer {
 fn is_stable_memory_type(memory_type: MemoryType) -> bool {
     matches!(
         memory_type,
-        MemoryType::Profile
-            | MemoryType::Preference
-            | MemoryType::Project
-            | MemoryType::Skill
+        MemoryType::Profile | MemoryType::Preference | MemoryType::Project | MemoryType::Skill
     )
 }
 
@@ -84,7 +81,11 @@ mod tests {
 
     #[test]
     fn importance_is_clamped_to_unit_interval() {
-        let high = candidate("stable profile fact content here", MemoryType::Profile, 0.95);
+        let high = candidate(
+            "stable profile fact content here",
+            MemoryType::Profile,
+            0.95,
+        );
         let adjusted_high = ImportanceScorer::adjust(&high);
         assert_eq!(adjusted_high.importance, 1.0);
 
@@ -95,7 +96,11 @@ mod tests {
 
     #[test]
     fn stable_memory_type_receives_boost() {
-        let base = candidate("User prefers Rust for backend work", MemoryType::Preference, 0.6);
+        let base = candidate(
+            "User prefers Rust for backend work",
+            MemoryType::Preference,
+            0.6,
+        );
         let adjusted = ImportanceScorer::adjust(&base);
         assert!(adjusted.importance > base.importance);
     }

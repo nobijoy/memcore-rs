@@ -3,9 +3,9 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use memcore_api::{create_mock_memory_engine, AppState, create_app};
+use memcore_api::{AppState, create_app, create_mock_memory_engine};
 use memcore_config::Settings;
-use memcore_core::{ContextCacheConfig, InMemoryContextCache, EMPTY_CONTEXT_MESSAGE};
+use memcore_core::{ContextCacheConfig, EMPTY_CONTEXT_MESSAGE, InMemoryContextCache};
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -135,7 +135,9 @@ async fn build_context_response_includes_formatted_context_string() {
     )
     .await;
 
-    let context = json["context"].as_str().expect("context should be a string");
+    let context = json["context"]
+        .as_str()
+        .expect("context should be a string");
     assert!(context.starts_with("Relevant long-term memories:"));
     assert!(context.contains(&format!("- {MEMORY_CONTENT}")));
 }
@@ -158,7 +160,9 @@ async fn build_context_response_includes_memories_array() {
     )
     .await;
 
-    let memories = json["memories"].as_array().expect("memories should be an array");
+    let memories = json["memories"]
+        .as_array()
+        .expect("memories should be an array");
     assert!(!memories.is_empty());
     assert_eq!(memories[0]["content"], MEMORY_CONTENT);
     assert!(memories[0]["fact_id"].is_string());
@@ -780,9 +784,16 @@ async fn simple_extractive_compression_returns_metadata() {
     assert_eq!(json["compression"]["enabled"], true);
     assert_eq!(json["compression"]["mode"], "simple_extractive");
     assert!(json["compression"]["summarized_memories"].as_u64().unwrap() > 0);
-    assert!(json["context"].as_str().unwrap().contains("Compressed Memory Summary"));
-    assert!(json["budget"]["used_tokens"].as_u64().unwrap()
-        <= json["budget"]["available_tokens"].as_u64().unwrap());
+    assert!(
+        json["context"]
+            .as_str()
+            .unwrap()
+            .contains("Compressed Memory Summary")
+    );
+    assert!(
+        json["budget"]["used_tokens"].as_u64().unwrap()
+            <= json["budget"]["available_tokens"].as_u64().unwrap()
+    );
 }
 
 #[tokio::test]

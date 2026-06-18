@@ -81,6 +81,14 @@ pub fn router(state: &AppState) -> Router<AppState> {
             get(admin::get_provider_usage),
         )
         .route(
+            "/api/v1/admin/org/usage/dashboard",
+            get(admin::get_org_usage_dashboard),
+        )
+        .route(
+            "/api/v1/admin/org/usage/provider/daily",
+            get(admin::get_provider_usage_daily),
+        )
+        .route(
             "/api/v1/admin/org/provider-usage/retention/apply",
             post(admin::apply_provider_usage_retention),
         )

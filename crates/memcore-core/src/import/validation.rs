@@ -2,7 +2,7 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::export::{UserMemoryExport, USER_EXPORT_FORMAT_VERSION};
+use crate::export::{USER_EXPORT_FORMAT_VERSION, UserMemoryExport};
 use crate::import::{ImportValidationIssue, ImportValidationSummary};
 use crate::{Fact, MemoryEvent, TenantContext};
 
@@ -15,7 +15,11 @@ const FORBIDDEN_METADATA_KEYS: &[&str] = &[
     "secret",
 ];
 
-fn validation_issue(code: &str, message: impl Into<String>, path: Option<String>) -> ImportValidationIssue {
+fn validation_issue(
+    code: &str,
+    message: impl Into<String>,
+    path: Option<String>,
+) -> ImportValidationIssue {
     ImportValidationIssue {
         code: code.to_string(),
         message: message.into(),
@@ -208,11 +212,7 @@ pub fn contains_forbidden_secret_fields(value: &Value) -> bool {
 
 /// Resolves the fact id to use on import. In append mode, generates a new id when the
 /// exported id already exists for this tenant.
-pub fn resolve_import_fact_id(
-    exported_id: Uuid,
-    id_exists: bool,
-    mode: super::ImportMode,
-) -> Uuid {
+pub fn resolve_import_fact_id(exported_id: Uuid, id_exists: bool, mode: super::ImportMode) -> Uuid {
     if id_exists && matches!(mode, super::ImportMode::Append) {
         Uuid::new_v4()
     } else {
@@ -259,8 +259,12 @@ mod tests {
     #[test]
     fn forbidden_metadata_keys_are_detected() {
         assert!(contains_forbidden_secret_fields(&json!({ "api_key": "x" })));
-        assert!(contains_forbidden_secret_fields(&json!({ "nested": { "key_hash": "y" } })));
-        assert!(!contains_forbidden_secret_fields(&json!({ "source": "import" })));
+        assert!(contains_forbidden_secret_fields(
+            &json!({ "nested": { "key_hash": "y" } })
+        ));
+        assert!(!contains_forbidden_secret_fields(
+            &json!({ "source": "import" })
+        ));
     }
 
     #[test]
@@ -283,10 +287,12 @@ mod tests {
         let export = UserMemoryExport::new("org_a", "user_b", vec![sample_fact()], vec![]);
         let summary = collect_import_validation(&export, &tenant(), false);
         assert!(!summary.valid);
-        assert!(summary
-            .errors
-            .iter()
-            .any(|issue| issue.code == "USER_ID_MISMATCH"));
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|issue| issue.code == "USER_ID_MISMATCH")
+        );
     }
 
     #[test]
@@ -296,9 +302,11 @@ mod tests {
         let export = sample_export(vec![fact]);
         let summary = collect_import_validation(&export, &tenant(), false);
         assert!(!summary.valid);
-        assert!(summary
-            .errors
-            .iter()
-            .any(|issue| issue.code == "INVALID_IMPORTANCE"));
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|issue| issue.code == "INVALID_IMPORTANCE")
+        );
     }
 }

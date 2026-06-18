@@ -52,9 +52,7 @@ fn get_request(uri: &str, org_id: Option<&str>, with_auth: bool) -> Request<Body
         builder = builder.header(name, value);
     }
 
-    builder
-        .body(Body::empty())
-        .expect("request should build")
+    builder.body(Body::empty()).expect("request should build")
 }
 
 async fn response_parts(
@@ -77,11 +75,8 @@ async fn response_parts(
 async fn protected_route_succeeds_under_limit() {
     let app = rate_limited_app(2, true);
 
-    let (status, json) = response_parts(
-        app,
-        post_request("/api/v1/memories", ADD_BODY, ORG_A),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, post_request("/api/v1/memories", ADD_BODY, ORG_A)).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "success");
@@ -100,11 +95,8 @@ async fn protected_route_returns_429_after_exceeding_limit() {
         assert_eq!(status, StatusCode::OK);
     }
 
-    let (status, json) = response_parts(
-        app,
-        post_request("/api/v1/memories", ADD_BODY, ORG_A),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, post_request("/api/v1/memories", ADD_BODY, ORG_A)).await;
 
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(json["error"]["code"], "RATE_LIMITED");
@@ -149,11 +141,8 @@ async fn org_a_hitting_limit_does_not_block_org_b() {
     .await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 
-    let (status, json) = response_parts(
-        app,
-        post_request("/api/v1/memories", ADD_BODY, ORG_B),
-    )
-    .await;
+    let (status, json) =
+        response_parts(app, post_request("/api/v1/memories", ADD_BODY, ORG_B)).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "success");

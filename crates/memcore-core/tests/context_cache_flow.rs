@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use memcore_core::{
     AddMemoryInput, ApplyRetentionInput, BuildContextInput, ContextCacheConfig, ContextFormat,
-    ImportMode, ImportUserDataInput, MemoryEngine, MemoryMessage,
-    MessageRole, RetentionPolicy, TenantContext, UserMemoryExport, InMemoryContextCache,
+    ImportMode, ImportUserDataInput, InMemoryContextCache, MemoryEngine, MemoryMessage,
+    MessageRole, RetentionPolicy, TenantContext, UserMemoryExport,
 };
 use memcore_providers::{MockEmbeddingProvider, MockLlmProvider};
 use memcore_storage::{MockFactStore, MockVectorStore};

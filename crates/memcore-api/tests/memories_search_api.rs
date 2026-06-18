@@ -114,7 +114,9 @@ async fn search_memory_response_includes_results() {
     )
     .await;
 
-    let results = json["results"].as_array().expect("results should be an array");
+    let results = json["results"]
+        .as_array()
+        .expect("results should be an array");
     assert!(!results.is_empty());
     assert!(results[0]["fact_id"].is_string());
     assert_eq!(results[0]["content"], MEMORY_CONTENT);
@@ -201,10 +203,7 @@ async fn missing_organization_header_returns_error() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
-    assert_eq!(
-        json["error"]["message"],
-        "missing X-Organization-ID header"
-    );
+    assert_eq!(json["error"]["message"], "missing X-Organization-ID header");
 }
 
 #[tokio::test]
@@ -265,7 +264,10 @@ async fn invalid_memory_type_filter_returns_validation_error() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
-    assert_eq!(json["error"]["message"], "invalid memory type: NotARealType");
+    assert_eq!(
+        json["error"]["message"],
+        "invalid memory type: NotARealType"
+    );
 }
 
 #[tokio::test]
@@ -347,10 +349,12 @@ async fn search_finds_keyword_phrase_match() {
 
     let results = json["results"].as_array().expect("results");
     assert_eq!(results.len(), 1);
-    assert!(results[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains(unique_phrase));
+    assert!(
+        results[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains(unique_phrase)
+    );
 }
 
 #[tokio::test]

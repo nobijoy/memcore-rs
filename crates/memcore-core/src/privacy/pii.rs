@@ -10,16 +10,14 @@ const REDACTED_SECRET: &str = "[REDACTED_SECRET]";
 fn bearer_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)Bearer\s+[A-Za-z0-9._=-]+")
-            .expect("bearer regex should compile")
+        Regex::new(r"(?i)Bearer\s+[A-Za-z0-9._=-]+").expect("bearer regex should compile")
     })
 }
 
 fn api_key_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"\b(?:sk|pk|api)[-_][A-Za-z0-9]{16,}\b")
-            .expect("api key regex should compile")
+        Regex::new(r"\b(?:sk|pk|api)[-_][A-Za-z0-9]{16,}\b").expect("api key regex should compile")
     })
 }
 
@@ -42,8 +40,7 @@ fn phone_regex() -> &'static Regex {
 fn card_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"\b(?:\d{4}[-\s]?){3}\d{4}\b")
-            .expect("card regex should compile")
+        Regex::new(r"\b(?:\d{4}[-\s]?){3}\d{4}\b").expect("card regex should compile")
     })
 }
 
@@ -53,12 +50,18 @@ pub struct PiiRedactor;
 impl PiiRedactor {
     pub fn redact_text(input: &str) -> String {
         let mut text = input.to_string();
-        text = bearer_regex().replace_all(&text, format!("Bearer {REDACTED_SECRET}")).into_owned();
+        text = bearer_regex()
+            .replace_all(&text, format!("Bearer {REDACTED_SECRET}"))
+            .into_owned();
         text = api_key_regex()
             .replace_all(&text, REDACTED_SECRET)
             .into_owned();
-        text = email_regex().replace_all(&text, REDACTED_EMAIL).into_owned();
-        text = phone_regex().replace_all(&text, REDACTED_PHONE).into_owned();
+        text = email_regex()
+            .replace_all(&text, REDACTED_EMAIL)
+            .into_owned();
+        text = phone_regex()
+            .replace_all(&text, REDACTED_PHONE)
+            .into_owned();
         text = card_regex().replace_all(&text, REDACTED_CARD).into_owned();
         text
     }

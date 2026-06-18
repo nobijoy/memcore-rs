@@ -98,10 +98,7 @@ fn messages_to_input(messages: &[MemoryMessage]) -> serde_json::Value {
 
 #[async_trait]
 impl LlmProvider for OpenAiLlmProvider {
-    async fn extract_facts(
-        &self,
-        input: FactExtractionInput,
-    ) -> MemcoreResult<Vec<CandidateFact>> {
+    async fn extract_facts(&self, input: FactExtractionInput) -> MemcoreResult<Vec<CandidateFact>> {
         let payload = json!({
             "tenant": {
                 "org_id": input.tenant.org_id,
