@@ -24,10 +24,7 @@ impl PostgresOrgPlanStore {
             .await
             .map_err(|error| storage_error("connect postgres org plan store", error))?;
 
-        sqlx::migrate!("./migrations/postgres")
-            .run(&pool)
-            .await
-            .map_err(|error| storage_error("run postgres migrations", error))?;
+        crate::migrations::postgres::run_postgres_migrations(&pool).await?;
 
         Ok(Self { pool })
     }

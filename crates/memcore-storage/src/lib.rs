@@ -4,6 +4,7 @@ pub mod keyword_search;
 #[cfg(feature = "lancedb")]
 pub mod lancedb;
 pub mod memory_usage;
+pub mod migrations;
 pub mod mocks;
 pub mod org_plan;
 pub mod pagination;
@@ -15,6 +16,7 @@ pub mod qdrant;
 pub mod queries;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
+pub mod startup_checks;
 pub mod traits;
 pub mod vector;
 
@@ -35,6 +37,14 @@ pub use memory_usage::MockMemoryUsageSnapshotStore;
 pub use memory_usage::PostgresMemoryUsageSnapshotStore;
 #[cfg(feature = "sqlite")]
 pub use memory_usage::SqliteMemoryUsageSnapshotStore;
+pub use migrations::{
+    AppliedMigration, Migration, MigrationIssue, MigrationRunner, MigrationStatus,
+    MigrationValidationReport, migration_checksum,
+};
+#[cfg(feature = "postgres")]
+pub use migrations::{PostgresMigrationRunner, postgres_migrations};
+#[cfg(feature = "sqlite")]
+pub use migrations::{SqliteMigrationRunner, sqlite_migrations};
 pub use mocks::{MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore};
 pub use org_plan::MockOrgPlanStore;
 #[cfg(feature = "postgres")]
@@ -53,6 +63,13 @@ pub use qdrant::QdrantVectorStore;
 pub use queries::{FactSearchQuery, MemoryEventQuery};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore};
+pub use startup_checks::{StorageMigrationMode, StorageStartupCheckReport};
+#[cfg(feature = "postgres")]
+pub use startup_checks::{
+    check_postgres_pool_startup, check_postgres_startup, connect_postgres_pool,
+};
+#[cfg(feature = "sqlite")]
+pub use startup_checks::{check_sqlite_pool_startup, check_sqlite_startup, connect_sqlite_pool};
 pub use traits::{
     ApiKeyStore, BackgroundJobLockStore, BackgroundJobRunStore, FactStore, MemoryEventStore,
     MemoryUsageSnapshotStore, OrgPlanStore, ProviderUsageStore, VectorStore,

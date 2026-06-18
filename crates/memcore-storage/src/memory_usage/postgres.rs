@@ -65,10 +65,7 @@ impl PostgresMemoryUsageSnapshotStore {
                 storage_error("connect postgres memory usage snapshot store", error)
             })?;
 
-        sqlx::migrate!("./migrations/postgres")
-            .run(&pool)
-            .await
-            .map_err(|error| storage_error("run postgres migrations", error))?;
+        crate::migrations::postgres::run_postgres_migrations(&pool).await?;
 
         Ok(Self { pool })
     }

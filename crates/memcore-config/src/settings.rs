@@ -12,6 +12,9 @@ const MEMCORE_FACT_BACKEND: &str = "MEMCORE_FACT_BACKEND";
 const MEMCORE_EVENT_BACKEND: &str = "MEMCORE_EVENT_BACKEND";
 const MEMCORE_DATABASE_URL: &str = "MEMCORE_DATABASE_URL";
 const MEMCORE_POSTGRES_URL: &str = "MEMCORE_POSTGRES_URL";
+const MEMCORE_DATABASE_MIGRATIONS_ENABLED: &str = "MEMCORE_DATABASE_MIGRATIONS_ENABLED";
+const MEMCORE_DATABASE_MIGRATION_MODE: &str = "MEMCORE_DATABASE_MIGRATION_MODE";
+const MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS: &str = "MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS";
 const MEMCORE_QDRANT_URL: &str = "MEMCORE_QDRANT_URL";
 const MEMCORE_QDRANT_COLLECTION: &str = "MEMCORE_QDRANT_COLLECTION";
 const MEMCORE_LANCEDB_PATH: &str = "MEMCORE_LANCEDB_PATH";
@@ -128,6 +131,23 @@ pub enum BackgroundJobLockBackend {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatabaseMigrationMode {
+    Auto,
+    ValidateOnly,
+    Disabled,
+}
+
+impl DatabaseMigrationMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::ValidateOnly => "validate_only",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMode {
     Dev,
     Database,
@@ -219,6 +239,9 @@ pub struct Settings {
     pub event_backend: EventBackend,
     pub database_url: String,
     pub postgres_url: Option<String>,
+    pub database_migrations_enabled: bool,
+    pub database_migration_mode: DatabaseMigrationMode,
+    pub database_require_clean_migrations: bool,
     pub qdrant_url: String,
     pub qdrant_collection: String,
     pub lancedb_path: String,
@@ -389,6 +412,9 @@ impl Default for Settings {
             event_backend: EventBackend::Mock,
             database_url: "sqlite://./data/memcore.db".to_string(),
             postgres_url: None,
+            database_migrations_enabled: true,
+            database_migration_mode: DatabaseMigrationMode::Auto,
+            database_require_clean_migrations: true,
             qdrant_url: "http://localhost:6333".to_string(),
             qdrant_collection: "memcore_vectors".to_string(),
             lancedb_path: "./data/lancedb".to_string(),
@@ -493,6 +519,18 @@ impl Settings {
         };
         let database_url = read_env_or(MEMCORE_DATABASE_URL, &defaults.database_url);
         let postgres_url = read_env_optional(MEMCORE_POSTGRES_URL);
+        let database_migrations_enabled = parse_bool(
+            MEMCORE_DATABASE_MIGRATIONS_ENABLED,
+            defaults.database_migrations_enabled,
+        )?;
+        let database_migration_mode = DatabaseMigrationMode::from_str(&read_env_or(
+            MEMCORE_DATABASE_MIGRATION_MODE,
+            defaults.database_migration_mode.as_str(),
+        ))?;
+        let database_require_clean_migrations = parse_bool(
+            MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS,
+            defaults.database_require_clean_migrations,
+        )?;
         let qdrant_url = read_env_or(MEMCORE_QDRANT_URL, &defaults.qdrant_url);
         let qdrant_collection = read_env_or(MEMCORE_QDRANT_COLLECTION, &defaults.qdrant_collection);
         let lancedb_path = read_env_or(MEMCORE_LANCEDB_PATH, &defaults.lancedb_path);
@@ -767,6 +805,9 @@ impl Settings {
             event_backend,
             database_url,
             postgres_url,
+            database_migrations_enabled,
+            database_migration_mode,
+            database_require_clean_migrations,
             qdrant_url,
             qdrant_collection,
             lancedb_path,
@@ -1465,6 +1506,21 @@ impl FromStr for BackgroundJobLockBackend {
     }
 }
 
+impl FromStr for DatabaseMigrationMode {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "validate_only" | "validate-only" => Ok(Self::ValidateOnly),
+            "disabled" => Ok(Self::Disabled),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_DATABASE_MIGRATION_MODE value: {value}"
+            ))),
+        }
+    }
+}
+
 impl FromStr for AuthMode {
     type Err = MemcoreError;
 
@@ -1527,6 +1583,9 @@ mod tests {
         "MEMCORE_EVENT_BACKEND",
         "MEMCORE_DATABASE_URL",
         "MEMCORE_POSTGRES_URL",
+        "MEMCORE_DATABASE_MIGRATIONS_ENABLED",
+        "MEMCORE_DATABASE_MIGRATION_MODE",
+        "MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS",
         "MEMCORE_QDRANT_URL",
         "MEMCORE_QDRANT_COLLECTION",
         "MEMCORE_LANCEDB_PATH",
@@ -1709,6 +1768,35 @@ mod tests {
         assert!(settings.background_job_retry_jitter_enabled);
         assert_eq!(settings.graceful_shutdown_timeout_seconds, 30);
         assert_eq!(settings.background_job_shutdown_timeout_seconds, 30);
+        assert!(settings.database_migrations_enabled);
+        assert_eq!(
+            settings.database_migration_mode,
+            super::DatabaseMigrationMode::Auto
+        );
+        assert!(settings.database_require_clean_migrations);
+    }
+
+    #[test]
+    fn database_migration_settings_parse_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_DATABASE_MIGRATIONS_ENABLED", "false");
+            std::env::set_var("MEMCORE_DATABASE_MIGRATION_MODE", "validate_only");
+            std::env::set_var("MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS", "false");
+        }
+
+        let settings = Settings::from_env().expect("migration settings should load");
+        assert!(!settings.database_migrations_enabled);
+        assert_eq!(
+            settings.database_migration_mode,
+            super::DatabaseMigrationMode::ValidateOnly
+        );
+        assert!(!settings.database_require_clean_migrations);
     }
 
     #[test]

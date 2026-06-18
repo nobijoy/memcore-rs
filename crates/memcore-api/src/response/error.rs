@@ -51,6 +51,7 @@ impl ErrorBody {
             MemcoreError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             MemcoreError::ProviderError(_) => StatusCode::BAD_GATEWAY,
             MemcoreError::StorageError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            MemcoreError::MigrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             MemcoreError::ValidationError(_) => StatusCode::BAD_REQUEST,
             MemcoreError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             MemcoreError::Timeout(_) => StatusCode::GATEWAY_TIMEOUT,
@@ -66,6 +67,7 @@ impl ErrorBody {
             MemcoreError::RateLimited => "RATE_LIMITED",
             MemcoreError::ProviderError(_) => "PROVIDER_ERROR",
             MemcoreError::StorageError(_) => "STORAGE_ERROR",
+            MemcoreError::MigrationError(_) => "MIGRATION_ERROR",
             MemcoreError::ValidationError(_) => "VALIDATION_ERROR",
             MemcoreError::Internal(_) => "INTERNAL_ERROR",
             MemcoreError::Timeout(_) => "TIMEOUT",
@@ -101,6 +103,7 @@ fn api_error_message(error: &MemcoreError) -> String {
         | MemcoreError::Conflict(message)
         | MemcoreError::ProviderError(message)
         | MemcoreError::StorageError(message)
+        | MemcoreError::MigrationError(message)
         | MemcoreError::Internal(message)
         | MemcoreError::Timeout(message) => message.clone(),
         MemcoreError::QuotaExceeded { message, .. } => message.clone(),

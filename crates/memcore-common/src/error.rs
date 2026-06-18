@@ -18,6 +18,8 @@ pub enum MemcoreError {
     ProviderError(String),
     #[error("storage error: {0}")]
     StorageError(String),
+    #[error("migration error: {0}")]
+    MigrationError(String),
     #[error("validation error: {0}")]
     ValidationError(String),
     #[error("internal error: {0}")]
@@ -69,6 +71,7 @@ impl MemcoreError {
             }
             Self::ProviderError(_) => "provider_error",
             Self::StorageError(_) => "storage_error",
+            Self::MigrationError(_) => "migration_error",
             Self::ValidationError(_) => "validation_error",
             Self::Internal(_) => "internal",
             Self::Timeout(msg) if msg == PROVIDER_TIMEOUT_MESSAGE => "provider_timeout",
@@ -132,6 +135,8 @@ mod tests {
     fn code_mapping_matches_expected_values() {
         let error = MemcoreError::StorageError("db unavailable".to_string());
         assert_eq!(error.code(), "storage_error");
+        let error = MemcoreError::MigrationError("checksum mismatch".to_string());
+        assert_eq!(error.code(), "migration_error");
     }
 
     #[test]

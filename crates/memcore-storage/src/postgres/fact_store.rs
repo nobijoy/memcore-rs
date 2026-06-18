@@ -70,10 +70,7 @@ impl PostgresFactStore {
             .await
             .map_err(|error| storage_error("failed to connect postgres database", error))?;
 
-        sqlx::migrate!("./migrations/postgres")
-            .run(&pool)
-            .await
-            .map_err(|error| storage_error("failed to run postgres migrations", error))?;
+        crate::migrations::postgres::run_postgres_migrations(&pool).await?;
 
         Ok(Self::new(pool))
     }

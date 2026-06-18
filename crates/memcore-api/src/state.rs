@@ -6,8 +6,8 @@ use crate::observability::Metrics;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
-    AuthMode, BackgroundJobLockBackend, ContextCacheBackend, EmbeddingProviderKind, EventBackend,
-    FactBackend, LlmProviderKind, Settings, VectorBackend,
+    AuthMode, BackgroundJobLockBackend, ContextCacheBackend, DatabaseMigrationMode,
+    EmbeddingProviderKind, EventBackend, FactBackend, LlmProviderKind, Settings, VectorBackend,
 };
 use memcore_core::{
     ApiKeyStore, BackgroundJob, BackgroundJobLockStore, BackgroundJobRetryPolicy,
@@ -46,6 +46,11 @@ use memcore_storage::{
     PostgresFactStore, PostgresMemoryEventStore, PostgresMemoryUsageSnapshotStore,
     PostgresOrgPlanStore, PostgresProviderUsageStore,
 };
+use memcore_storage::{
+    StorageMigrationMode, StorageStartupCheckReport, check_sqlite_startup, connect_sqlite_pool,
+};
+#[cfg(feature = "postgres")]
+use memcore_storage::{check_postgres_startup, connect_postgres_pool};
 
 /// Default embedding dimensions for the mock embedding provider.
 const MOCK_EMBEDDING_DIMENSIONS: usize = 8;
@@ -116,7 +121,7 @@ async fn create_provider_usage_store(
         #[cfg(feature = "postgres")]
         {
             let url = require_postgres_url(settings)?;
-            let store = PostgresProviderUsageStore::connect(&url).await?;
+            let store = PostgresProviderUsageStore::new(connect_postgres_pool(&url).await?);
             return Ok(Arc::new(store));
         }
         #[cfg(not(feature = "postgres"))]
@@ -129,7 +134,11 @@ async fn create_provider_usage_store(
     }
 
     if settings.fact_backend == FactBackend::Sqlite {
-        let store = SqliteProviderUsageStore::connect(&settings.database_url).await?;
+        let store = if is_sqlite_memory_database(settings) {
+            SqliteProviderUsageStore::connect(&settings.database_url).await?
+        } else {
+            SqliteProviderUsageStore::new(connect_sqlite_pool(&settings.database_url).await?)
+        };
         return Ok(Arc::new(store));
     }
 
@@ -147,7 +156,7 @@ async fn create_background_job_run_store(
         #[cfg(feature = "postgres")]
         {
             let url = require_postgres_url(settings)?;
-            let store = PostgresBackgroundJobRunStore::connect(&url).await?;
+            let store = PostgresBackgroundJobRunStore::new(connect_postgres_pool(&url).await?);
             return Ok(Some(Arc::new(store)));
         }
         #[cfg(not(feature = "postgres"))]
@@ -160,7 +169,11 @@ async fn create_background_job_run_store(
     }
 
     if settings.fact_backend == FactBackend::Sqlite {
-        let store = SqliteBackgroundJobRunStore::connect(&settings.database_url).await?;
+        let store = if is_sqlite_memory_database(settings) {
+            SqliteBackgroundJobRunStore::connect(&settings.database_url).await?
+        } else {
+            SqliteBackgroundJobRunStore::new(connect_sqlite_pool(&settings.database_url).await?)
+        };
         return Ok(Some(Arc::new(store)));
     }
 
@@ -182,7 +195,7 @@ async fn create_background_job_lock_store(
         #[cfg(feature = "postgres")]
         {
             let url = require_postgres_url(settings)?;
-            let store = PostgresBackgroundJobLockStore::connect(&url).await?;
+            let store = PostgresBackgroundJobLockStore::new(connect_postgres_pool(&url).await?);
             return Ok(Some(Arc::new(store)));
         }
         #[cfg(not(feature = "postgres"))]
@@ -195,7 +208,11 @@ async fn create_background_job_lock_store(
     }
 
     if settings.fact_backend == FactBackend::Sqlite {
-        let store = SqliteBackgroundJobLockStore::connect(&settings.database_url).await?;
+        let store = if is_sqlite_memory_database(settings) {
+            SqliteBackgroundJobLockStore::connect(&settings.database_url).await?
+        } else {
+            SqliteBackgroundJobLockStore::new(connect_sqlite_pool(&settings.database_url).await?)
+        };
         return Ok(Some(Arc::new(store)));
     }
 
@@ -370,6 +387,7 @@ pub struct AppState {
     pub background_job_lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
     pub background_job_lock_owner_id: Option<String>,
     pub shutdown_token: ShutdownToken,
+    pub storage_startup: StorageStartupCheckReport,
 }
 
 impl AppState {
@@ -383,6 +401,7 @@ impl AppState {
         settings: Settings,
         shutdown_token: ShutdownToken,
     ) -> MemcoreResult<Self> {
+        let storage_startup = run_storage_startup_checks(&settings).await?;
         let wiring = ProviderWiring::from_settings(&settings).await?;
         let org_plan_store = create_org_plan_store(&settings).await?;
         let memory_usage_snapshot_store = create_memory_usage_snapshot_store(&settings).await?;
@@ -430,6 +449,7 @@ impl AppState {
             background_job_lock_store,
             background_job_lock_owner_id,
             shutdown_token,
+            storage_startup,
         })
     }
 
@@ -489,6 +509,7 @@ impl AppState {
                 background_job_lock_store,
                 background_job_lock_owner_id,
                 shutdown_token: ShutdownToken::new(),
+                storage_startup: StorageStartupCheckReport::ready_without_database(),
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -521,6 +542,7 @@ impl AppState {
             background_job_lock_store: None,
             background_job_lock_owner_id: None,
             shutdown_token: ShutdownToken::new(),
+            storage_startup: StorageStartupCheckReport::ready_without_database(),
         }
     }
 
@@ -551,6 +573,7 @@ impl AppState {
             background_job_lock_store: None,
             background_job_lock_owner_id: None,
             shutdown_token: ShutdownToken::new(),
+            storage_startup: StorageStartupCheckReport::ready_without_database(),
         }
     }
 
@@ -582,8 +605,112 @@ impl AppState {
             background_job_lock_store: None,
             background_job_lock_owner_id: None,
             shutdown_token: ShutdownToken::new(),
+            storage_startup: StorageStartupCheckReport::ready_without_database(),
         }
     }
+}
+
+async fn run_storage_startup_checks(
+    settings: &Settings,
+) -> MemcoreResult<StorageStartupCheckReport> {
+    let mode = storage_migration_mode(settings);
+    let require_clean = settings.database_require_clean_migrations;
+    let uses_postgres = settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres;
+    let uses_sqlite = settings.fact_backend == FactBackend::Sqlite
+        || settings.event_backend == EventBackend::Sqlite;
+
+    tracing::info!(
+        migration_mode = migration_mode_label(mode),
+        require_clean_migrations = require_clean,
+        uses_sqlite,
+        uses_postgres,
+        "running storage startup checks"
+    );
+
+    let postgres_report = if uses_postgres {
+        #[cfg(feature = "postgres")]
+        {
+            let url = require_postgres_url(settings)?;
+            Some(check_postgres_startup(&url, mode, require_clean).await?)
+        }
+        #[cfg(not(feature = "postgres"))]
+        {
+            if settings.event_backend == EventBackend::Postgres {
+                return Err(MemcoreError::ValidationError(
+                    "Postgres event backend requires the `postgres` cargo feature".to_string(),
+                ));
+            }
+            return Err(MemcoreError::ValidationError(
+                "Postgres fact backend requires the `postgres` cargo feature".to_string(),
+            ));
+        }
+    } else {
+        None
+    };
+
+    let sqlite_report = if uses_sqlite {
+        Some(check_sqlite_startup(&settings.database_url, mode, require_clean).await?)
+    } else {
+        None
+    };
+
+    let report = combine_storage_startup_reports(postgres_report, sqlite_report);
+    tracing::info!(
+        database_connected = report.database_connected,
+        migrations_clean = report.migrations_clean,
+        pending_migrations = report
+            .migration_report
+            .as_ref()
+            .map(|report| report.pending_count),
+        warning_count = report.warnings.len(),
+        "storage startup checks completed"
+    );
+    Ok(report)
+}
+
+fn combine_storage_startup_reports(
+    first: Option<StorageStartupCheckReport>,
+    second: Option<StorageStartupCheckReport>,
+) -> StorageStartupCheckReport {
+    match (first, second) {
+        (None, None) => StorageStartupCheckReport::ready_without_database(),
+        (Some(report), None) | (None, Some(report)) => report,
+        (Some(first), Some(second)) => {
+            let mut warnings = first.warnings;
+            warnings.extend(second.warnings);
+            StorageStartupCheckReport {
+                database_connected: first.database_connected && second.database_connected,
+                migrations_clean: first.migrations_clean && second.migrations_clean,
+                migration_report: first.migration_report.or(second.migration_report),
+                warnings,
+            }
+        }
+    }
+}
+
+fn storage_migration_mode(settings: &Settings) -> StorageMigrationMode {
+    if !settings.database_migrations_enabled {
+        return StorageMigrationMode::Disabled;
+    }
+
+    match settings.database_migration_mode {
+        DatabaseMigrationMode::Auto => StorageMigrationMode::Auto,
+        DatabaseMigrationMode::ValidateOnly => StorageMigrationMode::ValidateOnly,
+        DatabaseMigrationMode::Disabled => StorageMigrationMode::Disabled,
+    }
+}
+
+fn migration_mode_label(mode: StorageMigrationMode) -> &'static str {
+    match mode {
+        StorageMigrationMode::Auto => "auto",
+        StorageMigrationMode::ValidateOnly => "validate_only",
+        StorageMigrationMode::Disabled => "disabled",
+    }
+}
+
+fn is_sqlite_memory_database(settings: &Settings) -> bool {
+    settings.database_url.contains(":memory:")
 }
 
 fn create_background_job_runner(
@@ -703,7 +830,7 @@ async fn create_api_key_store(settings: &Settings) -> MemcoreResult<Arc<dyn ApiK
         || settings.event_backend == EventBackend::Postgres
     {
         let postgres_url = require_postgres_url(settings)?;
-        let store = PostgresApiKeyStore::connect(&postgres_url).await?;
+        let store = PostgresApiKeyStore::new(connect_postgres_pool(&postgres_url).await?);
         return Ok(Arc::new(store));
     }
 
@@ -716,7 +843,11 @@ async fn create_api_key_store(settings: &Settings) -> MemcoreResult<Arc<dyn ApiK
         ));
     }
 
-    let store = SqliteApiKeyStore::connect(&settings.database_url).await?;
+    let store = if is_sqlite_memory_database(settings) {
+        SqliteApiKeyStore::connect(&settings.database_url).await?
+    } else {
+        SqliteApiKeyStore::new(connect_sqlite_pool(&settings.database_url).await?)
+    };
     Ok(Arc::new(store))
 }
 
@@ -730,7 +861,7 @@ async fn create_org_plan_store(settings: &Settings) -> MemcoreResult<Arc<dyn Org
         || settings.event_backend == EventBackend::Postgres
     {
         let postgres_url = require_postgres_url(settings)?;
-        let store = PostgresOrgPlanStore::connect(&postgres_url).await?;
+        let store = PostgresOrgPlanStore::new(connect_postgres_pool(&postgres_url).await?);
         return Ok(Arc::new(store));
     }
 
@@ -748,7 +879,11 @@ async fn create_org_plan_store(settings: &Settings) -> MemcoreResult<Arc<dyn Org
         ));
     }
 
-    let store = SqliteOrgPlanStore::connect(&settings.database_url).await?;
+    let store = if is_sqlite_memory_database(settings) {
+        SqliteOrgPlanStore::connect(&settings.database_url).await?
+    } else {
+        SqliteOrgPlanStore::new(connect_sqlite_pool(&settings.database_url).await?)
+    };
     Ok(Arc::new(store))
 }
 
@@ -764,7 +899,8 @@ async fn create_memory_usage_snapshot_store(
         || settings.event_backend == EventBackend::Postgres
     {
         let postgres_url = require_postgres_url(settings)?;
-        let store = PostgresMemoryUsageSnapshotStore::connect(&postgres_url).await?;
+        let store =
+            PostgresMemoryUsageSnapshotStore::new(connect_postgres_pool(&postgres_url).await?);
         return Ok(Arc::new(store));
     }
 
@@ -777,7 +913,11 @@ async fn create_memory_usage_snapshot_store(
         ));
     }
 
-    let store = SqliteMemoryUsageSnapshotStore::connect(&settings.database_url).await?;
+    let store = if is_sqlite_memory_database(settings) {
+        SqliteMemoryUsageSnapshotStore::connect(&settings.database_url).await?
+    } else {
+        SqliteMemoryUsageSnapshotStore::new(connect_sqlite_pool(&settings.database_url).await?)
+    };
     Ok(Arc::new(store))
 }
 
@@ -804,49 +944,71 @@ async fn create_storage(
             Arc::new(MockMemoryEventStore::new()),
         )),
         (FactBackend::Sqlite, EventBackend::Sqlite) => {
-            let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
+            let fact_store = if is_sqlite_memory_database(settings) {
+                SqliteFactStore::connect(&settings.database_url).await?
+            } else {
+                SqliteFactStore::new(connect_sqlite_pool(&settings.database_url).await?)
+            };
             let event_store = SqliteMemoryEventStore::new(fact_store.pool());
             Ok((Arc::new(fact_store), Arc::new(event_store)))
         }
         (FactBackend::Sqlite, EventBackend::Mock) => {
-            let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
+            let fact_store = if is_sqlite_memory_database(settings) {
+                SqliteFactStore::connect(&settings.database_url).await?
+            } else {
+                SqliteFactStore::new(connect_sqlite_pool(&settings.database_url).await?)
+            };
             Ok((Arc::new(fact_store), Arc::new(MockMemoryEventStore::new())))
         }
         (FactBackend::Mock, EventBackend::Sqlite) => {
-            let event_store = SqliteMemoryEventStore::connect(&settings.database_url).await?;
+            let event_store = if is_sqlite_memory_database(settings) {
+                SqliteMemoryEventStore::connect(&settings.database_url).await?
+            } else {
+                SqliteMemoryEventStore::new(connect_sqlite_pool(&settings.database_url).await?)
+            };
             Ok((Arc::new(MockFactStore::new()), Arc::new(event_store)))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Postgres, EventBackend::Postgres) => {
             let postgres_url = require_postgres_url(settings)?;
-            let fact_store = PostgresFactStore::connect(&postgres_url).await?;
+            let fact_store = PostgresFactStore::new(connect_postgres_pool(&postgres_url).await?);
             let event_store = PostgresMemoryEventStore::new(fact_store.pool());
             Ok((Arc::new(fact_store), Arc::new(event_store)))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Postgres, EventBackend::Mock) => {
             let postgres_url = require_postgres_url(settings)?;
-            let fact_store = PostgresFactStore::connect(&postgres_url).await?;
+            let fact_store = PostgresFactStore::new(connect_postgres_pool(&postgres_url).await?);
             Ok((Arc::new(fact_store), Arc::new(MockMemoryEventStore::new())))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Mock, EventBackend::Postgres) => {
             let postgres_url = require_postgres_url(settings)?;
-            let event_store = PostgresMemoryEventStore::connect(&postgres_url).await?;
+            let event_store =
+                PostgresMemoryEventStore::new(connect_postgres_pool(&postgres_url).await?);
             Ok((Arc::new(MockFactStore::new()), Arc::new(event_store)))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Sqlite, EventBackend::Postgres) => {
-            let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
+            let fact_store = if is_sqlite_memory_database(settings) {
+                SqliteFactStore::connect(&settings.database_url).await?
+            } else {
+                SqliteFactStore::new(connect_sqlite_pool(&settings.database_url).await?)
+            };
             let postgres_url = require_postgres_url(settings)?;
-            let event_store = PostgresMemoryEventStore::connect(&postgres_url).await?;
+            let event_store =
+                PostgresMemoryEventStore::new(connect_postgres_pool(&postgres_url).await?);
             Ok((Arc::new(fact_store), Arc::new(event_store)))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Postgres, EventBackend::Sqlite) => {
             let postgres_url = require_postgres_url(settings)?;
-            let fact_store = PostgresFactStore::connect(&postgres_url).await?;
-            let event_store = SqliteMemoryEventStore::connect(&settings.database_url).await?;
+            let fact_store = PostgresFactStore::new(connect_postgres_pool(&postgres_url).await?);
+            let event_store = if is_sqlite_memory_database(settings) {
+                SqliteMemoryEventStore::connect(&settings.database_url).await?
+            } else {
+                SqliteMemoryEventStore::new(connect_sqlite_pool(&settings.database_url).await?)
+            };
             Ok((Arc::new(fact_store), Arc::new(event_store)))
         }
         #[cfg(not(feature = "postgres"))]

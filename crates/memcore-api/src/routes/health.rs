@@ -18,11 +18,32 @@ pub struct HealthResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ReadyResponse {
-    pub status: &'static str,
+    pub status: String,
     pub environment: String,
     pub storage_mode: String,
     pub vector_backend: String,
     pub fact_backend: String,
+    pub checks: ReadyChecks,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReadyChecks {
+    pub database: DatabaseReadyCheck,
+    pub providers: ProvidersReadyCheck,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DatabaseReadyCheck {
+    pub connected: bool,
+    pub migrations_clean: bool,
+    pub applied_migrations: Option<usize>,
+    pub pending_migrations: Option<usize>,
+    pub warning_count: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProvidersReadyCheck {
+    pub configured: bool,
 }
 
 pub async fn health() -> Json<HealthResponse> {
@@ -36,12 +57,26 @@ pub async fn health() -> Json<HealthResponse> {
 pub async fn ready(State(state): State<AppState>) -> Json<ReadyResponse> {
     let settings = &state.settings;
 
+    let storage = &state.storage_startup;
+    let migration_report = storage.migration_report.as_ref();
+    let ready = storage.database_connected && storage.migrations_clean;
+
     Json(ReadyResponse {
-        status: "ready",
+        status: if ready { "ready" } else { "not_ready" }.to_string(),
         environment: environment_label(&settings.environment).to_string(),
         storage_mode: storage_mode_label(&settings.storage_mode).to_string(),
         vector_backend: vector_backend_label(&settings.vector_backend).to_string(),
         fact_backend: fact_backend_label(&settings.fact_backend).to_string(),
+        checks: ReadyChecks {
+            database: DatabaseReadyCheck {
+                connected: storage.database_connected,
+                migrations_clean: storage.migrations_clean,
+                applied_migrations: migration_report.map(|report| report.applied_count),
+                pending_migrations: migration_report.map(|report| report.pending_count),
+                warning_count: storage.warnings.len(),
+            },
+            providers: ProvidersReadyCheck { configured: true },
+        },
     })
 }
 

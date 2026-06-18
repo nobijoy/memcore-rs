@@ -87,10 +87,7 @@ impl SqliteMemoryEventStore {
         }
         .map_err(|error| storage_error("failed to connect sqlite database", error))?;
 
-        sqlx::migrate!("./migrations/sqlite")
-            .run(&pool)
-            .await
-            .map_err(|error| storage_error("failed to run sqlite migrations", error))?;
+        crate::migrations::sqlite::run_sqlite_migrations(&pool).await?;
 
         Ok(Self::new(pool))
     }

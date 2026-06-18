@@ -154,10 +154,7 @@ impl SqliteBackgroundJobRunStore {
         }
         .map_err(|error| storage_error("connect sqlite background job run store", error))?;
 
-        sqlx::migrate!("./migrations/sqlite")
-            .run(&pool)
-            .await
-            .map_err(|error| storage_error("run sqlite migrations", error))?;
+        crate::migrations::sqlite::run_sqlite_migrations(&pool).await?;
 
         Ok(Self { pool })
     }

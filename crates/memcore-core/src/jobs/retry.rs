@@ -86,6 +86,7 @@ pub fn is_retryable_job_error(error: &MemcoreError) -> bool {
         | MemcoreError::BadRequest(_)
         | MemcoreError::NotFound(_)
         | MemcoreError::Conflict(_)
+        | MemcoreError::MigrationError(_)
         | MemcoreError::ValidationError(_)
         | MemcoreError::QuotaExceeded { .. } => false,
     }
