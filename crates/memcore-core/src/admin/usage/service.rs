@@ -4,7 +4,8 @@ use memcore_common::{MemcoreError, MemcoreResult};
 use crate::{ProviderUsagePersistedSummary, validate_event_date_range};
 
 use super::types::{
-    DEFAULT_ORG_USAGE_DASHBOARD_DAYS, MAX_ORG_USAGE_DASHBOARD_DAYS, ProviderUsageDashboardSummary,
+    DEFAULT_MEMORY_USAGE_SNAPSHOT_LIMIT, DEFAULT_ORG_USAGE_DASHBOARD_DAYS,
+    MAX_MEMORY_USAGE_SNAPSHOT_LIMIT, MAX_ORG_USAGE_DASHBOARD_DAYS, ProviderUsageDashboardSummary,
 };
 
 pub fn resolve_org_usage_window(
@@ -36,6 +37,20 @@ pub fn validate_org_usage_days(days: Option<u32>) -> MemcoreResult<u32> {
         ));
     }
     Ok(days)
+}
+
+pub fn validate_memory_usage_snapshot_limit(limit: usize) -> MemcoreResult<usize> {
+    if limit == 0 {
+        return Ok(DEFAULT_MEMORY_USAGE_SNAPSHOT_LIMIT);
+    }
+
+    if limit > MAX_MEMORY_USAGE_SNAPSHOT_LIMIT {
+        return Err(MemcoreError::ValidationError(format!(
+            "limit cannot exceed {MAX_MEMORY_USAGE_SNAPSHOT_LIMIT}"
+        )));
+    }
+
+    Ok(limit)
 }
 
 impl From<ProviderUsagePersistedSummary> for ProviderUsageDashboardSummary {

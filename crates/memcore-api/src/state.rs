@@ -10,8 +10,8 @@ use memcore_config::{
 };
 use memcore_core::{
     ApiKeyStore, ContextCacheConfig, EmbeddingProvider, FactStore, InMemoryContextCache,
-    LlmProvider, MemoryEngine, MemoryEventStore, OrgPlanStore, OrgQuotaLimits,
-    ProviderUsageAttributionSlot, ProviderUsageStore, VectorStore,
+    LlmProvider, MemoryEngine, MemoryEventStore, MemoryUsageSnapshotStore, OrgPlanStore,
+    OrgQuotaLimits, ProviderUsageAttributionSlot, ProviderUsageStore, VectorStore,
 };
 use memcore_providers::{
     CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, OpenAiClient,
@@ -31,14 +31,14 @@ use memcore_storage::QdrantVectorStore;
 use memcore_storage::RedisContextCache;
 use memcore_storage::SqliteProviderUsageStore;
 use memcore_storage::{
-    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockOrgPlanStore, MockProviderUsageStore,
-    MockVectorStore, SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore,
-    SqliteOrgPlanStore,
+    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockMemoryUsageSnapshotStore,
+    MockOrgPlanStore, MockProviderUsageStore, MockVectorStore, SqliteApiKeyStore, SqliteFactStore,
+    SqliteMemoryEventStore, SqliteMemoryUsageSnapshotStore, SqliteOrgPlanStore,
 };
 #[cfg(feature = "postgres")]
 use memcore_storage::{
-    PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore, PostgresOrgPlanStore,
-    PostgresProviderUsageStore,
+    PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore,
+    PostgresMemoryUsageSnapshotStore, PostgresOrgPlanStore, PostgresProviderUsageStore,
 };
 
 /// Default embedding dimensions for the mock embedding provider.
@@ -293,8 +293,16 @@ impl AppState {
     pub async fn initialize(settings: Settings) -> MemcoreResult<Self> {
         let wiring = ProviderWiring::from_settings(&settings).await?;
         let org_plan_store = create_org_plan_store(&settings).await?;
-        let memory_engine =
-            Arc::new(create_memory_engine(&settings, &wiring, org_plan_store.clone()).await?);
+        let memory_usage_snapshot_store = create_memory_usage_snapshot_store(&settings).await?;
+        let memory_engine = Arc::new(
+            create_memory_engine(
+                &settings,
+                &wiring,
+                org_plan_store.clone(),
+                memory_usage_snapshot_store,
+            )
+            .await?,
+        );
         let api_key_store = create_api_key_store(&settings).await?;
         Ok(Self {
             settings: settings.clone(),
@@ -319,6 +327,7 @@ impl AppState {
         {
             let wiring = ProviderWiring::for_mock_tests(&settings);
             let org_plan_store = Arc::new(MockOrgPlanStore::new());
+            let memory_usage_snapshot_store = Arc::new(MockMemoryUsageSnapshotStore::new());
             Self {
                 started_at: Utc::now(),
                 memory_engine: Arc::new(
@@ -326,6 +335,7 @@ impl AppState {
                         &settings,
                         &wiring,
                         org_plan_store.clone(),
+                        memory_usage_snapshot_store,
                     )
                     .expect("failed to create mock memory engine"),
                 ),
@@ -420,6 +430,7 @@ pub async fn create_memory_engine(
     settings: &Settings,
     wiring: &ProviderWiring,
     org_plan_store: Arc<dyn OrgPlanStore>,
+    memory_usage_snapshot_store: Arc<dyn MemoryUsageSnapshotStore>,
 ) -> MemcoreResult<MemoryEngine> {
     let (fact_store, event_store) = create_storage(settings).await?;
     let llm_provider = create_llm_provider(
@@ -441,6 +452,7 @@ pub async fn create_memory_engine(
             .with_usage_attribution(wiring.attribution_slot.clone())
             .with_provider_usage_store(wiring.usage_store.clone())
             .with_org_plan_store(org_plan_store)
+            .with_memory_usage_snapshot_store(Some(memory_usage_snapshot_store))
             .with_global_quota_limits(org_quota_limits_from_settings(settings))
             .with_audit_provider_info(
                 Some(llm_provider_name(settings)),
@@ -507,6 +519,35 @@ async fn create_org_plan_store(settings: &Settings) -> MemcoreResult<Arc<dyn Org
     }
 
     let store = SqliteOrgPlanStore::connect(&settings.database_url).await?;
+    Ok(Arc::new(store))
+}
+
+async fn create_memory_usage_snapshot_store(
+    settings: &Settings,
+) -> MemcoreResult<Arc<dyn MemoryUsageSnapshotStore>> {
+    if settings.fact_backend == FactBackend::Mock && settings.event_backend == EventBackend::Mock {
+        return Ok(Arc::new(MockMemoryUsageSnapshotStore::new()));
+    }
+
+    #[cfg(feature = "postgres")]
+    if settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres
+    {
+        let postgres_url = require_postgres_url(settings)?;
+        let store = PostgresMemoryUsageSnapshotStore::connect(&postgres_url).await?;
+        return Ok(Arc::new(store));
+    }
+
+    #[cfg(not(feature = "postgres"))]
+    if settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres
+    {
+        return Err(MemcoreError::ValidationError(
+            "Postgres storage requires the `postgres` cargo feature".to_string(),
+        ));
+    }
+
+    let store = SqliteMemoryUsageSnapshotStore::connect(&settings.database_url).await?;
     Ok(Arc::new(store))
 }
 
@@ -791,6 +832,7 @@ pub fn create_mock_memory_engine_with_wiring(
         settings,
         wiring,
         Arc::new(MockOrgPlanStore::new()),
+        Arc::new(MockMemoryUsageSnapshotStore::new()),
     )
 }
 
@@ -798,6 +840,7 @@ pub fn create_mock_memory_engine_with_wiring_and_org_plan_store(
     settings: &Settings,
     wiring: &ProviderWiring,
     org_plan_store: Arc<dyn OrgPlanStore>,
+    memory_usage_snapshot_store: Arc<dyn MemoryUsageSnapshotStore>,
 ) -> MemcoreResult<MemoryEngine> {
     apply_context_cache(
         MemoryEngine::new(
@@ -819,6 +862,7 @@ pub fn create_mock_memory_engine_with_wiring_and_org_plan_store(
         .with_usage_attribution(wiring.attribution_slot.clone())
         .with_provider_usage_store(wiring.usage_store.clone())
         .with_org_plan_store(org_plan_store)
+        .with_memory_usage_snapshot_store(Some(memory_usage_snapshot_store))
         .with_global_quota_limits(org_quota_limits_from_settings(settings))
         .with_audit_provider_info(
             Some(llm_provider_name(settings)),

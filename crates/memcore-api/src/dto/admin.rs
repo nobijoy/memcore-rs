@@ -2,13 +2,15 @@ use chrono::{DateTime, Utc};
 use memcore_common::MemcoreError;
 use memcore_config::Settings;
 use memcore_core::{
-    ContextCacheMetricsSnapshot, DEFAULT_LIST_ORG_USERS_LIMIT,
+    ContextCacheMetricsSnapshot, CreateMemoryUsageSnapshotInput, CreateMemoryUsageSnapshotOutput,
+    DEFAULT_LIST_ORG_USERS_LIMIT, DEFAULT_MEMORY_USAGE_SNAPSHOT_LIMIT,
     DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput,
     MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryEvent,
-    OrgMemoryUsageSummary, OrgPlanConfig, OrgPlanLimits, OrgPlanTier, OrgQuotaLimits,
-    OrgQuotaUsage, OrgSummaryInput, OrgSummaryOutput, OrgUsageDashboardInput,
-    OrgUsageDashboardOutput, OrgUserSummary, ProviderUsageDailyBucket, ProviderUsageDailyOutput,
-    ProviderUsageDashboardSummary, QuotaCheckResult, QuotaLimitKind, QuotaViolation,
+    MemoryUsageLatestSnapshot, MemoryUsageSnapshot, OrgMemoryUsageSummary, OrgPlanConfig,
+    OrgPlanLimits, OrgPlanTier, OrgQuotaLimits, OrgQuotaUsage, OrgSummaryInput, OrgSummaryOutput,
+    OrgUsageDashboardInput, OrgUsageDashboardOutput, OrgUserSummary, ProviderUsageDailyBucket,
+    ProviderUsageDailyOutput, ProviderUsageDashboardSummary, QueryMemoryUsageSnapshotsInput,
+    QueryMemoryUsageSnapshotsOutput, QuotaCheckResult, QuotaLimitKind, QuotaViolation,
     SearchOrgMemoryEventsOutput, resolve_org_usage_window, validate_org_plan_metadata,
 };
 use serde::{Deserialize, Serialize};
@@ -24,6 +26,10 @@ pub fn default_list_org_users_limit() -> usize {
 
 pub fn default_search_org_memory_events_limit() -> usize {
     DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT
+}
+
+pub fn default_memory_usage_snapshot_limit() -> usize {
+    DEFAULT_MEMORY_USAGE_SNAPSHOT_LIMIT
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -66,6 +72,20 @@ pub struct ProviderUsageDailyQueryParams {
     pub created_after: Option<String>,
     pub created_before: Option<String>,
     pub days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct CreateMemoryUsageSnapshotRequest {
+    pub captured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct QueryMemoryUsageSnapshotsParams {
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    #[serde(default = "default_memory_usage_snapshot_limit")]
+    pub limit: usize,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -152,6 +172,40 @@ pub struct OrgMemoryUsageSummaryResponse {
     pub total_memories: u64,
     pub active_memories: u64,
     pub deleted_memories: Option<u64>,
+    pub latest_snapshot: Option<MemoryUsageLatestSnapshotResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MemoryUsageLatestSnapshotResponse {
+    pub captured_at: DateTime<Utc>,
+    pub total_users: u64,
+    pub total_memories: u64,
+    pub active_memories: u64,
+    pub deleted_memories: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct CreateMemoryUsageSnapshotResponse {
+    pub status: &'static str,
+    pub snapshot: MemoryUsageSnapshotResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct QueryMemoryUsageSnapshotsResponse {
+    pub status: &'static str,
+    pub snapshots: Vec<MemoryUsageSnapshotResponse>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MemoryUsageSnapshotResponse {
+    pub id: Uuid,
+    pub org_id: String,
+    pub total_users: u64,
+    pub total_memories: u64,
+    pub active_memories: u64,
+    pub deleted_memories: Option<u64>,
+    pub captured_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -774,6 +828,58 @@ impl From<OrgMemoryUsageSummary> for OrgMemoryUsageSummaryResponse {
             total_memories: summary.total_memories,
             active_memories: summary.active_memories,
             deleted_memories: summary.deleted_memories,
+            latest_snapshot: summary
+                .latest_snapshot
+                .map(MemoryUsageLatestSnapshotResponse::from),
+        }
+    }
+}
+
+impl From<MemoryUsageLatestSnapshot> for MemoryUsageLatestSnapshotResponse {
+    fn from(snapshot: MemoryUsageLatestSnapshot) -> Self {
+        Self {
+            captured_at: snapshot.captured_at,
+            total_users: snapshot.total_users,
+            total_memories: snapshot.total_memories,
+            active_memories: snapshot.active_memories,
+            deleted_memories: snapshot.deleted_memories,
+        }
+    }
+}
+
+impl From<MemoryUsageSnapshot> for MemoryUsageSnapshotResponse {
+    fn from(snapshot: MemoryUsageSnapshot) -> Self {
+        Self {
+            id: snapshot.id,
+            org_id: snapshot.org_id,
+            total_users: snapshot.total_users,
+            total_memories: snapshot.total_memories,
+            active_memories: snapshot.active_memories,
+            deleted_memories: snapshot.deleted_memories,
+            captured_at: snapshot.captured_at,
+        }
+    }
+}
+
+impl From<CreateMemoryUsageSnapshotOutput> for CreateMemoryUsageSnapshotResponse {
+    fn from(output: CreateMemoryUsageSnapshotOutput) -> Self {
+        Self {
+            status: "success",
+            snapshot: output.snapshot.into(),
+        }
+    }
+}
+
+impl From<QueryMemoryUsageSnapshotsOutput> for QueryMemoryUsageSnapshotsResponse {
+    fn from(output: QueryMemoryUsageSnapshotsOutput) -> Self {
+        Self {
+            status: "success",
+            snapshots: output
+                .snapshots
+                .into_iter()
+                .map(MemoryUsageSnapshotResponse::from)
+                .collect(),
+            next_cursor: output.next_cursor,
         }
     }
 }
@@ -902,6 +1008,47 @@ pub fn org_usage_dashboard_input(
     })
 }
 
+impl CreateMemoryUsageSnapshotRequest {
+    pub fn into_input(
+        self,
+        org_id: String,
+    ) -> Result<CreateMemoryUsageSnapshotInput, MemcoreError> {
+        let captured_at = self
+            .captured_at
+            .as_deref()
+            .map(parse_rfc3339_utc)
+            .transpose()
+            .map_err(|_| {
+                MemcoreError::ValidationError("invalid captured_at timestamp".to_string())
+            })?;
+
+        Ok(CreateMemoryUsageSnapshotInput {
+            org_id,
+            captured_at,
+        })
+    }
+}
+
+pub fn query_memory_usage_snapshots_input(
+    org_id: String,
+    query: QueryMemoryUsageSnapshotsParams,
+) -> Result<QueryMemoryUsageSnapshotsInput, MemcoreError> {
+    let (created_after, created_before) = crate::dto::memory_events::parse_event_date_filters(
+        query.created_after.as_ref(),
+        query.created_before.as_ref(),
+    )?;
+    let limit = memcore_core::validate_memory_usage_snapshot_limit(query.limit)?;
+    let cursor = memcore_core::parse_optional_cursor(query.cursor)?;
+
+    Ok(QueryMemoryUsageSnapshotsInput {
+        org_id,
+        created_after,
+        created_before,
+        limit,
+        cursor,
+    })
+}
+
 pub fn parse_org_usage_window(
     created_after: Option<&String>,
     created_before: Option<&String>,
@@ -910,6 +1057,10 @@ pub fn parse_org_usage_window(
     let (created_after, created_before) =
         crate::dto::memory_events::parse_event_date_filters(created_after, created_before)?;
     resolve_org_usage_window(created_after, created_before, days, Utc::now())
+}
+
+fn parse_rfc3339_utc(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
+    DateTime::parse_from_rfc3339(value).map(|parsed| parsed.with_timezone(&Utc))
 }
 
 pub fn validate_list_org_users_limit(limit: usize) -> Result<(), memcore_common::MemcoreError> {

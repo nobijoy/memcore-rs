@@ -6,12 +6,13 @@ use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, ApplyProviderUsageRetentionRequest,
     ApplyProviderUsageRetentionResponse, ApplyRetentionRequest, ApplyRetentionResponse,
     BuildContextRequest, BuildContextResponse, ContextCacheMetricsResponse, CreateApiKeyRequest,
-    CreateApiKeyResponse, DeleteMemoryResponse, DeleteOrgPlanResponse, ExportUserResponse,
-    ForgetUserResponse, GetOrgPlanResponse, ImportUserDataRequest, ImportUserDataResponse,
-    ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse, ListOrgUsersResponse,
-    OrgQuotaStatusResponse, OrgSummaryResponse, OrgUsageDashboardResponse,
-    ProviderUsageDailyResponse, ProviderUsageResponse, RevokeApiKeyResponse, SearchMemoryRequest,
-    SearchMemoryResponse, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
+    CreateApiKeyResponse, CreateMemoryUsageSnapshotRequest, CreateMemoryUsageSnapshotResponse,
+    DeleteMemoryResponse, DeleteOrgPlanResponse, ExportUserResponse, ForgetUserResponse,
+    GetOrgPlanResponse, ImportUserDataRequest, ImportUserDataResponse, ListApiKeysResponse,
+    ListMemoriesResponse, ListMemoryEventsResponse, ListOrgUsersResponse, OrgQuotaStatusResponse,
+    OrgSummaryResponse, OrgUsageDashboardResponse, ProviderUsageDailyResponse,
+    ProviderUsageResponse, QueryMemoryUsageSnapshotsResponse, RevokeApiKeyResponse,
+    SearchMemoryRequest, SearchMemoryResponse, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
     UpsertOrgPlanResponse,
 };
 use crate::response::ErrorBody;
@@ -560,6 +561,51 @@ pub fn get_provider_usage() {}
     )
 )]
 pub fn get_org_usage_dashboard() {}
+
+/// Create an org-scoped memory usage snapshot from current aggregate counts.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/org/usage/memory/snapshots",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    request_body = CreateMemoryUsageSnapshotRequest,
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Created memory usage snapshot", body = CreateMemoryUsageSnapshotResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn create_memory_usage_snapshot() {}
+
+/// List org-scoped memory usage snapshots. Does not expose memory content.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/usage/memory/snapshots",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+        ("created_after" = Option<String>, Query, description = "Inclusive RFC3339 lower bound"),
+        ("created_before" = Option<String>, Query, description = "Exclusive RFC3339 upper bound"),
+        ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
+        ("cursor" = Option<String>, Query, description = "Pagination cursor"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Memory usage snapshots", body = QueryMemoryUsageSnapshotsResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn query_memory_usage_snapshots() {}
 
 /// Daily provider usage buckets over a UTC time window. Does not expose prompts or memory content.
 #[utoipa::path(

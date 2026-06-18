@@ -85,6 +85,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
             get(admin::get_org_usage_dashboard),
         )
         .route(
+            "/api/v1/admin/org/usage/memory/snapshots",
+            post(admin::create_memory_usage_snapshot).get(admin::query_memory_usage_snapshots),
+        )
+        .route(
             "/api/v1/admin/org/usage/provider/daily",
             get(admin::get_provider_usage_daily),
         )

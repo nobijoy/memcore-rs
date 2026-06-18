@@ -17,13 +17,16 @@ pub mod ranking;
 pub mod retention;
 
 pub use admin::{
-    DEFAULT_LIST_ORG_USERS_LIMIT, DEFAULT_ORG_USAGE_DASHBOARD_DAYS,
+    CreateMemoryUsageSnapshotInput, CreateMemoryUsageSnapshotOutput, DEFAULT_LIST_ORG_USERS_LIMIT,
+    DEFAULT_MEMORY_USAGE_SNAPSHOT_LIMIT, DEFAULT_ORG_USAGE_DASHBOARD_DAYS,
     DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput,
-    MAX_LIST_ORG_USERS_LIMIT, MAX_ORG_USAGE_DASHBOARD_DAYS, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
+    MAX_LIST_ORG_USERS_LIMIT, MAX_MEMORY_USAGE_SNAPSHOT_LIMIT, MAX_ORG_USAGE_DASHBOARD_DAYS,
+    MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryUsageLatestSnapshot, MemoryUsageSnapshot,
     OrgMemoryUsageSummary, OrgSummaryInput, OrgSummaryOutput, OrgUsageDashboardInput,
     OrgUsageDashboardOutput, ProviderUsageDailyBucket, ProviderUsageDailyInput,
-    ProviderUsageDailyOutput, ProviderUsageDashboardSummary, SearchOrgMemoryEventsInput,
-    SearchOrgMemoryEventsOutput, empty_provider_usage_summary, resolve_org_usage_window,
+    ProviderUsageDailyOutput, ProviderUsageDashboardSummary, QueryMemoryUsageSnapshotsInput,
+    QueryMemoryUsageSnapshotsOutput, SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
+    empty_provider_usage_summary, resolve_org_usage_window, validate_memory_usage_snapshot_limit,
     validate_org_usage_days,
 };
 pub use context::{
@@ -78,13 +81,13 @@ pub use ports::{
     ApiKeyListQuery, ApiKeyStore, DEFAULT_MEMORY_EVENT_LIST_LIMIT, DEFAULT_PROVIDER_USAGE_LIMIT,
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MAX_MEMORY_EVENT_LIST_LIMIT, MAX_PROVIDER_USAGE_LIMIT, MemoryEventQuery,
-    MemoryEventStore, MemoryMessage, MessageRole, OrgMemoryEventQuery, OrgPlanStore,
-    OrgUserListQuery, OrgUserSummary, ProviderCallStatus, ProviderUsageAttribution,
-    ProviderUsageAttributionSlot, ProviderUsageCapability, ProviderUsageDailyQuery,
-    ProviderUsageEventRecord, ProviderUsagePersistedSummary, ProviderUsageQuery,
-    ProviderUsageQueryResult, ProviderUsageStore, RetentionPruneResult, SummarizationInput,
-    VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore, validate_event_date_range,
-    validate_provider_usage_limit,
+    MemoryEventStore, MemoryMessage, MemoryUsageSnapshotQuery, MemoryUsageSnapshotQueryResult,
+    MemoryUsageSnapshotStore, MessageRole, OrgMemoryEventQuery, OrgPlanStore, OrgUserListQuery,
+    OrgUserSummary, ProviderCallStatus, ProviderUsageAttribution, ProviderUsageAttributionSlot,
+    ProviderUsageCapability, ProviderUsageDailyQuery, ProviderUsageEventRecord,
+    ProviderUsagePersistedSummary, ProviderUsageQuery, ProviderUsageQueryResult,
+    ProviderUsageStore, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery,
+    VectorSearchResult, VectorStore, validate_event_date_range, validate_provider_usage_limit,
 };
 pub use privacy::PiiRedactor;
 pub use quota::{

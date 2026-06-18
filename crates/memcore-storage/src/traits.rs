@@ -1,3 +1,4 @@
 pub use memcore_core::ports::{
-    ApiKeyStore, FactStore, MemoryEventStore, OrgPlanStore, ProviderUsageStore, VectorStore,
+    ApiKeyStore, FactStore, MemoryEventStore, MemoryUsageSnapshotStore, OrgPlanStore,
+    ProviderUsageStore, VectorStore,
 };

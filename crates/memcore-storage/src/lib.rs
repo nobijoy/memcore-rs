@@ -2,6 +2,7 @@ pub mod context_cache;
 pub mod keyword_search;
 #[cfg(feature = "lancedb")]
 pub mod lancedb;
+pub mod memory_usage;
 pub mod mocks;
 pub mod org_plan;
 pub mod pagination;
@@ -23,6 +24,11 @@ pub use context_cache::{
 };
 #[cfg(feature = "lancedb")]
 pub use lancedb::LanceDbVectorStore;
+pub use memory_usage::MockMemoryUsageSnapshotStore;
+#[cfg(feature = "postgres")]
+pub use memory_usage::PostgresMemoryUsageSnapshotStore;
+#[cfg(feature = "sqlite")]
+pub use memory_usage::SqliteMemoryUsageSnapshotStore;
 pub use mocks::{MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockVectorStore};
 pub use org_plan::MockOrgPlanStore;
 #[cfg(feature = "postgres")]
@@ -42,6 +48,7 @@ pub use queries::{FactSearchQuery, MemoryEventQuery};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore};
 pub use traits::{
-    ApiKeyStore, FactStore, MemoryEventStore, OrgPlanStore, ProviderUsageStore, VectorStore,
+    ApiKeyStore, FactStore, MemoryEventStore, MemoryUsageSnapshotStore, OrgPlanStore,
+    ProviderUsageStore, VectorStore,
 };
 pub use vector::{VectorRecord, VectorSearchQuery, VectorSearchResult};

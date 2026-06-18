@@ -1,10 +1,14 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
 
-use crate::{OrgPlanConfig, ProviderUsageCapability, QuotaCheckResult};
+use crate::{OrgPlanConfig, PageCursor, ProviderUsageCapability, QuotaCheckResult};
 
 pub const DEFAULT_ORG_USAGE_DASHBOARD_DAYS: u32 = 30;
 pub const MAX_ORG_USAGE_DASHBOARD_DAYS: u32 = 90;
+pub const DEFAULT_MEMORY_USAGE_SNAPSHOT_LIMIT: usize = 50;
+pub const MAX_MEMORY_USAGE_SNAPSHOT_LIMIT: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrgUsageDashboardInput {
@@ -31,6 +35,28 @@ pub struct OrgMemoryUsageSummary {
     pub total_memories: u64,
     pub active_memories: u64,
     pub deleted_memories: Option<u64>,
+    pub latest_snapshot: Option<MemoryUsageLatestSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryUsageLatestSnapshot {
+    pub captured_at: DateTime<Utc>,
+    pub total_users: u64,
+    pub total_memories: u64,
+    pub active_memories: u64,
+    pub deleted_memories: Option<u64>,
+}
+
+impl From<&MemoryUsageSnapshot> for MemoryUsageLatestSnapshot {
+    fn from(snapshot: &MemoryUsageSnapshot) -> Self {
+        Self {
+            captured_at: snapshot.captured_at,
+            total_users: snapshot.total_users,
+            total_memories: snapshot.total_memories,
+            active_memories: snapshot.active_memories,
+            deleted_memories: snapshot.deleted_memories,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -99,4 +125,42 @@ pub struct ProviderUsageDailyOutput {
     pub window_start: DateTime<Utc>,
     pub window_end: DateTime<Utc>,
     pub buckets: Vec<ProviderUsageDailyBucket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryUsageSnapshot {
+    pub id: Uuid,
+    pub org_id: String,
+    pub total_users: u64,
+    pub total_memories: u64,
+    pub active_memories: u64,
+    pub deleted_memories: Option<u64>,
+    pub captured_at: DateTime<Utc>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateMemoryUsageSnapshotInput {
+    pub org_id: String,
+    pub captured_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateMemoryUsageSnapshotOutput {
+    pub snapshot: MemoryUsageSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryMemoryUsageSnapshotsInput {
+    pub org_id: String,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
+    pub limit: usize,
+    pub cursor: Option<PageCursor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueryMemoryUsageSnapshotsOutput {
+    pub snapshots: Vec<MemoryUsageSnapshot>,
+    pub next_cursor: Option<String>,
 }

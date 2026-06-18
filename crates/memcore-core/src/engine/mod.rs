@@ -6,11 +6,14 @@ use chrono::{Duration, Utc};
 use memcore_common::MemcoreResult;
 
 use crate::admin::{
-    DEFAULT_LIST_ORG_USERS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput, MAX_LIST_ORG_USERS_LIMIT,
-    MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, OrgMemoryUsageSummary, OrgSummaryInput, OrgSummaryOutput,
-    OrgUsageDashboardInput, OrgUsageDashboardOutput, ProviderUsageDailyInput,
-    ProviderUsageDailyOutput, SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
-    empty_provider_usage_summary,
+    CreateMemoryUsageSnapshotInput, CreateMemoryUsageSnapshotOutput, DEFAULT_LIST_ORG_USERS_LIMIT,
+    ListOrgUsersInput, ListOrgUsersOutput, MAX_LIST_ORG_USERS_LIMIT,
+    MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryUsageLatestSnapshot, MemoryUsageSnapshot,
+    OrgMemoryUsageSummary, OrgSummaryInput, OrgSummaryOutput, OrgUsageDashboardInput,
+    OrgUsageDashboardOutput, ProviderUsageDailyInput, ProviderUsageDailyOutput,
+    QueryMemoryUsageSnapshotsInput, QueryMemoryUsageSnapshotsOutput, SearchOrgMemoryEventsInput,
+    SearchOrgMemoryEventsOutput, empty_provider_usage_summary,
+    validate_memory_usage_snapshot_limit,
 };
 use crate::audit::{
     build_add_event, build_delete_event, build_forget_user_event, build_import_replace_event,
@@ -34,9 +37,10 @@ use crate::pagination::{PageCursor, build_page, parse_optional_cursor};
 use crate::ports::{DEFAULT_PROVIDER_USAGE_LIMIT, MemoryMessage};
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgPlanStore,
-    OrgUserListQuery, ProviderUsageAttributionSlot, ProviderUsageDailyQuery, ProviderUsageQuery,
-    ProviderUsageStore, VectorRecord, VectorStore, validate_event_date_range,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, MemoryUsageSnapshotQuery,
+    MemoryUsageSnapshotStore, OrgMemoryEventQuery, OrgPlanStore, OrgUserListQuery,
+    ProviderUsageAttributionSlot, ProviderUsageDailyQuery, ProviderUsageQuery, ProviderUsageStore,
+    VectorRecord, VectorStore, validate_event_date_range,
 };
 use crate::privacy::redact_messages_for_extraction;
 use crate::quota::{
@@ -90,6 +94,7 @@ pub struct MemoryEngine {
     usage_attribution: Option<Arc<ProviderUsageAttributionSlot>>,
     provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
     org_plan_store: Option<Arc<dyn OrgPlanStore>>,
+    memory_usage_snapshot_store: Option<Arc<dyn MemoryUsageSnapshotStore>>,
     global_quota_limits: OrgQuotaLimits,
 }
 
@@ -125,6 +130,7 @@ impl MemoryEngine {
             usage_attribution: None,
             provider_usage_store: None,
             org_plan_store: None,
+            memory_usage_snapshot_store: None,
             global_quota_limits: OrgQuotaLimits::disabled(),
         }
     }
@@ -207,6 +213,14 @@ impl MemoryEngine {
 
     pub fn with_provider_usage_store(mut self, store: Option<Arc<dyn ProviderUsageStore>>) -> Self {
         self.provider_usage_store = store;
+        self
+    }
+
+    pub fn with_memory_usage_snapshot_store(
+        mut self,
+        store: Option<Arc<dyn MemoryUsageSnapshotStore>>,
+    ) -> Self {
+        self.memory_usage_snapshot_store = store;
         self
     }
 
@@ -994,11 +1008,13 @@ impl MemoryEngine {
             .await?;
 
         let active_memories = self.fact_store.count_facts_by_org(&input.org_id).await? as u64;
+        let latest_snapshot = self.latest_memory_usage_snapshot(&input.org_id).await?;
         let memory = OrgMemoryUsageSummary {
             total_users: self.fact_store.count_users_by_org(&input.org_id).await? as u64,
             total_memories: active_memories,
             active_memories,
             deleted_memories: None,
+            latest_snapshot,
         };
 
         let provider = match &self.provider_usage_store {
@@ -1032,6 +1048,78 @@ impl MemoryEngine {
             memory,
             provider,
         })
+    }
+
+    pub async fn create_memory_usage_snapshot(
+        &self,
+        input: CreateMemoryUsageSnapshotInput,
+    ) -> MemcoreResult<CreateMemoryUsageSnapshotOutput> {
+        validate_org_id(&input.org_id)?;
+        let store = self.memory_usage_snapshot_store()?;
+
+        let active_memories = self.fact_store.count_facts_by_org(&input.org_id).await? as u64;
+        let snapshot = MemoryUsageSnapshot {
+            id: Uuid::new_v4(),
+            org_id: input.org_id.clone(),
+            total_users: self.fact_store.count_users_by_org(&input.org_id).await? as u64,
+            total_memories: active_memories,
+            active_memories,
+            deleted_memories: None,
+            captured_at: input.captured_at.unwrap_or_else(Utc::now),
+            metadata: None,
+        };
+
+        let snapshot = store.insert_snapshot(snapshot).await?;
+        Ok(CreateMemoryUsageSnapshotOutput { snapshot })
+    }
+
+    pub async fn query_memory_usage_snapshots(
+        &self,
+        input: QueryMemoryUsageSnapshotsInput,
+    ) -> MemcoreResult<QueryMemoryUsageSnapshotsOutput> {
+        validate_org_id(&input.org_id)?;
+        validate_event_date_range(input.created_after, input.created_before)?;
+        let limit = validate_memory_usage_snapshot_limit(input.limit)?;
+        let store = self.memory_usage_snapshot_store()?;
+
+        let result = store
+            .query_snapshots(MemoryUsageSnapshotQuery {
+                org_id: input.org_id,
+                created_after: input.created_after,
+                created_before: input.created_before,
+                limit,
+                cursor: input.cursor,
+            })
+            .await?;
+
+        Ok(QueryMemoryUsageSnapshotsOutput {
+            snapshots: result.snapshots,
+            next_cursor: result.next_cursor,
+        })
+    }
+
+    async fn latest_memory_usage_snapshot(
+        &self,
+        org_id: &str,
+    ) -> MemcoreResult<Option<MemoryUsageLatestSnapshot>> {
+        let Some(store) = &self.memory_usage_snapshot_store else {
+            return Ok(None);
+        };
+
+        let result = store
+            .query_snapshots(MemoryUsageSnapshotQuery {
+                org_id: org_id.to_string(),
+                created_after: None,
+                created_before: None,
+                limit: 1,
+                cursor: None,
+            })
+            .await?;
+
+        Ok(result
+            .snapshots
+            .first()
+            .map(MemoryUsageLatestSnapshot::from))
     }
 
     pub async fn get_provider_usage_daily(
@@ -1343,6 +1431,14 @@ impl MemoryEngine {
                 }
             }
         }
+    }
+
+    fn memory_usage_snapshot_store(&self) -> MemcoreResult<&Arc<dyn MemoryUsageSnapshotStore>> {
+        self.memory_usage_snapshot_store.as_ref().ok_or_else(|| {
+            memcore_common::MemcoreError::StorageError(
+                "memory usage snapshot store is not configured".to_string(),
+            )
+        })
     }
 }
 

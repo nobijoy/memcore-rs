@@ -2,13 +2,17 @@ use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
 use memcore_core::{
-    Fact, FactStore, GetOrgQuotaStatusInput, MemoryEngine, MemorySource, MemoryType, OrgPlanConfig,
-    OrgPlanLimits, OrgPlanStore, OrgPlanTier, OrgQuotaLimits, OrgUsageDashboardInput,
-    ProviderCallStatus, ProviderUsageCapability, ProviderUsageDailyInput, ProviderUsageEventRecord,
-    ProviderUsageStore, QuotaLimitSource, TenantContext,
+    CreateMemoryUsageSnapshotInput, Fact, FactStore, GetOrgQuotaStatusInput, MemoryEngine,
+    MemorySource, MemoryType, OrgPlanConfig, OrgPlanLimits, OrgPlanStore, OrgPlanTier,
+    OrgQuotaLimits, OrgUsageDashboardInput, ProviderCallStatus, ProviderUsageCapability,
+    ProviderUsageDailyInput, ProviderUsageEventRecord, ProviderUsageStore,
+    QueryMemoryUsageSnapshotsInput, QuotaLimitSource, TenantContext,
 };
 use memcore_providers::{MockEmbeddingProvider, MockLlmProvider};
-use memcore_storage::{MockFactStore, MockOrgPlanStore, MockProviderUsageStore, MockVectorStore};
+use memcore_storage::{
+    MockFactStore, MockMemoryUsageSnapshotStore, MockOrgPlanStore, MockProviderUsageStore,
+    MockVectorStore,
+};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -34,6 +38,7 @@ fn engine(
     )
     .with_provider_usage_store(usage_store)
     .with_org_plan_store(plan_store)
+    .with_memory_usage_snapshot_store(Some(Arc::new(MockMemoryUsageSnapshotStore::new())))
     .with_global_quota_limits(quota_limits)
 }
 
@@ -202,6 +207,110 @@ async fn dashboard_combines_plan_quota_memory_and_provider_summary() {
     let body = serde_json::to_string(&output).expect("json");
     assert!(!body.contains("secret memory"));
     assert!(!body.contains("another secret"));
+}
+
+#[tokio::test]
+async fn create_and_query_memory_usage_snapshots_are_org_scoped() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let plan_store = Arc::new(MockOrgPlanStore::new());
+    let org_id = "org_snapshots";
+    let captured_at = Utc.with_ymd_and_hms(2026, 6, 18, 10, 0, 0).unwrap();
+
+    insert_fact(&fact_store, &tenant(org_id, "user_a"), "private memory").await;
+    insert_fact(
+        &fact_store,
+        &tenant(org_id, "user_b"),
+        "another private memory",
+    )
+    .await;
+    insert_fact(
+        &fact_store,
+        &tenant("org_other", "user_x"),
+        "other private memory",
+    )
+    .await;
+
+    let engine = engine(fact_store, None, plan_store, limits(false, 0));
+    let created = engine
+        .create_memory_usage_snapshot(CreateMemoryUsageSnapshotInput {
+            org_id: org_id.to_string(),
+            captured_at: Some(captured_at),
+        })
+        .await
+        .expect("create snapshot");
+
+    assert_eq!(created.snapshot.org_id, org_id);
+    assert_eq!(created.snapshot.total_users, 2);
+    assert_eq!(created.snapshot.total_memories, 2);
+    assert_eq!(created.snapshot.active_memories, 2);
+    assert_eq!(created.snapshot.deleted_memories, None);
+    assert_eq!(created.snapshot.metadata, None);
+
+    engine
+        .create_memory_usage_snapshot(CreateMemoryUsageSnapshotInput {
+            org_id: "org_other".to_string(),
+            captured_at: Some(captured_at + chrono::Duration::days(1)),
+        })
+        .await
+        .expect("other snapshot");
+
+    let output = engine
+        .query_memory_usage_snapshots(QueryMemoryUsageSnapshotsInput {
+            org_id: org_id.to_string(),
+            created_after: Some(captured_at - chrono::Duration::seconds(1)),
+            created_before: Some(captured_at + chrono::Duration::seconds(1)),
+            limit: 10,
+            cursor: None,
+        })
+        .await
+        .expect("query snapshots");
+
+    assert_eq!(output.snapshots.len(), 1);
+    assert_eq!(output.snapshots[0].id, created.snapshot.id);
+
+    let body = serde_json::to_string(&output).expect("json");
+    assert!(!body.contains("private memory"));
+}
+
+#[tokio::test]
+async fn dashboard_includes_latest_memory_usage_snapshot() {
+    let fact_store = Arc::new(MockFactStore::new());
+    let plan_store = Arc::new(MockOrgPlanStore::new());
+    let org_id = "org_latest_snapshot";
+    let older = Utc.with_ymd_and_hms(2026, 6, 17, 10, 0, 0).unwrap();
+    let newer = Utc.with_ymd_and_hms(2026, 6, 18, 10, 0, 0).unwrap();
+
+    insert_fact(&fact_store, &tenant(org_id, "user_a"), "private memory").await;
+
+    let engine = engine(fact_store, None, plan_store, limits(false, 0));
+    engine
+        .create_memory_usage_snapshot(CreateMemoryUsageSnapshotInput {
+            org_id: org_id.to_string(),
+            captured_at: Some(older),
+        })
+        .await
+        .expect("older snapshot");
+    let latest = engine
+        .create_memory_usage_snapshot(CreateMemoryUsageSnapshotInput {
+            org_id: org_id.to_string(),
+            captured_at: Some(newer),
+        })
+        .await
+        .expect("newer snapshot");
+
+    let output = engine
+        .get_org_usage_dashboard(OrgUsageDashboardInput {
+            org_id: org_id.to_string(),
+            created_after: older - chrono::Duration::days(1),
+            created_before: newer + chrono::Duration::days(1),
+        })
+        .await
+        .expect("dashboard");
+
+    let latest_snapshot = output.memory.latest_snapshot.expect("latest snapshot");
+    assert_eq!(latest_snapshot.captured_at, latest.snapshot.captured_at);
+    assert_eq!(latest_snapshot.total_memories, 1);
+    assert_eq!(latest_snapshot.active_memories, 1);
 }
 
 #[tokio::test]

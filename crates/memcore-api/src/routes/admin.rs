@@ -9,16 +9,19 @@ use memcore_core::{
 use uuid::Uuid;
 
 use crate::dto::{
-    ContextCacheMetricsResponse, DeleteOrgPlanResponse, GetOrgPlanResponse, ListOrgUsersQuery,
-    ListOrgUsersResponse, OrgQuotaStatusResponse, OrgQuotasQuery, OrgSummaryResponse,
-    OrgUsageDashboardResponse, OrgUsageDateRangeQuery, ProviderUsageDailyQueryParams,
-    ProviderUsageDailyResponse, ProviderUsageQueryParams, ProviderUsageResponse,
+    ContextCacheMetricsResponse, CreateMemoryUsageSnapshotRequest,
+    CreateMemoryUsageSnapshotResponse, DeleteOrgPlanResponse, GetOrgPlanResponse,
+    ListOrgUsersQuery, ListOrgUsersResponse, OrgQuotaStatusResponse, OrgQuotasQuery,
+    OrgSummaryResponse, OrgUsageDashboardResponse, OrgUsageDateRangeQuery,
+    ProviderUsageDailyQueryParams, ProviderUsageDailyResponse, ProviderUsageQueryParams,
+    ProviderUsageResponse, QueryMemoryUsageSnapshotsParams, QueryMemoryUsageSnapshotsResponse,
     SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
     UpsertOrgPlanResponse, context_cache_metrics_response, get_org_plan_response,
     org_quota_status_response, org_summary_input, org_usage_dashboard_input,
     parse_event_date_filters, parse_keyword_query, parse_memory_event_operation_label,
     parse_org_usage_window, parse_provider_usage_capability, provider_usage_memory_response,
-    provider_usage_persisted_response, upsert_org_plan_response, validate_list_org_users_limit,
+    provider_usage_persisted_response, query_memory_usage_snapshots_input,
+    upsert_org_plan_response, validate_list_org_users_limit,
     validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
@@ -280,6 +283,48 @@ pub async fn get_org_usage_dashboard(
     let output = state.memory_engine.get_org_usage_dashboard(input).await?;
 
     Ok(Json(OrgUsageDashboardResponse::from(output)))
+}
+
+pub async fn create_memory_usage_snapshot(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    body: Option<Json<CreateMemoryUsageSnapshotRequest>>,
+) -> Result<Json<CreateMemoryUsageSnapshotResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite],
+    )?;
+
+    let body = body
+        .map(|Json(body)| body)
+        .unwrap_or(CreateMemoryUsageSnapshotRequest { captured_at: None });
+    let output = state
+        .memory_engine
+        .create_memory_usage_snapshot(body.into_input(organization.org_id)?)
+        .await?;
+
+    Ok(Json(CreateMemoryUsageSnapshotResponse::from(output)))
+}
+
+pub async fn query_memory_usage_snapshots(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Query(query): Query<QueryMemoryUsageSnapshotsParams>,
+) -> Result<Json<QueryMemoryUsageSnapshotsResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    let input = query_memory_usage_snapshots_input(organization.org_id, query)?;
+    let output = state
+        .memory_engine
+        .query_memory_usage_snapshots(input)
+        .await?;
+
+    Ok(Json(QueryMemoryUsageSnapshotsResponse::from(output)))
 }
 
 pub async fn get_provider_usage_daily(

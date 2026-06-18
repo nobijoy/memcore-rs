@@ -36,6 +36,29 @@ fn get_request(path: &str, org_id: Option<&str>, with_auth: bool) -> Request<Bod
     builder.body(Body::empty()).expect("request")
 }
 
+fn post_request(
+    path: &str,
+    org_id: Option<&str>,
+    with_auth: bool,
+    body: Option<serde_json::Value>,
+) -> Request<Body> {
+    let mut builder = Request::builder().method("POST").uri(path);
+    if let Some(org_id) = org_id {
+        builder = builder.header("X-Organization-ID", org_id);
+    }
+    if with_auth {
+        let (name, value) = authorization_header();
+        builder = builder.header(name, value);
+    }
+    match body {
+        Some(body) => builder
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request"),
+        None => builder.body(Body::empty()).expect("request"),
+    }
+}
+
 async fn response_parts(
     app: axum::Router,
     request: Request<Body>,
@@ -248,6 +271,183 @@ async fn dashboard_date_validation_errors_use_existing_error_style() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["error"]["message"], "invalid created_after timestamp");
+}
+
+#[tokio::test]
+async fn memory_snapshot_endpoints_require_auth_and_org_header() {
+    let app = create_app(AppState::new(Settings::default()));
+    let (status, _, _) = response_parts(
+        app,
+        post_request(
+            "/api/v1/admin/org/usage/memory/snapshots",
+            Some(ORG_ID),
+            false,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let app = create_app(AppState::new(Settings::default()));
+    let (status, _, _) = response_parts(
+        app,
+        get_request("/api/v1/admin/org/usage/memory/snapshots", None, true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn memory_snapshot_endpoints_require_admin_scopes_in_database_auth_mode() {
+    let mut settings = Settings::sqlite_memory();
+    settings.auth_mode = AuthMode::Database;
+    settings.api_key_pepper = Some(API_KEY_PEPPER.to_string());
+
+    let state = AppState::initialize(settings).await.expect("initialize");
+    state
+        .api_key_store
+        .insert_api_key(ApiKeyRecord {
+            id: Uuid::new_v4(),
+            org_id: ORG_ID.to_string(),
+            name: "memory-only".to_string(),
+            key_hash: hash_api_key(API_KEY_PEPPER, RAW_API_KEY),
+            scopes: vec![ApiKeyScope::MemoryRead],
+            created_at: Utc::now(),
+            revoked_at: None,
+        })
+        .await
+        .expect("insert key");
+
+    let app = create_app(state);
+    let create_request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/admin/org/usage/memory/snapshots")
+        .header("X-Organization-ID", ORG_ID)
+        .header("Authorization", format!("Bearer {RAW_API_KEY}"))
+        .body(Body::empty())
+        .expect("request");
+    let (status, _, _) = response_parts(app.clone(), create_request).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let list_request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/admin/org/usage/memory/snapshots")
+        .header("X-Organization-ID", ORG_ID)
+        .header("Authorization", format!("Bearer {RAW_API_KEY}"))
+        .body(Body::empty())
+        .expect("request");
+    let (status, _, _) = response_parts(app, list_request).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn memory_snapshot_create_list_and_dashboard_latest_work_without_exposing_content() {
+    let (settings, engine, store) = persistent_state();
+    add_memory(&engine, "snapshot private memory").await;
+    let app = create_app(AppState::with_memory_engine_provider_usage_and_store(
+        settings,
+        engine,
+        memcore_providers::InMemoryProviderUsageRecorder::new(),
+        Some(store),
+    ));
+
+    let older_body = json!({ "captured_at": "2026-06-17T10:00:00Z" });
+    let newer_body = json!({ "captured_at": "2026-06-18T10:00:00Z" });
+    let (status, json, body) = response_parts(
+        app.clone(),
+        post_request(
+            "/api/v1/admin/org/usage/memory/snapshots",
+            Some(ORG_ID),
+            true,
+            Some(older_body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["snapshot"]["org_id"], ORG_ID);
+    assert_eq!(json["snapshot"]["total_users"], 1);
+    assert_eq!(json["snapshot"]["active_memories"], 1);
+    assert!(!body.contains("snapshot private memory"));
+
+    let (status, _, _) = response_parts(
+        app.clone(),
+        post_request(
+            "/api/v1/admin/org/usage/memory/snapshots",
+            Some(ORG_ID),
+            true,
+            Some(newer_body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let list_path = "/api/v1/admin/org/usage/memory/snapshots?created_after=2026-06-17T00:00:00Z&created_before=2026-06-19T00:00:00Z&limit=1";
+    let (status, json, body) =
+        response_parts(app.clone(), get_request(list_path, Some(ORG_ID), true)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["snapshots"].as_array().expect("snapshots").len(), 1);
+    assert_eq!(json["snapshots"][0]["captured_at"], "2026-06-18T10:00:00Z");
+    assert!(json["next_cursor"].is_string());
+    assert!(!body.contains("snapshot private memory"));
+
+    let (status, json, _) = response_parts(
+        app,
+        get_request("/api/v1/admin/org/usage/dashboard", Some(ORG_ID), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["dashboard"]["memory"]["latest_snapshot"]["captured_at"],
+        "2026-06-18T10:00:00Z"
+    );
+    assert_eq!(
+        json["dashboard"]["memory"]["latest_snapshot"]["total_memories"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn memory_snapshot_validation_errors_use_existing_error_style() {
+    let app = create_app(AppState::new(Settings::default()));
+    let (status, json, _) = response_parts(
+        app.clone(),
+        post_request(
+            "/api/v1/admin/org/usage/memory/snapshots",
+            Some(ORG_ID),
+            true,
+            Some(json!({ "captured_at": "not-a-date" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "invalid captured_at timestamp");
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        get_request(
+            "/api/v1/admin/org/usage/memory/snapshots?created_after=2026-06-19T00:00:00Z&created_before=2026-06-18T00:00:00Z",
+            Some(ORG_ID),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        json["error"]["message"],
+        "created_after must be earlier than created_before"
+    );
+
+    let (status, json, _) = response_parts(
+        app,
+        get_request(
+            "/api/v1/admin/org/usage/memory/snapshots?limit=101",
+            Some(ORG_ID),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["message"], "limit cannot exceed 100");
 }
 
 #[tokio::test]

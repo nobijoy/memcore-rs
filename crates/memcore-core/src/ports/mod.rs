@@ -1,5 +1,6 @@
 pub mod api_key_store;
 pub mod event_store;
+pub mod memory_usage_snapshot_store;
 pub mod org_plan_store;
 pub mod provider;
 pub mod provider_usage;
@@ -9,6 +10,9 @@ pub use api_key_store::{ApiKeyListQuery, ApiKeyStore};
 pub use event_store::{
     DEFAULT_MEMORY_EVENT_LIST_LIMIT, MAX_MEMORY_EVENT_LIST_LIMIT, MemoryEventQuery,
     MemoryEventStore, OrgMemoryEventQuery, validate_event_date_range,
+};
+pub use memory_usage_snapshot_store::{
+    MemoryUsageSnapshotQuery, MemoryUsageSnapshotQueryResult, MemoryUsageSnapshotStore,
 };
 pub use org_plan_store::OrgPlanStore;
 pub use provider::{
