@@ -6,6 +6,7 @@ pub mod engine;
 pub mod export;
 pub mod import;
 pub mod importance;
+pub mod jobs;
 pub mod lifecycle;
 pub mod models;
 pub mod org;
@@ -68,6 +69,11 @@ pub use import::{
     ImportValidationSummary,
 };
 pub use importance::ImportanceScorer;
+pub use jobs::{
+    BackgroundJob, BackgroundJobDefinition, BackgroundJobKind, BackgroundJobRun,
+    BackgroundJobRunner, BackgroundJobSnapshot, BackgroundJobStatus, InMemoryBackgroundJobState,
+    MemoryRetentionJob, MemoryUsageSnapshotJob, ProviderUsageRetentionJob,
+};
 pub use models::{
     ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
     MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,

@@ -5,15 +5,15 @@
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, ApplyProviderUsageRetentionRequest,
     ApplyProviderUsageRetentionResponse, ApplyRetentionRequest, ApplyRetentionResponse,
-    BuildContextRequest, BuildContextResponse, ContextCacheMetricsResponse, CreateApiKeyRequest,
-    CreateApiKeyResponse, CreateMemoryUsageSnapshotRequest, CreateMemoryUsageSnapshotResponse,
-    DeleteMemoryResponse, DeleteOrgPlanResponse, ExportUserResponse, ForgetUserResponse,
-    GetOrgPlanResponse, ImportUserDataRequest, ImportUserDataResponse, ListApiKeysResponse,
-    ListMemoriesResponse, ListMemoryEventsResponse, ListOrgUsersResponse, OrgQuotaStatusResponse,
-    OrgSummaryResponse, OrgUsageDashboardResponse, ProviderUsageDailyResponse,
-    ProviderUsageResponse, QueryMemoryUsageSnapshotsResponse, RevokeApiKeyResponse,
-    SearchMemoryRequest, SearchMemoryResponse, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
-    UpsertOrgPlanResponse,
+    BackgroundJobsResponse, BuildContextRequest, BuildContextResponse, ContextCacheMetricsResponse,
+    CreateApiKeyRequest, CreateApiKeyResponse, CreateMemoryUsageSnapshotRequest,
+    CreateMemoryUsageSnapshotResponse, DeleteMemoryResponse, DeleteOrgPlanResponse,
+    ExportUserResponse, ForgetUserResponse, GetOrgPlanResponse, ImportUserDataRequest,
+    ImportUserDataResponse, ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse,
+    ListOrgUsersResponse, OrgQuotaStatusResponse, OrgSummaryResponse, OrgUsageDashboardResponse,
+    ProviderUsageDailyResponse, ProviderUsageResponse, QueryMemoryUsageSnapshotsResponse,
+    RevokeApiKeyResponse, RunBackgroundJobResponse, SearchMemoryRequest, SearchMemoryResponse,
+    SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest, UpsertOrgPlanResponse,
 };
 use crate::response::ErrorBody;
 use crate::routes::health::{HealthResponse, ReadyResponse};
@@ -361,6 +361,46 @@ pub fn revoke_api_key() {}
     )
 )]
 pub fn get_org_summary() {}
+
+/// List in-process background job definitions and recent process-local runs.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/jobs",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Background job status", body = BackgroundJobsResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_background_jobs() {}
+
+/// Manually run one registered background job once.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/jobs/{job_kind}/run",
+    tag = "Admin",
+    params(
+        ("job_kind" = String, Path, description = "Job kind: memory-usage-snapshot, provider-usage-retention, or memory-retention"),
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Background job run result", body = RunBackgroundJobResponse),
+        (status = 400, description = "Validation error", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn run_background_job() {}
 
 /// List users in the organization with memory aggregates. Does not return memory content.
 #[utoipa::path(

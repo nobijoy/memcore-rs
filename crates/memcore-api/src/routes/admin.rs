@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::{Extension, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use memcore_common::MemcoreError;
 use memcore_core::{
     ApiKeyScope, GetOrgQuotaStatusInput, ListOrgUsersInput, ProviderUsageDailyInput,
@@ -15,19 +15,53 @@ use crate::dto::{
     OrgSummaryResponse, OrgUsageDashboardResponse, OrgUsageDateRangeQuery,
     ProviderUsageDailyQueryParams, ProviderUsageDailyResponse, ProviderUsageQueryParams,
     ProviderUsageResponse, QueryMemoryUsageSnapshotsParams, QueryMemoryUsageSnapshotsResponse,
-    SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
-    UpsertOrgPlanResponse, context_cache_metrics_response, get_org_plan_response,
-    org_quota_status_response, org_summary_input, org_usage_dashboard_input,
+    RunBackgroundJobResponse, SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse,
+    UpsertOrgPlanRequest, UpsertOrgPlanResponse, background_jobs_response,
+    context_cache_metrics_response, get_org_plan_response, org_quota_status_response,
+    org_summary_input, org_usage_dashboard_input, parse_background_job_kind,
     parse_event_date_filters, parse_keyword_query, parse_memory_event_operation_label,
     parse_org_usage_window, parse_provider_usage_capability, provider_usage_memory_response,
     provider_usage_persisted_response, query_memory_usage_snapshots_input,
-    upsert_org_plan_response, validate_list_org_users_limit,
+    run_background_job_response, upsert_org_plan_response, validate_list_org_users_limit,
     validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{ApiError, check_any_scope};
 use crate::security::AuthContext;
 use crate::state::AppState;
+
+pub async fn get_background_jobs(
+    State(state): State<AppState>,
+    Extension(_organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+) -> Result<Json<crate::dto::BackgroundJobsResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    Ok(Json(background_jobs_response(
+        state.background_jobs.snapshot(),
+    )))
+}
+
+pub async fn run_background_job(
+    State(state): State<AppState>,
+    Extension(_organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Path(job_kind): Path<String>,
+) -> Result<Json<RunBackgroundJobResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite],
+    )?;
+
+    let kind = parse_background_job_kind(&job_kind)?;
+    tracing::info!(job_kind = %kind, "manual background job trigger requested");
+    let run = state.background_jobs.run_manual(kind).await?;
+
+    Ok(Json(run_background_job_response(run)))
+}
 
 pub async fn get_org_summary(
     State(state): State<AppState>,

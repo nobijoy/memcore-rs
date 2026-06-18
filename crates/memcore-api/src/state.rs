@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
@@ -9,9 +10,11 @@ use memcore_config::{
     LlmProviderKind, Settings, VectorBackend,
 };
 use memcore_core::{
-    ApiKeyStore, ContextCacheConfig, EmbeddingProvider, FactStore, InMemoryContextCache,
-    LlmProvider, MemoryEngine, MemoryEventStore, MemoryUsageSnapshotStore, OrgPlanStore,
-    OrgQuotaLimits, ProviderUsageAttributionSlot, ProviderUsageStore, VectorStore,
+    ApiKeyStore, BackgroundJob, BackgroundJobRunner, ContextCacheConfig, EmbeddingProvider,
+    FactStore, InMemoryContextCache, LlmProvider, MemoryEngine, MemoryEventStore,
+    MemoryRetentionJob, MemoryUsageSnapshotJob, MemoryUsageSnapshotStore, OrgPlanStore,
+    OrgQuotaLimits, ProviderUsageAttributionSlot, ProviderUsageRetentionJob, ProviderUsageStore,
+    VectorStore,
 };
 use memcore_providers::{
     CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, OpenAiClient,
@@ -286,6 +289,7 @@ pub struct AppState {
     pub provider_usage: Arc<dyn ProviderUsageRecorder>,
     pub provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
     pub org_plan_store: Arc<dyn OrgPlanStore>,
+    pub background_jobs: Arc<BackgroundJobRunner>,
 }
 
 impl AppState {
@@ -303,17 +307,28 @@ impl AppState {
             )
             .await?,
         );
+        let background_jobs = Arc::new(create_background_job_runner(
+            &settings,
+            memory_engine.clone(),
+        ));
+        if settings.background_jobs_enabled {
+            let runner = background_jobs.clone();
+            tokio::spawn(async move {
+                runner.run_forever().await;
+            });
+        }
         let api_key_store = create_api_key_store(&settings).await?;
         Ok(Self {
             settings: settings.clone(),
             started_at: Utc::now(),
-            memory_engine,
+            memory_engine: memory_engine.clone(),
             api_key_store,
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
             provider_usage: wiring.usage_recorder,
             provider_usage_store: wiring.usage_store,
             org_plan_store,
+            background_jobs,
         })
     }
 
@@ -328,17 +343,22 @@ impl AppState {
             let wiring = ProviderWiring::for_mock_tests(&settings);
             let org_plan_store = Arc::new(MockOrgPlanStore::new());
             let memory_usage_snapshot_store = Arc::new(MockMemoryUsageSnapshotStore::new());
+            let memory_engine = Arc::new(
+                create_mock_memory_engine_with_wiring_and_org_plan_store(
+                    &settings,
+                    &wiring,
+                    org_plan_store.clone(),
+                    memory_usage_snapshot_store,
+                )
+                .expect("failed to create mock memory engine"),
+            );
+            let background_jobs = Arc::new(create_background_job_runner(
+                &settings,
+                memory_engine.clone(),
+            ));
             Self {
                 started_at: Utc::now(),
-                memory_engine: Arc::new(
-                    create_mock_memory_engine_with_wiring_and_org_plan_store(
-                        &settings,
-                        &wiring,
-                        org_plan_store.clone(),
-                        memory_usage_snapshot_store,
-                    )
-                    .expect("failed to create mock memory engine"),
-                ),
+                memory_engine,
                 api_key_store: Arc::new(MockApiKeyStore::new()),
                 settings: settings.clone(),
                 rate_limiter: create_rate_limiter(&settings),
@@ -346,6 +366,7 @@ impl AppState {
                 provider_usage: wiring.usage_recorder,
                 provider_usage_store: wiring.usage_store,
                 org_plan_store,
+                background_jobs,
             }
         } else {
             tokio::task::block_in_place(|| {
@@ -359,13 +380,17 @@ impl AppState {
         Self {
             settings: settings.clone(),
             started_at: Utc::now(),
-            memory_engine,
+            memory_engine: memory_engine.clone(),
             api_key_store: Arc::new(MockApiKeyStore::new()),
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
             provider_usage: provider_usage_recorder(settings.provider_usage_metrics_enabled),
             provider_usage_store: None,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
+            background_jobs: Arc::new(create_background_job_runner(
+                &settings,
+                memory_engine.clone(),
+            )),
         }
     }
 
@@ -377,13 +402,17 @@ impl AppState {
         Self {
             settings: settings.clone(),
             started_at: Utc::now(),
-            memory_engine,
+            memory_engine: memory_engine.clone(),
             api_key_store: Arc::new(MockApiKeyStore::new()),
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
             provider_usage,
             provider_usage_store: None,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
+            background_jobs: Arc::new(create_background_job_runner(
+                &settings,
+                memory_engine.clone(),
+            )),
         }
     }
 
@@ -396,15 +425,51 @@ impl AppState {
         Self {
             settings: settings.clone(),
             started_at: Utc::now(),
-            memory_engine,
+            memory_engine: memory_engine.clone(),
             api_key_store: Arc::new(MockApiKeyStore::new()),
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
             provider_usage,
             provider_usage_store,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
+            background_jobs: Arc::new(create_background_job_runner(
+                &settings,
+                memory_engine.clone(),
+            )),
         }
     }
+}
+
+fn create_background_job_runner(
+    settings: &Settings,
+    memory_engine: Arc<MemoryEngine>,
+) -> BackgroundJobRunner {
+    let org_ids = settings.background_job_org_ids.clone();
+    let jobs: Vec<Arc<dyn BackgroundJob>> = vec![
+        Arc::new(MemoryUsageSnapshotJob::new(
+            memory_engine.clone(),
+            settings.memory_usage_snapshot_job_enabled,
+            Duration::from_secs(settings.memory_usage_snapshot_job_interval_seconds),
+            org_ids.clone(),
+        )),
+        Arc::new(ProviderUsageRetentionJob::new(
+            memory_engine,
+            settings.provider_usage_retention_job_enabled,
+            Duration::from_secs(settings.provider_usage_retention_job_interval_seconds),
+            org_ids,
+            settings.provider_usage_retention_days,
+        )),
+        Arc::new(MemoryRetentionJob::new(
+            settings.memory_retention_job_enabled,
+            Duration::from_secs(settings.memory_retention_job_interval_seconds),
+        )),
+    ];
+
+    BackgroundJobRunner::new(
+        settings.background_jobs_enabled,
+        Duration::from_secs(settings.background_job_runner_interval_seconds),
+        jobs,
+    )
 }
 
 fn create_rate_limiter(settings: &Settings) -> Arc<RateLimiter> {

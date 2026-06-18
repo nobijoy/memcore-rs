@@ -76,6 +76,20 @@ const MEMCORE_MAX_MEMORIES_PER_USER: &str = "MEMCORE_MAX_MEMORIES_PER_USER";
 const MEMCORE_MAX_MEMORIES_PER_ORG: &str = "MEMCORE_MAX_MEMORIES_PER_ORG";
 const MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT: &str = "MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT";
 const MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT: &str = "MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT";
+const MEMCORE_BACKGROUND_JOBS_ENABLED: &str = "MEMCORE_BACKGROUND_JOBS_ENABLED";
+const MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS: &str =
+    "MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS";
+const MEMCORE_BACKGROUND_JOB_ORG_IDS: &str = "MEMCORE_BACKGROUND_JOB_ORG_IDS";
+const MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_ENABLED: &str = "MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_ENABLED";
+const MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS: &str =
+    "MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS";
+const MEMCORE_PROVIDER_USAGE_RETENTION_JOB_ENABLED: &str =
+    "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_ENABLED";
+const MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS: &str =
+    "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS";
+const MEMCORE_MEMORY_RETENTION_JOB_ENABLED: &str = "MEMCORE_MEMORY_RETENTION_JOB_ENABLED";
+const MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS: &str =
+    "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -293,6 +307,24 @@ pub struct Settings {
     pub daily_provider_request_limit: u64,
     /// Maximum persisted provider tokens per UTC day (`0` means unlimited).
     pub daily_provider_token_limit: u64,
+    /// Global in-process background job runner toggle.
+    pub background_jobs_enabled: bool,
+    /// Runner polling interval in seconds.
+    pub background_job_runner_interval_seconds: u64,
+    /// Organization ids targeted by org-scoped background jobs.
+    pub background_job_org_ids: Vec<String>,
+    /// Enable scheduled memory usage snapshot capture.
+    pub memory_usage_snapshot_job_enabled: bool,
+    /// Memory usage snapshot job interval in seconds.
+    pub memory_usage_snapshot_job_interval_seconds: u64,
+    /// Enable scheduled provider usage retention cleanup.
+    pub provider_usage_retention_job_enabled: bool,
+    /// Provider usage retention job interval in seconds.
+    pub provider_usage_retention_job_interval_seconds: u64,
+    /// Enable scheduled memory retention job foundation.
+    pub memory_retention_job_enabled: bool,
+    /// Memory retention job interval in seconds.
+    pub memory_retention_job_interval_seconds: u64,
 }
 
 impl Default for Settings {
@@ -367,6 +399,15 @@ impl Default for Settings {
             max_memories_per_org: 0,
             daily_provider_request_limit: 0,
             daily_provider_token_limit: 0,
+            background_jobs_enabled: false,
+            background_job_runner_interval_seconds: 60,
+            background_job_org_ids: Vec::new(),
+            memory_usage_snapshot_job_enabled: false,
+            memory_usage_snapshot_job_interval_seconds: 86_400,
+            provider_usage_retention_job_enabled: false,
+            provider_usage_retention_job_interval_seconds: 86_400,
+            memory_retention_job_enabled: false,
+            memory_retention_job_interval_seconds: 86_400,
         }
     }
 }
@@ -554,6 +595,42 @@ impl Settings {
             MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT,
             defaults.daily_provider_token_limit,
         )?;
+        let background_jobs_enabled = parse_bool(
+            MEMCORE_BACKGROUND_JOBS_ENABLED,
+            defaults.background_jobs_enabled,
+        )?;
+        let background_job_runner_interval_seconds = parse_u64(
+            MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS,
+            defaults.background_job_runner_interval_seconds,
+        )?;
+        let background_job_org_ids = parse_string_list(
+            MEMCORE_BACKGROUND_JOB_ORG_IDS,
+            &defaults.background_job_org_ids,
+        );
+        let memory_usage_snapshot_job_enabled = parse_bool(
+            MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_ENABLED,
+            defaults.memory_usage_snapshot_job_enabled,
+        )?;
+        let memory_usage_snapshot_job_interval_seconds = parse_u64(
+            MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS,
+            defaults.memory_usage_snapshot_job_interval_seconds,
+        )?;
+        let provider_usage_retention_job_enabled = parse_bool(
+            MEMCORE_PROVIDER_USAGE_RETENTION_JOB_ENABLED,
+            defaults.provider_usage_retention_job_enabled,
+        )?;
+        let provider_usage_retention_job_interval_seconds = parse_u64(
+            MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS,
+            defaults.provider_usage_retention_job_interval_seconds,
+        )?;
+        let memory_retention_job_enabled = parse_bool(
+            MEMCORE_MEMORY_RETENTION_JOB_ENABLED,
+            defaults.memory_retention_job_enabled,
+        )?;
+        let memory_retention_job_interval_seconds = parse_u64(
+            MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS,
+            defaults.memory_retention_job_interval_seconds,
+        )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
             return Err(MemcoreError::ValidationError(
@@ -631,6 +708,15 @@ impl Settings {
             max_memories_per_org,
             daily_provider_request_limit,
             daily_provider_token_limit,
+            background_jobs_enabled,
+            background_job_runner_interval_seconds,
+            background_job_org_ids,
+            memory_usage_snapshot_job_enabled,
+            memory_usage_snapshot_job_interval_seconds,
+            provider_usage_retention_job_enabled,
+            provider_usage_retention_job_interval_seconds,
+            memory_retention_job_enabled,
+            memory_retention_job_interval_seconds,
         };
 
         settings.validate()?;
@@ -800,6 +886,32 @@ impl Settings {
             ));
         }
 
+        if self.background_job_runner_interval_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.memory_usage_snapshot_job_interval_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS must be greater than 0"
+                    .to_string(),
+            ));
+        }
+
+        if self.provider_usage_retention_job_interval_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS must be greater than 0"
+                    .to_string(),
+            ));
+        }
+
+        if self.memory_retention_job_interval_seconds == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS must be greater than 0".to_string(),
+            ));
+        }
+
         match self.context_cache_backend {
             ContextCacheBackend::Disabled => {}
             ContextCacheBackend::Memory => {
@@ -965,6 +1077,18 @@ fn parse_provider_fallback_order(key: &str, default: &[String]) -> MemcoreResult
             Ok(parsed)
         }
         Err(_) => Ok(default.to_vec()),
+    }
+}
+
+fn parse_string_list(key: &str, default: &[String]) -> Vec<String> {
+    match env::var(key) {
+        Ok(value) => value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        Err(_) => default.to_vec(),
     }
 }
 
@@ -1274,6 +1398,15 @@ mod tests {
         "MEMCORE_MAX_MEMORIES_PER_ORG",
         "MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT",
         "MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT",
+        "MEMCORE_BACKGROUND_JOBS_ENABLED",
+        "MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS",
+        "MEMCORE_BACKGROUND_JOB_ORG_IDS",
+        "MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_ENABLED",
+        "MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS",
+        "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_ENABLED",
+        "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS",
+        "MEMCORE_MEMORY_RETENTION_JOB_ENABLED",
+        "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1347,6 +1480,86 @@ mod tests {
         assert!(!settings.retention_enabled);
         assert_eq!(settings.fact_retention_days, 0);
         assert_eq!(settings.event_retention_days, 0);
+        assert!(!settings.background_jobs_enabled);
+        assert_eq!(settings.background_job_runner_interval_seconds, 60);
+        assert!(settings.background_job_org_ids.is_empty());
+        assert!(!settings.memory_usage_snapshot_job_enabled);
+        assert_eq!(settings.memory_usage_snapshot_job_interval_seconds, 86_400);
+        assert!(!settings.provider_usage_retention_job_enabled);
+        assert_eq!(
+            settings.provider_usage_retention_job_interval_seconds,
+            86_400
+        );
+        assert!(!settings.memory_retention_job_enabled);
+        assert_eq!(settings.memory_retention_job_interval_seconds, 86_400);
+    }
+
+    #[test]
+    fn background_job_settings_parse_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_BACKGROUND_JOBS_ENABLED", "true");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS", "5");
+            std::env::set_var("MEMCORE_BACKGROUND_JOB_ORG_IDS", "org_a, org_b,,org_c");
+            std::env::set_var("MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_ENABLED", "true");
+            std::env::set_var("MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS", "10");
+            std::env::set_var("MEMCORE_PROVIDER_USAGE_RETENTION_JOB_ENABLED", "true");
+            std::env::set_var(
+                "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS",
+                "20",
+            );
+            std::env::set_var("MEMCORE_MEMORY_RETENTION_JOB_ENABLED", "true");
+            std::env::set_var("MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS", "30");
+        }
+
+        let settings = Settings::from_env().expect("background job settings should load");
+        assert!(settings.background_jobs_enabled);
+        assert_eq!(settings.background_job_runner_interval_seconds, 5);
+        assert_eq!(
+            settings.background_job_org_ids,
+            vec![
+                "org_a".to_string(),
+                "org_b".to_string(),
+                "org_c".to_string()
+            ]
+        );
+        assert!(settings.memory_usage_snapshot_job_enabled);
+        assert_eq!(settings.memory_usage_snapshot_job_interval_seconds, 10);
+        assert!(settings.provider_usage_retention_job_enabled);
+        assert_eq!(settings.provider_usage_retention_job_interval_seconds, 20);
+        assert!(settings.memory_retention_job_enabled);
+        assert_eq!(settings.memory_retention_job_interval_seconds, 30);
+    }
+
+    #[test]
+    fn zero_background_job_intervals_fail_validation() {
+        for key in [
+            "MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS",
+            "MEMCORE_MEMORY_USAGE_SNAPSHOT_JOB_INTERVAL_SECONDS",
+            "MEMCORE_PROVIDER_USAGE_RETENTION_JOB_INTERVAL_SECONDS",
+            "MEMCORE_MEMORY_RETENTION_JOB_INTERVAL_SECONDS",
+        ] {
+            let _lock = env_test_lock()
+                .lock()
+                .expect("env test lock should not be poisoned");
+            let _guard = EnvGuard::new();
+            clear_env();
+
+            unsafe {
+                std::env::set_var(key, "0");
+            }
+
+            let error = Settings::from_env().expect_err("zero interval should fail");
+            assert!(
+                error.to_string().contains("must be greater than 0"),
+                "unexpected error for {key}: {error}"
+            );
+        }
     }
 
     #[test]

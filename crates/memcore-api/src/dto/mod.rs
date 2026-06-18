@@ -3,6 +3,7 @@ pub mod api_keys;
 pub mod context;
 pub mod export;
 pub mod import;
+pub mod jobs;
 pub mod keyword_search;
 pub mod memories;
 pub mod memory_events;
@@ -47,6 +48,11 @@ pub use export::{
 pub use import::{
     ImportUserDataRequest, ImportUserDataResponse, ImportUserDataSummaryResponse,
     ImportValidationIssueResponse, ImportValidationSummaryResponse,
+};
+pub use jobs::{
+    BackgroundJobDefinitionResponse, BackgroundJobRunResponse, BackgroundJobSnapshotResponse,
+    BackgroundJobsResponse, RunBackgroundJobResponse, background_jobs_response,
+    parse_background_job_kind, run_background_job_response,
 };
 pub use keyword_search::parse_keyword_query;
 pub use memories::{

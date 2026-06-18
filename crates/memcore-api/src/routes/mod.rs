@@ -60,6 +60,11 @@ pub fn router(state: &AppState) -> Router<AppState> {
             delete(api_keys::revoke_api_key),
         )
         .route("/api/v1/admin/org/summary", get(admin::get_org_summary))
+        .route("/api/v1/admin/jobs", get(admin::get_background_jobs))
+        .route(
+            "/api/v1/admin/jobs/{job_kind}/run",
+            post(admin::run_background_job),
+        )
         .route("/api/v1/admin/org/users", get(admin::list_org_users))
         .route(
             "/api/v1/admin/org/memory-events",
