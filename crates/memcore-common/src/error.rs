@@ -24,6 +24,14 @@ pub enum MemcoreError {
     Internal(String),
     #[error("timeout: {0}")]
     Timeout(String),
+    #[error("quota exceeded: {message}")]
+    QuotaExceeded {
+        message: String,
+        kind: String,
+        limit: u64,
+        current: u64,
+        requested: u64,
+    },
 }
 
 pub const PROVIDER_TIMEOUT_MESSAGE: &str = "provider operation timed out";
@@ -65,11 +73,28 @@ impl MemcoreError {
             Self::Internal(_) => "internal",
             Self::Timeout(msg) if msg == PROVIDER_TIMEOUT_MESSAGE => "provider_timeout",
             Self::Timeout(_) => "timeout",
+            Self::QuotaExceeded { .. } => "quota_exceeded",
         }
     }
 
     pub fn message(&self) -> String {
         self.to_string()
+    }
+
+    pub fn quota_exceeded(
+        message: impl Into<String>,
+        kind: impl Into<String>,
+        limit: u64,
+        current: u64,
+        requested: u64,
+    ) -> Self {
+        Self::QuotaExceeded {
+            message: message.into(),
+            kind: kind.into(),
+            limit,
+            current,
+            requested,
+        }
     }
 }
 
@@ -95,6 +120,12 @@ mod tests {
         let error = MemcoreError::provider_circuit_open();
         assert_eq!(error.code(), "provider_circuit_open");
         assert!(error.is_provider_circuit_open());
+    }
+
+    #[test]
+    fn quota_exceeded_uses_dedicated_error_code() {
+        let error = MemcoreError::quota_exceeded("limit exceeded", "MemoriesPerOrg", 10, 10, 1);
+        assert_eq!(error.code(), "quota_exceeded");
     }
 
     #[test]

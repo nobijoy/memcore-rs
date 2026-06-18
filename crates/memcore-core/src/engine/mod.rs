@@ -5,57 +5,67 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 use memcore_common::MemcoreResult;
 
-use crate::privacy::redact_messages_for_extraction;
-use crate::ports::MemoryMessage;
+use crate::admin::{
+    DEFAULT_LIST_ORG_USERS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput, MAX_LIST_ORG_USERS_LIMIT,
+    MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, OrgSummaryInput, OrgSummaryOutput,
+    SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
+};
 use crate::audit::{
     build_add_event, build_delete_event, build_forget_user_event, build_import_replace_event,
     build_noop_event, build_update_event, record_event_best_effort,
 };
-use crate::import::{
-    collect_import_validation, ImportMode, ImportUserDataInput, ImportUserDataOutput,
-    ImportValidationSummary, resolve_import_fact_id,
-};
-use crate::{InMemoryContextCache, ContextCacheCoordinator, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES};
 use crate::context_cache_metrics_recorder;
+use crate::dedup::{
+    DeduplicationDecision, EmbeddingDeduplicationConfig, detect_duplicate,
+    detect_embedding_duplicate, find_existing_facts_for_dedup,
+};
+use crate::export::{EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT, UserMemoryExport};
+use crate::import::{
+    ImportMode, ImportUserDataInput, ImportUserDataOutput, ImportValidationSummary,
+    collect_import_validation, resolve_import_fact_id,
+};
+use crate::importance::ImportanceScorer;
+use crate::lifecycle::{
+    LifecycleApplyResult, LifecycleContext, apply_fact_operation, find_related_facts,
+};
+use crate::pagination::{PageCursor, build_page, parse_optional_cursor};
+use crate::ports::MemoryMessage;
+use crate::ports::{
+    EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgUserListQuery,
+    ProviderUsageAttributionSlot, ProviderUsageStore, VectorRecord, VectorStore,
+    validate_event_date_range,
+};
+use crate::privacy::redact_messages_for_extraction;
+use crate::quota::{
+    CheckMemoryWriteQuotaInput, CheckProviderQuotaInput, GetOrgQuotaStatusInput, QuotaCheckResult,
+    QuotaService,
+};
 use crate::ranking::{
-    reciprocal_rank_fusion, weighted_score_for, RankedCandidate, RankingConfig, RankingSource,
-    RrfConfig,
+    RankedCandidate, RankingConfig, RankingSource, RrfConfig, reciprocal_rank_fusion,
+    weighted_score_for,
 };
 use crate::retention::{
     ApplyProviderUsageRetentionInput, ApplyProviderUsageRetentionOutput, ApplyRetentionInput,
     ApplyRetentionOutput,
 };
-use crate::admin::{
-    ListOrgUsersInput, ListOrgUsersOutput, OrgSummaryInput, OrgSummaryOutput,
-    SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
-    DEFAULT_LIST_ORG_USERS_LIMIT, MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
+use crate::{
+    BuildContextInput, BuildContextOutput, ContextCache, ContextCacheConfig,
+    ContextCacheMetricsRecorder, ContextCacheMetricsSnapshot, ContextCacheUsage, Fact,
+    FactOperation, FactOperationDecision, MemoryEvent, MemorySearchResult, SimpleTokenEstimator,
+    TenantContext, apply_provider_compression_summary, assemble_context_with_budget,
+    build_context_cache_key, cached_entry_from_output,
 };
-use crate::pagination::{build_page, parse_optional_cursor, PageCursor};
-use crate::ports::{
-    EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgUserListQuery,
-    ProviderUsageAttributionSlot, ProviderUsageStore, VectorRecord, VectorStore, validate_event_date_range,
-};
-use crate::export::{UserMemoryExport, EXPORT_EVENTS_LIMIT, EXPORT_FACTS_LIMIT};
-use crate::dedup::{
-    detect_duplicate, detect_embedding_duplicate, find_existing_facts_for_dedup,
-    DeduplicationDecision, EmbeddingDeduplicationConfig,
-};
-use crate::importance::ImportanceScorer;
-use crate::lifecycle::{
-    apply_fact_operation, find_related_facts, LifecycleApplyResult, LifecycleContext,
-};
-use crate::{assemble_context_with_budget, apply_provider_compression_summary, build_context_cache_key, cached_entry_from_output, BuildContextInput, BuildContextOutput, ContextCache, ContextCacheConfig, ContextCacheMetricsRecorder, ContextCacheMetricsSnapshot, ContextCacheUsage, Fact, FactOperation,
-    FactOperationDecision, MemoryEvent, MemorySearchResult, SimpleTokenEstimator, TenantContext};
+use crate::{ContextCacheCoordinator, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES, InMemoryContextCache};
 use uuid::Uuid;
 
 pub use types::{
-    AddMemoryInput, AddMemoryOutput, DeleteMemoryInput, DeleteMemoryOutput, ExportUserDataInput,
-    ForgetUserInput, ForgetUserOutput, ListMemoriesInput, ListMemoriesOutput,
-    ListMemoryEventsInput, ListMemoryEventsOutput, MemoryOperationSummary, SearchMemoryInput,
-    SearchMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_LIST_MEMORY_EVENTS_LIMIT,
-    DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, MAX_LIST_MEMORIES_LIMIT,
-    MAX_LIST_MEMORY_EVENTS_LIMIT, MAX_SEARCH_LIMIT,
+    AddMemoryInput, AddMemoryOutput, DEFAULT_LIST_MEMORIES_LIMIT, DEFAULT_LIST_MEMORY_EVENTS_LIMIT,
+    DEFAULT_MIN_IMPORTANCE, DEFAULT_SEARCH_LIMIT, DeleteMemoryInput, DeleteMemoryOutput,
+    ExportUserDataInput, ForgetUserInput, ForgetUserOutput, ListMemoriesInput, ListMemoriesOutput,
+    ListMemoryEventsInput, ListMemoryEventsOutput, MAX_LIST_MEMORIES_LIMIT,
+    MAX_LIST_MEMORY_EVENTS_LIMIT, MAX_SEARCH_LIMIT, MemoryOperationSummary, SearchMemoryInput,
+    SearchMemoryOutput,
 };
 
 pub struct MemoryEngine {
@@ -162,8 +172,7 @@ impl MemoryEngine {
         self.context_cache = cache.clone();
         self.context_cache_config = config;
         self.context_cache_metrics = metrics.clone();
-        self.context_cache_coordinator =
-            ContextCacheCoordinator::new(cache, config, metrics);
+        self.context_cache_coordinator = ContextCacheCoordinator::new(cache, config, metrics);
         self
     }
 
@@ -175,18 +184,12 @@ impl MemoryEngine {
         self.context_cache_metrics.snapshot()
     }
 
-    pub fn with_usage_attribution(
-        mut self,
-        slot: Arc<ProviderUsageAttributionSlot>,
-    ) -> Self {
+    pub fn with_usage_attribution(mut self, slot: Arc<ProviderUsageAttributionSlot>) -> Self {
         self.usage_attribution = Some(slot);
         self
     }
 
-    pub fn with_provider_usage_store(
-        mut self,
-        store: Option<Arc<dyn ProviderUsageStore>>,
-    ) -> Self {
+    pub fn with_provider_usage_store(mut self, store: Option<Arc<dyn ProviderUsageStore>>) -> Self {
         self.provider_usage_store = store;
         self
     }
@@ -465,8 +468,10 @@ impl MemoryEngine {
         let fused =
             reciprocal_rank_fusion(&semantic_candidates, &keyword_candidates, &self.rrf_config);
 
-        let vector_by_fact: HashMap<Uuid, _> =
-            vector_results.iter().map(|result| (result.fact_id, result)).collect();
+        let vector_by_fact: HashMap<Uuid, _> = vector_results
+            .iter()
+            .map(|result| (result.fact_id, result))
+            .collect();
         let keyword_by_fact: HashMap<Uuid, _> =
             keyword_facts.iter().map(|fact| (fact.id, fact)).collect();
         let now = Utc::now();
@@ -478,9 +483,7 @@ impl MemoryEngine {
             let fact = if let Some(fact) = keyword_by_fact.get(&fact_id) {
                 Some((*fact).clone())
             } else {
-                self.fact_store
-                    .get_fact(&input.tenant, fact_id)
-                    .await?
+                self.fact_store.get_fact(&input.tenant, fact_id).await?
             };
 
             let Some(fact) = fact else {
@@ -528,12 +531,7 @@ impl MemoryEngine {
                 .1
                 .partial_cmp(&left.1)
                 .unwrap_or(Ordering::Equal)
-                .then(
-                    right
-                        .2
-                        .partial_cmp(&left.2)
-                        .unwrap_or(Ordering::Equal),
-                )
+                .then(right.2.partial_cmp(&left.2).unwrap_or(Ordering::Equal))
                 .then(right.3.cmp(&left.3))
                 .then_with(|| left.0.fact_id.cmp(&right.0.fact_id))
         });
@@ -697,9 +695,7 @@ impl MemoryEngine {
         let limit = normalize_list_limit(input.limit)?;
         let cursor = parse_optional_cursor(input.cursor)?;
 
-        let memory_types = input
-            .memory_type
-            .map(|memory_type| vec![memory_type]);
+        let memory_types = input.memory_type.map(|memory_type| vec![memory_type]);
 
         let memories = self
             .fact_store
@@ -866,10 +862,7 @@ impl MemoryEngine {
         })
     }
 
-    pub async fn get_org_summary(
-        &self,
-        input: OrgSummaryInput,
-    ) -> MemcoreResult<OrgSummaryOutput> {
+    pub async fn get_org_summary(&self, input: OrgSummaryInput) -> MemcoreResult<OrgSummaryOutput> {
         validate_org_id(&input.org_id)?;
 
         let total_facts = self.fact_store.count_facts_by_org(&input.org_id).await?;
@@ -954,16 +947,47 @@ impl MemoryEngine {
         })
     }
 
+    pub async fn get_org_quota_status(
+        &self,
+        input: GetOrgQuotaStatusInput,
+    ) -> MemcoreResult<QuotaCheckResult> {
+        validate_org_id(&input.org_id)?;
+        if let Some(user_id) = &input.user_id {
+            TenantContext::new(input.org_id.clone(), user_id.clone())?;
+        }
+
+        self.quota_service().get_org_quota_status(input).await
+    }
+
+    pub async fn check_memory_write_quota(
+        &self,
+        input: CheckMemoryWriteQuotaInput,
+    ) -> MemcoreResult<QuotaCheckResult> {
+        let tenant = TenantContext::new(input.org_id.clone(), input.user_id.clone())?;
+        validate_tenant(&tenant)?;
+        self.quota_service().check_memory_write_allowed(input).await
+    }
+
+    pub async fn check_provider_quota(
+        &self,
+        input: CheckProviderQuotaInput,
+    ) -> MemcoreResult<QuotaCheckResult> {
+        validate_org_id(&input.org_id)?;
+        self.quota_service()
+            .check_provider_call_allowed(input)
+            .await
+    }
+
+    fn quota_service(&self) -> QuotaService {
+        QuotaService::new(self.fact_store.clone(), self.provider_usage_store.clone())
+    }
+
     pub async fn forget_user(&self, input: ForgetUserInput) -> MemcoreResult<ForgetUserOutput> {
         validate_tenant(&input.tenant)?;
 
-        self.fact_store
-            .delete_user_data(&input.tenant)
-            .await?;
+        self.fact_store.delete_user_data(&input.tenant).await?;
 
-        self.vector_store
-            .delete_by_user(&input.tenant)
-            .await?;
+        self.vector_store.delete_by_user(&input.tenant).await?;
 
         record_event_best_effort(
             &self.event_store,
@@ -1016,12 +1040,8 @@ impl MemoryEngine {
         let mut replaced_existing = false;
 
         if matches!(input.mode, ImportMode::Replace) {
-            self.fact_store
-                .delete_user_data(&input.tenant)
-                .await?;
-            self.vector_store
-                .delete_by_user(&input.tenant)
-                .await?;
+            self.fact_store.delete_user_data(&input.tenant).await?;
+            self.vector_store.delete_by_user(&input.tenant).await?;
             replaced_existing = true;
 
             record_event_best_effort(
@@ -1053,10 +1073,7 @@ impl MemoryEngine {
                 .insert_fact(&input.tenant, fact.clone())
                 .await?;
 
-            let embedding = self
-                .embedding_provider
-                .embed_text(&fact.content)
-                .await?;
+            let embedding = self.embedding_provider.embed_text(&fact.content).await?;
 
             let record = VectorRecord {
                 id: Uuid::new_v4(),
@@ -1082,9 +1099,7 @@ impl MemoryEngine {
             if let Some(event_store) = &self.event_store {
                 for exported_event in &input.export.memory_events {
                     let event = restored_event_from_export(exported_event);
-                    event_store
-                        .record_event(&input.tenant, event)
-                        .await?;
+                    event_store.record_event(&input.tenant, event).await?;
                     imported_events += 1;
                 }
             }
@@ -1190,8 +1205,7 @@ impl MemoryEngine {
                 .await
             {
                 Ok(removed) => {
-                    self.context_cache_metrics
-                        .record_invalidation(removed);
+                    self.context_cache_metrics.record_invalidation(removed);
                     tracing::debug!(
                         event = "context_cache_invalidated",
                         org_id = %tenant.org_id,
@@ -1437,11 +1451,7 @@ fn dedup_noop_decision(existing_fact_id: Uuid, reason: String) -> FactOperationD
     }
 }
 
-fn fact_for_import(
-    exported: &Fact,
-    tenant: &TenantContext,
-    fact_id: Uuid,
-) -> MemcoreResult<Fact> {
+fn fact_for_import(exported: &Fact, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<Fact> {
     Fact::new(
         fact_id,
         tenant.org_id.clone(),

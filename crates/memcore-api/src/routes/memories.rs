@@ -2,18 +2,18 @@ use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use memcore_common::MemcoreError;
 use memcore_core::{
-    AddMemoryInput, ApiKeyScope, DeleteMemoryInput, ListMemoriesInput, MemoryMessage, MessageRole,
-    SearchMemoryInput, TenantContext,
+    AddMemoryInput, ApiKeyScope, CheckMemoryWriteQuotaInput, DeleteMemoryInput, ListMemoriesInput,
+    MemoryMessage, MessageRole, SearchMemoryInput, TenantContext,
 };
 use uuid::Uuid;
 
 use crate::dto::{
-    parse_keyword_query, parse_memory_type_label, AddMemoryRequest, AddMemoryResponse,
-    DeleteMemoryResponse, ListMemoriesQuery, ListMemoriesResponse, MemoryMessageRequest,
-    SearchMemoryRequest, SearchMemoryResponse,
+    AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse, ListMemoriesQuery,
+    ListMemoriesResponse, MemoryMessageRequest, SearchMemoryRequest, SearchMemoryResponse,
+    org_quota_limits_from_settings, parse_keyword_query, parse_memory_type_label,
 };
 use crate::middleware::OrganizationContext;
-use crate::routes::common::{check_scope, ApiError};
+use crate::routes::common::{ApiError, check_scope};
 use crate::security::AuthContext;
 use crate::state::AppState;
 
@@ -23,11 +23,30 @@ pub async fn add_memory(
     auth: Option<Extension<AuthContext>>,
     Json(request): Json<AddMemoryRequest>,
 ) -> Result<Json<AddMemoryResponse>, ApiError> {
-    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryWrite)?;
+    check_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        ApiKeyScope::MemoryWrite,
+    )?;
     validate_add_memory_request(&request)?;
 
     let tenant = organization.tenant_with_user_id(request.user_id)?;
     let messages = map_messages(&request.messages)?;
+
+    let limits = org_quota_limits_from_settings(&state.settings);
+    if limits.enabled {
+        let quota = state
+            .memory_engine
+            .check_memory_write_quota(CheckMemoryWriteQuotaInput {
+                org_id: tenant.org_id.clone(),
+                user_id: tenant.user_id.clone(),
+                limits,
+                requested_new_memories: 1,
+            })
+            .await?;
+        if let Some(violation) = quota.violations.into_iter().next() {
+            return Err(violation.into_error().into());
+        }
+    }
 
     let output = state
         .memory_engine
@@ -47,7 +66,10 @@ pub async fn search_memory(
     auth: Option<Extension<AuthContext>>,
     Json(request): Json<SearchMemoryRequest>,
 ) -> Result<Json<SearchMemoryResponse>, ApiError> {
-    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryRead)?;
+    check_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        ApiKeyScope::MemoryRead,
+    )?;
     validate_search_memory_request(&request)?;
 
     let tenant = organization.tenant_with_user_id(request.user_id)?;
@@ -74,7 +96,10 @@ pub async fn list_user_memories(
     Path(user_id): Path<String>,
     Query(query): Query<ListMemoriesQuery>,
 ) -> Result<Json<ListMemoriesResponse>, ApiError> {
-    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryRead)?;
+    check_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        ApiKeyScope::MemoryRead,
+    )?;
     validate_path_user_id(&user_id)?;
 
     let memory_type = query
@@ -84,10 +109,9 @@ pub async fn list_user_memories(
         .transpose()?;
 
     if query.limit == 0 {
-        return Err(MemcoreError::ValidationError(
-            "limit must be greater than 0".to_string(),
-        )
-        .into());
+        return Err(
+            MemcoreError::ValidationError("limit must be greater than 0".to_string()).into(),
+        );
     }
 
     if query.limit > memcore_core::MAX_LIST_MEMORIES_LIMIT {
@@ -123,12 +147,14 @@ pub async fn delete_user_memory(
     auth: Option<Extension<AuthContext>>,
     Path((user_id, memory_id)): Path<(String, String)>,
 ) -> Result<Json<DeleteMemoryResponse>, ApiError> {
-    check_scope(auth.as_ref().map(|extension| &extension.0), ApiKeyScope::MemoryDelete)?;
+    check_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        ApiKeyScope::MemoryDelete,
+    )?;
     validate_path_user_id(&user_id)?;
 
-    let memory_id = Uuid::parse_str(memory_id.trim()).map_err(|_| {
-        MemcoreError::ValidationError("invalid memory_id".to_string())
-    })?;
+    let memory_id = Uuid::parse_str(memory_id.trim())
+        .map_err(|_| MemcoreError::ValidationError("invalid memory_id".to_string()))?;
 
     let tenant = TenantContext::new(organization.org_id, user_id)?;
 

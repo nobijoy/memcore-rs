@@ -3,26 +3,27 @@ mod paths;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::dto::{
-    AddMemoryRequest, AddMemoryResponse, ApiKeyItemResponse, ApiKeyScopeResponse,
-    BuildContextRequest, BuildContextResponse, ContextBudgetResponse,
-    ContextCacheMetricsBodyResponse, ContextCacheMetricsResponse, ContextCacheResponse,
-    ContextCompressionResponse, ContextMemoryResponse, CreateApiKeyRequest,
-    CreateApiKeyResponse, DeleteMemoryResponse, ExportFactItemResponse, ExportMemorySourceResponse,
-    ApplyRetentionRequest, ApplyRetentionResponse, ApplyRetentionSummaryResponse, ExportUserResponse,
-    ForgetUserResponse, ImportUserDataRequest, ImportUserDataResponse, ImportUserDataSummaryResponse,
-    ImportValidationIssueResponse, ImportValidationSummaryResponse, ListApiKeysResponse,
-    ListMemoriesResponse, ListOrgUsersResponse, OrgSummaryBodyResponse, OrgSummaryResponse,
-    OrgUserSummaryResponse, SearchOrgMemoryEventsResponse, AdminOrgMemoryEventItemResponse,
-    ListMemoryEventsResponse, ListMemoryItemResponse, MemoryEventItemResponse,
-    MemoryEventOperationResponse, MemoryItemResponse, MemoryMessageRequest,
-    MemoryOperationSummaryResponse, RevokeApiKeyResponse, SearchMemoryFiltersRequest,
-    SearchMemoryRequest, SearchMemoryResponse, SearchMemoryResultResponse, UserMemoryExportResponse,
-    ProviderUsageEventItemResponse, ProviderUsageQueryParams, ProviderUsageResponse,
-    ProviderUsageSummaryResponse, ApplyProviderUsageRetentionRequest,
-    ApplyProviderUsageRetentionResponse, ApplyProviderUsageRetentionSummaryResponse,
-};
 use crate::dto::memories::MemoryTypeResponse;
+use crate::dto::{
+    AddMemoryRequest, AddMemoryResponse, AdminOrgMemoryEventItemResponse, ApiKeyItemResponse,
+    ApiKeyScopeResponse, ApplyProviderUsageRetentionRequest, ApplyProviderUsageRetentionResponse,
+    ApplyProviderUsageRetentionSummaryResponse, ApplyRetentionRequest, ApplyRetentionResponse,
+    ApplyRetentionSummaryResponse, BuildContextRequest, BuildContextResponse,
+    ContextBudgetResponse, ContextCacheMetricsBodyResponse, ContextCacheMetricsResponse,
+    ContextCacheResponse, ContextCompressionResponse, ContextMemoryResponse, CreateApiKeyRequest,
+    CreateApiKeyResponse, DeleteMemoryResponse, ExportFactItemResponse, ExportMemorySourceResponse,
+    ExportUserResponse, ForgetUserResponse, ImportUserDataRequest, ImportUserDataResponse,
+    ImportUserDataSummaryResponse, ImportValidationIssueResponse, ImportValidationSummaryResponse,
+    ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse, ListMemoryItemResponse,
+    ListOrgUsersResponse, MemoryEventItemResponse, MemoryEventOperationResponse,
+    MemoryItemResponse, MemoryMessageRequest, MemoryOperationSummaryResponse,
+    OrgQuotaLimitsResponse, OrgQuotaStatusBodyResponse, OrgQuotaStatusResponse,
+    OrgQuotaUsageResponse, OrgSummaryBodyResponse, OrgSummaryResponse, OrgUserSummaryResponse,
+    ProviderUsageEventItemResponse, ProviderUsageQueryParams, ProviderUsageResponse,
+    ProviderUsageSummaryResponse, QuotaViolationResponse, RevokeApiKeyResponse,
+    SearchMemoryFiltersRequest, SearchMemoryRequest, SearchMemoryResponse,
+    SearchMemoryResultResponse, SearchOrgMemoryEventsResponse, UserMemoryExportResponse,
+};
 use crate::response::{ErrorBody, ErrorDetail};
 use crate::routes::health::{HealthResponse, ReadyResponse};
 
@@ -57,6 +58,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         paths::list_org_users,
         paths::search_org_memory_events,
         paths::get_context_cache_metrics,
+        paths::get_org_quotas,
         paths::get_provider_usage,
         paths::apply_provider_usage_retention,
     ),
@@ -114,6 +116,11 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         AdminOrgMemoryEventItemResponse,
         ContextCacheMetricsResponse,
         ContextCacheMetricsBodyResponse,
+        OrgQuotaStatusResponse,
+        OrgQuotaStatusBodyResponse,
+        OrgQuotaLimitsResponse,
+        OrgQuotaUsageResponse,
+        QuotaViolationResponse,
         ProviderUsageResponse,
         ProviderUsageSummaryResponse,
         ProviderUsageEventItemResponse,

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{Fact, MemoryType, TenantContext};
 use crate::pagination::PageCursor;
+use crate::{Fact, MemoryType, TenantContext};
 
 /// Result of a fact retention prune operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,19 +91,11 @@ pub trait FactStore: Send + Sync {
 
     async fn update_fact(&self, tenant: &TenantContext, fact: Fact) -> MemcoreResult<Fact>;
 
-    async fn get_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<Option<Fact>>;
+    async fn get_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<Option<Fact>>;
 
     async fn search_facts(&self, query: FactSearchQuery) -> MemcoreResult<Vec<Fact>>;
 
-    async fn soft_delete_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()>;
+    async fn soft_delete_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()>;
 
     async fn delete_user_data(&self, tenant: &TenantContext) -> MemcoreResult<()>;
 
@@ -118,6 +110,9 @@ pub trait FactStore: Send + Sync {
 
     /// Counts active (non-deleted) facts for an organization.
     async fn count_facts_by_org(&self, org_id: &str) -> MemcoreResult<usize>;
+
+    /// Counts active (non-deleted) facts for one tenant user.
+    async fn count_facts_by_user(&self, tenant: &TenantContext) -> MemcoreResult<usize>;
 
     /// Counts distinct users with at least one active fact in the organization.
     async fn count_users_by_org(&self, org_id: &str) -> MemcoreResult<usize>;
@@ -142,11 +137,7 @@ pub trait VectorStore: Send + Sync {
         query: VectorSearchQuery,
     ) -> MemcoreResult<Vec<VectorSearchResult>>;
 
-    async fn delete_by_fact_id(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()>;
+    async fn delete_by_fact_id(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()>;
 
     async fn delete_by_user(&self, tenant: &TenantContext) -> MemcoreResult<()>;
 }

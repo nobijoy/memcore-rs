@@ -6,11 +6,11 @@ use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::{QueryBuilder, Row, Sqlite};
 use uuid::Uuid;
 
-use memcore_core::ports::FactSearchQuery;
 use crate::sqlite::conversions::{
     datetime_to_str, memory_source_to_str, memory_type_to_str, metadata_to_str,
     optional_datetime_to_str, row_to_fact,
 };
+use memcore_core::ports::FactSearchQuery;
 use memcore_core::ports::{FactStore, RetentionPruneResult};
 
 fn storage_error(context: impl Into<String>, error: impl std::fmt::Display) -> MemcoreError {
@@ -226,17 +226,16 @@ impl FactStore for SqliteFactStore {
         .map_err(|error| storage_error("failed to update fact", error))?;
 
         if result.rows_affected() == 0 {
-            return Err(MemcoreError::NotFound(format!("fact not found: {}", fact.id)));
+            return Err(MemcoreError::NotFound(format!(
+                "fact not found: {}",
+                fact.id
+            )));
         }
 
         Ok(fact)
     }
 
-    async fn get_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<Option<Fact>> {
+    async fn get_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<Option<Fact>> {
         self.fetch_fact_row(tenant, fact_id, false).await
     }
 
@@ -275,9 +274,11 @@ impl FactStore for SqliteFactStore {
         }
 
         builder.push(" ORDER BY updated_at DESC, id DESC LIMIT ");
-        builder.push_bind(i64::try_from(fetch_limit(query.limit)).map_err(|error| {
-            storage_error("fact search limit out of range for sqlite", error)
-        })?);
+        builder.push_bind(
+            i64::try_from(fetch_limit(query.limit)).map_err(|error| {
+                storage_error("fact search limit out of range for sqlite", error)
+            })?,
+        );
 
         let rows = builder
             .build()
@@ -288,11 +289,7 @@ impl FactStore for SqliteFactStore {
         rows.iter().map(parse_row).collect()
     }
 
-    async fn soft_delete_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()> {
+    async fn soft_delete_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()> {
         let deleted_at = datetime_to_str(Utc::now());
         let result = sqlx::query(
             "UPDATE facts SET deleted_at = ? WHERE id = ? AND org_id = ? AND user_id = ? AND deleted_at IS NULL",
@@ -347,8 +344,7 @@ impl FactStore for SqliteFactStore {
                 let id_str: String = row
                     .try_get("id")
                     .map_err(|error| storage_error("row id", error))?;
-                Uuid::parse_str(&id_str)
-                    .map_err(|error| storage_error("invalid fact id", error))
+                Uuid::parse_str(&id_str).map_err(|error| storage_error("invalid fact id", error))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -392,6 +388,22 @@ impl FactStore for SqliteFactStore {
         .fetch_one(&self.pool)
         .await
         .map_err(|error| storage_error("failed to count facts by org", error))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|error| storage_error("row count", error))?;
+        Ok(count as usize)
+    }
+
+    async fn count_facts_by_user(&self, tenant: &TenantContext) -> MemcoreResult<usize> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) as count FROM facts WHERE org_id = ? AND user_id = ? AND deleted_at IS NULL",
+        )
+        .bind(&tenant.org_id)
+        .bind(&tenant.user_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to count facts by user", error))?;
 
         let count: i64 = row
             .try_get("count")
@@ -794,11 +806,13 @@ mod tests {
             .await
             .expect("soft delete should succeed");
 
-        assert!(store
-            .get_fact(&tenant, fact.id)
-            .await
-            .expect("get should succeed")
-            .is_none());
+        assert!(
+            store
+                .get_fact(&tenant, fact.id)
+                .await
+                .expect("get should succeed")
+                .is_none()
+        );
 
         let results = store
             .search_facts(FactSearchQuery::new(tenant.clone(), 10))
@@ -888,11 +902,13 @@ mod tests {
             .await
             .expect("delete should succeed");
 
-        assert!(store
-            .search_facts(FactSearchQuery::new(tenant_a, 10))
-            .await
-            .expect("search")
-            .is_empty());
+        assert!(
+            store
+                .search_facts(FactSearchQuery::new(tenant_a, 10))
+                .await
+                .expect("search")
+                .is_empty()
+        );
         assert_eq!(
             store
                 .search_facts(FactSearchQuery::new(tenant_b, 10))
@@ -1018,10 +1034,7 @@ mod tests {
             .soft_delete_fact(&tenant_a, fact_deleted.id)
             .await
             .expect("soft delete");
-        store
-            .insert_fact(&tenant_b, fact_b)
-            .await
-            .expect("insert");
+        store.insert_fact(&tenant_b, fact_b).await.expect("insert");
         store
             .insert_fact(&other_org, fact_other)
             .await
@@ -1040,6 +1053,13 @@ mod tests {
                 .await
                 .expect("count users"),
             2
+        );
+        assert_eq!(
+            store
+                .count_facts_by_user(&tenant_a)
+                .await
+                .expect("count user facts"),
+            1
         );
 
         let users = store

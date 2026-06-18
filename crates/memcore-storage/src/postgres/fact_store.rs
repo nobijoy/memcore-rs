@@ -202,17 +202,16 @@ impl FactStore for PostgresFactStore {
         .map_err(|error| storage_error("failed to update fact", error))?;
 
         if result.rows_affected() == 0 {
-            return Err(MemcoreError::NotFound(format!("fact not found: {}", fact.id)));
+            return Err(MemcoreError::NotFound(format!(
+                "fact not found: {}",
+                fact.id
+            )));
         }
 
         Ok(fact)
     }
 
-    async fn get_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<Option<Fact>> {
+    async fn get_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<Option<Fact>> {
         self.fetch_fact_row(tenant, fact_id, false).await
     }
 
@@ -264,11 +263,7 @@ impl FactStore for PostgresFactStore {
         rows.iter().map(parse_row).collect()
     }
 
-    async fn soft_delete_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()> {
+    async fn soft_delete_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()> {
         let deleted_at = Utc::now();
         let result = sqlx::query(
             "UPDATE facts SET deleted_at = $1 WHERE id = $2 AND org_id = $3 AND user_id = $4 AND deleted_at IS NULL",
@@ -363,6 +358,22 @@ impl FactStore for PostgresFactStore {
         .fetch_one(&self.pool)
         .await
         .map_err(|error| storage_error("failed to count facts by org", error))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|error| storage_error("row count", error))?;
+        Ok(count as usize)
+    }
+
+    async fn count_facts_by_user(&self, tenant: &TenantContext) -> MemcoreResult<usize> {
+        let row = sqlx::query(
+            "SELECT COUNT(*)::bigint AS count FROM facts WHERE org_id = $1 AND user_id = $2 AND deleted_at IS NULL",
+        )
+        .bind(&tenant.org_id)
+        .bind(&tenant.user_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| storage_error("failed to count facts by user", error))?;
 
         let count: i64 = row
             .try_get("count")

@@ -8,13 +8,13 @@ use memcore_core::{Fact, TenantContext};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::keyword_search::event_matches_keyword;
 use memcore_core::pagination::{is_after_cursor_in_desc_order, page_fetch_limit};
 use memcore_core::ports::{
     ApiKeyListQuery, ApiKeyStore, FactSearchQuery, FactStore, MemoryEventQuery, MemoryEventStore,
     OrgMemoryEventQuery, OrgUserListQuery, OrgUserSummary, RetentionPruneResult, VectorRecord,
     VectorSearchQuery, VectorSearchResult, VectorStore,
 };
-use crate::keyword_search::event_matches_keyword;
 
 use memcore_core::{ApiKeyRecord, MemoryEvent};
 
@@ -156,11 +156,7 @@ impl FactStore for MockFactStore {
         Ok(fact)
     }
 
-    async fn get_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<Option<Fact>> {
+    async fn get_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<Option<Fact>> {
         let facts = self.facts.read().expect("facts lock poisoned");
         let Some(fact) = facts.get(&fact_id) else {
             return Ok(None);
@@ -209,11 +205,7 @@ impl FactStore for MockFactStore {
             })
             .filter(|fact| {
                 query.cursor.as_ref().is_none_or(|cursor| {
-                    is_after_cursor_in_desc_order(
-                        fact.updated_at,
-                        &fact.id.to_string(),
-                        cursor,
-                    )
+                    is_after_cursor_in_desc_order(fact.updated_at, &fact.id.to_string(), cursor)
                 })
             })
             .cloned()
@@ -228,11 +220,7 @@ impl FactStore for MockFactStore {
         Ok(results)
     }
 
-    async fn soft_delete_fact(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()> {
+    async fn soft_delete_fact(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()> {
         let facts = self.facts.read().expect("facts lock poisoned");
         let Some(fact) = facts.get(&fact_id) else {
             return Err(MemcoreError::NotFound(format!("fact not found: {fact_id}")));
@@ -306,6 +294,16 @@ impl FactStore for MockFactStore {
             .count())
     }
 
+    async fn count_facts_by_user(&self, tenant: &TenantContext) -> MemcoreResult<usize> {
+        let facts = self.facts.read().expect("facts lock poisoned");
+        let deleted_set = self.deleted.read().expect("deleted lock poisoned");
+        Ok(facts
+            .values()
+            .filter(|fact| fact_matches_tenant(fact, tenant))
+            .filter(|fact| !deleted_set.contains(&fact.id))
+            .count())
+    }
+
     async fn count_users_by_org(&self, org_id: &str) -> MemcoreResult<usize> {
         let facts = self.facts.read().expect("facts lock poisoned");
         let deleted_set = self.deleted.read().expect("deleted lock poisoned");
@@ -330,9 +328,7 @@ impl FactStore for MockFactStore {
             if fact.org_id != query.org_id || deleted_set.contains(&fact.id) {
                 continue;
             }
-            let entry = aggregates
-                .entry(fact.user_id.clone())
-                .or_insert((0, None));
+            let entry = aggregates.entry(fact.user_id.clone()).or_insert((0, None));
             entry.0 += 1;
             entry.1 = Some(match entry.1 {
                 Some(current) => current.max(fact.updated_at),
@@ -358,9 +354,7 @@ impl FactStore for MockFactStore {
         users.sort_by(|a, b| {
             let a_sort = a.last_memory_at.unwrap_or(DateTime::<Utc>::MIN_UTC);
             let b_sort = b.last_memory_at.unwrap_or(DateTime::<Utc>::MIN_UTC);
-            b_sort
-                .cmp(&a_sort)
-                .then_with(|| b.user_id.cmp(&a.user_id))
+            b_sort.cmp(&a_sort).then_with(|| b.user_id.cmp(&a.user_id))
         });
         users.truncate(page_fetch_limit(query.limit));
         Ok(users)
@@ -432,11 +426,7 @@ impl VectorStore for MockVectorStore {
         Ok(scored)
     }
 
-    async fn delete_by_fact_id(
-        &self,
-        tenant: &TenantContext,
-        fact_id: Uuid,
-    ) -> MemcoreResult<()> {
+    async fn delete_by_fact_id(&self, tenant: &TenantContext, fact_id: Uuid) -> MemcoreResult<()> {
         let mut records = self.records.write().expect("records lock poisoned");
         let before = records.len();
         records.retain(|_, record| {
@@ -457,7 +447,9 @@ impl VectorStore for MockVectorStore {
         self.records
             .write()
             .expect("records lock poisoned")
-            .retain(|_, record| (record.org_id.as_str(), record.user_id.as_str()) != (&key.0, &key.1));
+            .retain(|_, record| {
+                (record.org_id.as_str(), record.user_id.as_str()) != (&key.0, &key.1)
+            });
         Ok(())
     }
 }
@@ -516,17 +508,14 @@ impl MemoryEventStore for MockMemoryEventStore {
                     .is_none_or(|created_before| event.created_at < created_before)
             })
             .filter(|event| {
-                query.query_text.as_ref().is_none_or(|text| {
-                    event_matches_keyword(event, text, false)
-                })
+                query
+                    .query_text
+                    .as_ref()
+                    .is_none_or(|text| event_matches_keyword(event, text, false))
             })
             .filter(|event| {
                 query.cursor.as_ref().is_none_or(|cursor| {
-                    is_after_cursor_in_desc_order(
-                        event.created_at,
-                        &event.id.to_string(),
-                        cursor,
-                    )
+                    is_after_cursor_in_desc_order(event.created_at, &event.id.to_string(), cursor)
                 })
             })
             .cloned()
@@ -578,17 +567,14 @@ impl MemoryEventStore for MockMemoryEventStore {
                     .is_none_or(|created_before| event.created_at < created_before)
             })
             .filter(|event| {
-                query.query_text.as_ref().is_none_or(|text| {
-                    event_matches_keyword(event, text, true)
-                })
+                query
+                    .query_text
+                    .as_ref()
+                    .is_none_or(|text| event_matches_keyword(event, text, true))
             })
             .filter(|event| {
                 query.cursor.as_ref().is_none_or(|cursor| {
-                    is_after_cursor_in_desc_order(
-                        event.created_at,
-                        &event.id.to_string(),
-                        cursor,
-                    )
+                    is_after_cursor_in_desc_order(event.created_at, &event.id.to_string(), cursor)
                 })
             })
             .cloned()
@@ -621,9 +607,7 @@ impl MemoryEventStore for MockMemoryEventStore {
             return Ok(count);
         }
 
-        events.retain(|event| {
-            !(event_matches_tenant(event, tenant) && event.created_at < cutoff)
-        });
+        events.retain(|event| !(event_matches_tenant(event, tenant) && event.created_at < cutoff));
 
         Ok(before_len - events.len())
     }
@@ -669,17 +653,16 @@ impl ApiKeyStore for MockApiKeyStore {
             .iter_mut()
             .find(|record| record.id == key_id && record.org_id == org_id && record.is_active())
         else {
-            return Err(MemcoreError::NotFound(format!("api key not found: {key_id}")));
+            return Err(MemcoreError::NotFound(format!(
+                "api key not found: {key_id}"
+            )));
         };
 
         record.revoked_at = Some(Utc::now());
         Ok(())
     }
 
-    async fn list_api_keys(
-        &self,
-        query: ApiKeyListQuery,
-    ) -> MemcoreResult<Vec<ApiKeyRecord>> {
+    async fn list_api_keys(&self, query: ApiKeyListQuery) -> MemcoreResult<Vec<ApiKeyRecord>> {
         let keys = self.keys.read().expect("api keys lock poisoned");
         let mut results: Vec<ApiKeyRecord> = keys
             .iter()
@@ -687,11 +670,7 @@ impl ApiKeyStore for MockApiKeyStore {
             .filter(|record| query.include_revoked || record.is_active())
             .filter(|record| {
                 query.cursor.as_ref().is_none_or(|cursor| {
-                    is_after_cursor_in_desc_order(
-                        record.created_at,
-                        &record.id.to_string(),
-                        cursor,
-                    )
+                    is_after_cursor_in_desc_order(record.created_at, &record.id.to_string(), cursor)
                 })
             })
             .cloned()
@@ -816,11 +795,13 @@ mod api_key_store_tests {
             .revoke_api_key("org_mock", record.id)
             .await
             .expect("revoke should succeed");
-        assert!(store
-            .find_by_hash(&record.key_hash)
-            .await
-            .expect("find should succeed")
-            .is_none());
+        assert!(
+            store
+                .find_by_hash(&record.key_hash)
+                .await
+                .expect("find should succeed")
+                .is_none()
+        );
     }
 }
 
@@ -1164,11 +1145,14 @@ mod tests {
         let query_a = FactSearchQuery::new(tenant_a, 10);
         let query_b = FactSearchQuery::new(tenant_b, 10);
 
-        assert!(store.search_facts(query_a).await.expect("search").is_empty());
-        assert_eq!(
-            store.search_facts(query_b).await.expect("search").len(),
-            1
+        assert!(
+            store
+                .search_facts(query_a)
+                .await
+                .expect("search")
+                .is_empty()
         );
+        assert_eq!(store.search_facts(query_b).await.expect("search").len(), 1);
     }
 
     #[tokio::test]
@@ -1275,11 +1259,13 @@ mod tests {
             metadata_filter: None,
         };
 
-        assert!(store
-            .search_vectors(query)
-            .await
-            .expect("search should succeed")
-            .is_empty());
+        assert!(
+            store
+                .search_vectors(query)
+                .await
+                .expect("search should succeed")
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -1337,17 +1323,15 @@ mod tests {
             metadata_filter: None,
         };
 
-        assert!(store
-            .search_vectors(query_a)
-            .await
-            .expect("search")
-            .is_empty());
-        assert_eq!(
+        assert!(
             store
-                .search_vectors(query_b)
+                .search_vectors(query_a)
                 .await
                 .expect("search")
-                .len(),
+                .is_empty()
+        );
+        assert_eq!(
+            store.search_vectors(query_b).await.expect("search").len(),
             1
         );
     }
@@ -1355,9 +1339,9 @@ mod tests {
     #[tokio::test]
     async fn memory_event_store_enforces_tenant_on_record() {
         use super::MockMemoryEventStore;
+        use crate::traits::MemoryEventStore;
         use memcore_common::MemcoreError;
         use memcore_core::MemoryEventOperation;
-        use crate::traits::MemoryEventStore;
 
         let store = MockMemoryEventStore::new();
         let tenant_a = tenant("org_a", "user_a");
@@ -1443,11 +1427,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mock_count_facts_by_user_excludes_deleted_other_users_and_orgs() {
+        let store = MockFactStore::new();
+        let tenant_a = tenant("org_count_user", "user_a");
+        let tenant_b = tenant("org_count_user", "user_b");
+        let other_org = tenant("org_other_count", "user_a");
+
+        let deleted_fact = store
+            .insert_fact(
+                &tenant_a,
+                sample_fact("org_count_user", "user_a", "deleted", MemoryType::Profile),
+            )
+            .await
+            .expect("insert deleted");
+        store
+            .insert_fact(
+                &tenant_a,
+                sample_fact("org_count_user", "user_a", "active", MemoryType::Profile),
+            )
+            .await
+            .expect("insert active");
+        store
+            .insert_fact(
+                &tenant_b,
+                sample_fact(
+                    "org_count_user",
+                    "user_b",
+                    "other user",
+                    MemoryType::Profile,
+                ),
+            )
+            .await
+            .expect("insert other user");
+        store
+            .insert_fact(
+                &other_org,
+                sample_fact(
+                    "org_other_count",
+                    "user_a",
+                    "other org",
+                    MemoryType::Profile,
+                ),
+            )
+            .await
+            .expect("insert other org");
+        store
+            .soft_delete_fact(&tenant_a, deleted_fact.id)
+            .await
+            .expect("delete");
+
+        assert_eq!(
+            store
+                .count_facts_by_user(&tenant_a)
+                .await
+                .expect("count user"),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn org_audit_mock_list_events_by_org() {
         use super::MockMemoryEventStore;
+        use crate::traits::MemoryEventStore;
         use memcore_core::MemoryEventOperation;
         use memcore_core::ports::OrgMemoryEventQuery;
-        use crate::traits::MemoryEventStore;
 
         let store = MockMemoryEventStore::new();
         let tenant_a = tenant("org_mock_audit", "user_a");
@@ -1508,10 +1551,7 @@ mod tests {
             .expect("record");
 
         let events = store
-            .list_events_by_org(OrgMemoryEventQuery::new(
-                "org_mock_audit".to_string(),
-                10,
-            ))
+            .list_events_by_org(OrgMemoryEventQuery::new("org_mock_audit".to_string(), 10))
             .await
             .expect("list");
         assert_eq!(events.len(), 2);

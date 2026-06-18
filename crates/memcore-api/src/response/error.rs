@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 use memcore_common::MemcoreError;
 use serde::Serialize;
+use serde_json::{Value, json};
 use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -13,6 +14,8 @@ pub struct ErrorDetail {
     pub code: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
 }
 
@@ -22,9 +25,15 @@ impl ErrorBody {
             error: ErrorDetail {
                 code: code.into(),
                 message: message.into(),
+                details: None,
                 request_id: None,
             },
         }
+    }
+
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.error.details = Some(details);
+        self
     }
 
     pub fn with_request_id(mut self, request_id: Option<String>) -> Self {
@@ -45,6 +54,7 @@ impl ErrorBody {
             MemcoreError::ValidationError(_) => StatusCode::BAD_REQUEST,
             MemcoreError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             MemcoreError::Timeout(_) => StatusCode::GATEWAY_TIMEOUT,
+            MemcoreError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
         };
 
         let code = match &error {
@@ -59,9 +69,27 @@ impl ErrorBody {
             MemcoreError::ValidationError(_) => "VALIDATION_ERROR",
             MemcoreError::Internal(_) => "INTERNAL_ERROR",
             MemcoreError::Timeout(_) => "TIMEOUT",
+            MemcoreError::QuotaExceeded { .. } => "QUOTA_EXCEEDED",
         };
 
-        (status, Self::new(code, api_error_message(&error)))
+        let body = Self::new(code, api_error_message(&error));
+        let body = match &error {
+            MemcoreError::QuotaExceeded {
+                kind,
+                limit,
+                current,
+                requested,
+                ..
+            } => body.with_details(json!({
+                "kind": kind,
+                "limit": limit,
+                "current": current,
+                "requested": requested,
+            })),
+            _ => body,
+        };
+
+        (status, body)
     }
 }
 
@@ -75,6 +103,7 @@ fn api_error_message(error: &MemcoreError) -> String {
         | MemcoreError::StorageError(message)
         | MemcoreError::Internal(message)
         | MemcoreError::Timeout(message) => message.clone(),
+        MemcoreError::QuotaExceeded { message, .. } => message.clone(),
         MemcoreError::Unauthorized => "unauthorized".to_string(),
         MemcoreError::Forbidden => "forbidden".to_string(),
         MemcoreError::RateLimited => "rate limit exceeded".to_string(),

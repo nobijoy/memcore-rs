@@ -28,7 +28,9 @@ pub fn is_retryable_provider_error(error: &MemcoreError) -> bool {
         | MemcoreError::BadRequest(_)
         | MemcoreError::NotFound(_)
         | MemcoreError::Conflict(_) => false,
-        MemcoreError::StorageError(_) | MemcoreError::Internal(_) => false,
+        MemcoreError::StorageError(_)
+        | MemcoreError::Internal(_)
+        | MemcoreError::QuotaExceeded { .. } => false,
     }
 }
 
@@ -127,7 +129,9 @@ mod tests {
     #[test]
     fn retryable_errors_include_timeout_rate_limit_and_5xx() {
         assert!(is_retryable_provider_error(&MemcoreError::RateLimited));
-        assert!(is_retryable_provider_error(&MemcoreError::provider_timeout()));
+        assert!(is_retryable_provider_error(
+            &MemcoreError::provider_timeout()
+        ));
         assert!(is_retryable_provider_error(&MemcoreError::ProviderError(
             "OpenAI API error (503): service unavailable".to_string()
         )));
@@ -140,9 +144,9 @@ mod tests {
     fn non_retryable_errors_include_auth_and_validation() {
         assert!(!is_retryable_provider_error(&MemcoreError::Unauthorized));
         assert!(!is_retryable_provider_error(&MemcoreError::Forbidden));
-        assert!(!is_retryable_provider_error(&MemcoreError::ValidationError(
-            "bad input".to_string()
-        )));
+        assert!(!is_retryable_provider_error(
+            &MemcoreError::ValidationError("bad input".to_string())
+        ));
         assert!(!is_retryable_provider_error(&MemcoreError::ProviderError(
             "OpenAI API key is unauthorized".to_string()
         )));

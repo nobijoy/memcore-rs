@@ -59,14 +59,8 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/v1/api-keys/{api_key_id}",
             delete(api_keys::revoke_api_key),
         )
-        .route(
-            "/api/v1/admin/org/summary",
-            get(admin::get_org_summary),
-        )
-        .route(
-            "/api/v1/admin/org/users",
-            get(admin::list_org_users),
-        )
+        .route("/api/v1/admin/org/summary", get(admin::get_org_summary))
+        .route("/api/v1/admin/org/users", get(admin::list_org_users))
         .route(
             "/api/v1/admin/org/memory-events",
             get(admin::search_org_memory_events),
@@ -75,6 +69,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/v1/admin/org/cache/context/metrics",
             get(admin::get_context_cache_metrics),
         )
+        .route("/api/v1/admin/org/quotas", get(admin::get_org_quotas))
         .route(
             "/api/v1/admin/org/provider-usage",
             get(admin::get_provider_usage),

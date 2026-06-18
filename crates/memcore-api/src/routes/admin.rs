@@ -2,22 +2,23 @@ use axum::Json;
 use axum::extract::{Extension, Query, State};
 use memcore_common::MemcoreError;
 use memcore_core::{
-    parse_optional_cursor, validate_provider_usage_limit, ApiKeyScope, ListOrgUsersInput,
-    ProviderUsageQuery, SearchOrgMemoryEventsInput,
+    ApiKeyScope, GetOrgQuotaStatusInput, ListOrgUsersInput, ProviderUsageQuery,
+    SearchOrgMemoryEventsInput, parse_optional_cursor, validate_provider_usage_limit,
 };
 use uuid::Uuid;
 
 use crate::dto::{
-    context_cache_metrics_response, parse_event_date_filters, parse_memory_event_operation_label,
-    parse_provider_usage_capability, provider_usage_memory_response, provider_usage_persisted_response,
-    ContextCacheMetricsResponse, ListOrgUsersQuery, ProviderUsageQueryParams, ProviderUsageResponse,
-    ListOrgUsersResponse, OrgSummaryResponse, SearchOrgMemoryEventsQuery,
-    SearchOrgMemoryEventsResponse, org_summary_input, parse_keyword_query,
-    validate_list_org_users_limit,
+    ContextCacheMetricsResponse, ListOrgUsersQuery, ListOrgUsersResponse, OrgQuotaStatusResponse,
+    OrgQuotasQuery, OrgSummaryResponse, ProviderUsageQueryParams, ProviderUsageResponse,
+    SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, context_cache_metrics_response,
+    org_quota_limits_from_settings, org_quota_status_response, org_summary_input,
+    parse_event_date_filters, parse_keyword_query, parse_memory_event_operation_label,
+    parse_provider_usage_capability, provider_usage_memory_response,
+    provider_usage_persisted_response, validate_list_org_users_limit,
     validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
-use crate::routes::common::{check_any_scope, ApiError};
+use crate::routes::common::{ApiError, check_any_scope};
 use crate::security::AuthContext;
 use crate::state::AppState;
 
@@ -83,16 +84,10 @@ pub async fn search_org_memory_events(
         .map(parse_memory_event_operation_label)
         .transpose()?;
 
-    let fact_id = query
-        .fact_id
-        .as_deref()
-        .map(parse_fact_id)
-        .transpose()?;
+    let fact_id = query.fact_id.as_deref().map(parse_fact_id).transpose()?;
 
-    let (created_after, created_before) = parse_event_date_filters(
-        query.created_after.as_ref(),
-        query.created_before.as_ref(),
-    )?;
+    let (created_after, created_before) =
+        parse_event_date_filters(query.created_after.as_ref(), query.created_before.as_ref())?;
     let query_text = parse_keyword_query(query.q)?;
 
     let input = SearchOrgMemoryEventsInput {
@@ -127,6 +122,30 @@ pub async fn get_context_cache_metrics(
     Ok(Json(context_cache_metrics_response(snapshot)))
 }
 
+pub async fn get_org_quotas(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Query(query): Query<OrgQuotasQuery>,
+) -> Result<Json<OrgQuotaStatusResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    let limits = org_quota_limits_from_settings(&state.settings);
+    let result = state
+        .memory_engine
+        .get_org_quota_status(GetOrgQuotaStatusInput {
+            org_id: organization.org_id,
+            user_id: query.user_id,
+            limits,
+        })
+        .await?;
+
+    Ok(Json(org_quota_status_response(result)))
+}
+
 pub async fn get_provider_usage(
     State(state): State<AppState>,
     Extension(organization): Extension<OrganizationContext>,
@@ -144,10 +163,8 @@ pub async fn get_provider_usage(
         .as_deref()
         .map(parse_provider_usage_capability)
         .transpose()?;
-    let (created_after, created_before) = parse_event_date_filters(
-        query.created_after.as_ref(),
-        query.created_before.as_ref(),
-    )?;
+    let (created_after, created_before) =
+        parse_event_date_filters(query.created_after.as_ref(), query.created_before.as_ref())?;
     let cursor = parse_optional_cursor(query.cursor)?;
 
     let use_persistent = match query.source.as_deref() {
@@ -155,10 +172,7 @@ pub async fn get_provider_usage(
         Some("persistent") => true,
         None => state.provider_usage_store.is_some(),
         Some(other) => {
-            return Err(MemcoreError::ValidationError(format!(
-                "invalid source: {other}"
-            ))
-            .into())
+            return Err(MemcoreError::ValidationError(format!("invalid source: {other}")).into());
         }
     };
 
@@ -178,7 +192,10 @@ pub async fn get_provider_usage(
                     cursor,
                 })
                 .await?;
-            return Ok(Json(provider_usage_persisted_response("persistent", result)));
+            return Ok(Json(provider_usage_persisted_response(
+                "persistent",
+                result,
+            )));
         }
     }
 

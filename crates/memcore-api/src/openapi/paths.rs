@@ -3,15 +3,14 @@
 #![allow(dead_code)]
 
 use crate::dto::{
-    AddMemoryRequest, AddMemoryResponse, BuildContextRequest, BuildContextResponse,
-    CreateApiKeyRequest, CreateApiKeyResponse, ContextCacheMetricsResponse, DeleteMemoryResponse, ExportUserResponse,
-    ApplyRetentionRequest, ApplyRetentionResponse, ApplyProviderUsageRetentionRequest,
-    ApplyProviderUsageRetentionResponse,
-    ForgetUserResponse, ImportUserDataRequest,
-    ImportUserDataResponse, ListApiKeysResponse, ListOrgUsersResponse, OrgSummaryResponse,
-    ProviderUsageResponse, SearchOrgMemoryEventsResponse,
-    ListMemoriesResponse, ListMemoryEventsResponse,
-    RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
+    AddMemoryRequest, AddMemoryResponse, ApplyProviderUsageRetentionRequest,
+    ApplyProviderUsageRetentionResponse, ApplyRetentionRequest, ApplyRetentionResponse,
+    BuildContextRequest, BuildContextResponse, ContextCacheMetricsResponse, CreateApiKeyRequest,
+    CreateApiKeyResponse, DeleteMemoryResponse, ExportUserResponse, ForgetUserResponse,
+    ImportUserDataRequest, ImportUserDataResponse, ListApiKeysResponse, ListMemoriesResponse,
+    ListMemoryEventsResponse, ListOrgUsersResponse, OrgQuotaStatusResponse, OrgSummaryResponse,
+    ProviderUsageResponse, RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
+    SearchOrgMemoryEventsResponse,
 };
 use crate::response::ErrorBody;
 use crate::routes::health::{HealthResponse, ReadyResponse};
@@ -428,6 +427,26 @@ pub fn search_org_memory_events() {}
     )
 )]
 pub fn get_context_cache_metrics() {}
+
+/// Organization quota status and configured limits.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/quotas",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+        ("user_id" = Option<String>, Query, description = "Optional user id for per-user memory count"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization quota status", body = OrgQuotaStatusResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_org_quotas() {}
 
 /// Provider usage events (persistent store) or process-local aggregates (`source=memory`).
 #[utoipa::path(

@@ -1,10 +1,12 @@
 use chrono::{DateTime, Utc};
 use memcore_common::MemcoreError;
+use memcore_config::Settings;
 use memcore_core::{
-    ContextCacheMetricsSnapshot, ListOrgUsersInput, ListOrgUsersOutput, MemoryEvent,
-    OrgSummaryInput, OrgSummaryOutput, OrgUserSummary, SearchOrgMemoryEventsOutput,
-    DEFAULT_LIST_ORG_USERS_LIMIT, DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
-    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT,
+    ContextCacheMetricsSnapshot, DEFAULT_LIST_ORG_USERS_LIMIT,
+    DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput,
+    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryEvent, OrgQuotaLimits,
+    OrgQuotaUsage, OrgSummaryInput, OrgSummaryOutput, OrgUserSummary, QuotaCheckResult,
+    QuotaLimitKind, QuotaViolation, SearchOrgMemoryEventsOutput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,6 +41,11 @@ pub struct ListOrgUsersQuery {
     #[serde(default = "default_list_org_users_limit")]
     pub limit: usize,
     pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct OrgQuotasQuery {
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -86,6 +93,51 @@ pub struct ContextCacheMetricsBodyResponse {
     pub compute_errors: u64,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgQuotaStatusResponse {
+    pub status: &'static str,
+    pub quotas: OrgQuotaStatusBodyResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgQuotaStatusBodyResponse {
+    pub allowed: bool,
+    pub limits: OrgQuotaLimitsResponse,
+    pub usage: OrgQuotaUsageResponse,
+    pub violations: Vec<QuotaViolationResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgQuotaLimitsResponse {
+    pub enabled: bool,
+    pub max_users_per_org: Option<u64>,
+    pub max_memories_per_user: Option<u64>,
+    pub max_memories_per_org: Option<u64>,
+    pub daily_provider_request_limit: Option<u64>,
+    pub daily_provider_token_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgQuotaUsageResponse {
+    pub org_id: String,
+    pub total_users: u64,
+    pub total_memories: u64,
+    pub user_memory_count: Option<u64>,
+    pub daily_provider_requests: u64,
+    pub daily_provider_tokens: u64,
+    pub window_start: DateTime<Utc>,
+    pub window_end: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct QuotaViolationResponse {
+    pub kind: String,
+    pub limit: u64,
+    pub current: u64,
+    pub requested: u64,
+    pub message: String,
+}
+
 impl From<ContextCacheMetricsSnapshot> for ContextCacheMetricsBodyResponse {
     fn from(snapshot: ContextCacheMetricsSnapshot) -> Self {
         Self {
@@ -105,12 +157,85 @@ impl From<ContextCacheMetricsSnapshot> for ContextCacheMetricsBodyResponse {
     }
 }
 
-pub fn context_cache_metrics_response(snapshot: ContextCacheMetricsSnapshot) -> ContextCacheMetricsResponse {
+pub fn context_cache_metrics_response(
+    snapshot: ContextCacheMetricsSnapshot,
+) -> ContextCacheMetricsResponse {
     ContextCacheMetricsResponse {
         status: "success",
         scope: "process_local",
         metrics: snapshot.into(),
     }
+}
+
+pub fn org_quota_limits_from_settings(settings: &Settings) -> OrgQuotaLimits {
+    OrgQuotaLimits::from_raw(
+        settings.quotas_enabled,
+        settings.max_users_per_org,
+        settings.max_memories_per_user,
+        settings.max_memories_per_org,
+        settings.daily_provider_request_limit,
+        settings.daily_provider_token_limit,
+    )
+}
+
+pub fn org_quota_status_response(result: QuotaCheckResult) -> OrgQuotaStatusResponse {
+    OrgQuotaStatusResponse {
+        status: "success",
+        quotas: OrgQuotaStatusBodyResponse {
+            allowed: result.allowed,
+            limits: result.limits.into(),
+            usage: result.usage.into(),
+            violations: result
+                .violations
+                .into_iter()
+                .map(QuotaViolationResponse::from)
+                .collect(),
+        },
+    }
+}
+
+impl From<OrgQuotaLimits> for OrgQuotaLimitsResponse {
+    fn from(limits: OrgQuotaLimits) -> Self {
+        Self {
+            enabled: limits.enabled,
+            max_users_per_org: limits.max_users_per_org,
+            max_memories_per_user: limits.max_memories_per_user,
+            max_memories_per_org: limits.max_memories_per_org,
+            daily_provider_request_limit: limits.daily_provider_request_limit,
+            daily_provider_token_limit: limits.daily_provider_token_limit,
+        }
+    }
+}
+
+impl From<OrgQuotaUsage> for OrgQuotaUsageResponse {
+    fn from(usage: OrgQuotaUsage) -> Self {
+        Self {
+            org_id: usage.org_id,
+            total_users: usage.total_users,
+            total_memories: usage.total_memories,
+            user_memory_count: usage.user_memory_count,
+            daily_provider_requests: usage.daily_provider_requests,
+            daily_provider_tokens: usage.daily_provider_tokens,
+            window_start: usage.window_start,
+            window_end: usage.window_end,
+        }
+    }
+}
+
+impl From<QuotaViolation> for QuotaViolationResponse {
+    fn from(violation: QuotaViolation) -> Self {
+        Self {
+            kind: quota_kind_label(violation.kind).to_string(),
+            limit: violation.limit,
+            current: violation.current,
+            requested: violation.requested,
+            message: violation.message,
+        }
+    }
+}
+
+fn quota_kind_label(kind: QuotaLimitKind) -> &'static str {
+    kind.as_str()
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -394,7 +519,11 @@ impl From<ListOrgUsersOutput> for ListOrgUsersResponse {
     fn from(output: ListOrgUsersOutput) -> Self {
         Self {
             status: "success",
-            users: output.users.into_iter().map(OrgUserSummaryResponse::from).collect(),
+            users: output
+                .users
+                .into_iter()
+                .map(OrgUserSummaryResponse::from)
+                .collect(),
             next_cursor: output.next_cursor,
         }
     }

@@ -67,8 +67,15 @@ const MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS: &str =
     "MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS";
 const MEMCORE_PROVIDER_USAGE_METRICS_ENABLED: &str = "MEMCORE_PROVIDER_USAGE_METRICS_ENABLED";
 const MEMCORE_PROVIDER_COST_TRACKING_ENABLED: &str = "MEMCORE_PROVIDER_COST_TRACKING_ENABLED";
-const MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED: &str = "MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED";
+const MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED: &str =
+    "MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED";
 const MEMCORE_PROVIDER_USAGE_RETENTION_DAYS: &str = "MEMCORE_PROVIDER_USAGE_RETENTION_DAYS";
+const MEMCORE_QUOTAS_ENABLED: &str = "MEMCORE_QUOTAS_ENABLED";
+const MEMCORE_MAX_USERS_PER_ORG: &str = "MEMCORE_MAX_USERS_PER_ORG";
+const MEMCORE_MAX_MEMORIES_PER_USER: &str = "MEMCORE_MAX_MEMORIES_PER_USER";
+const MEMCORE_MAX_MEMORIES_PER_ORG: &str = "MEMCORE_MAX_MEMORIES_PER_ORG";
+const MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT: &str = "MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT";
+const MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT: &str = "MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT";
 const MEMCORE_REDIS_URL: &str = "MEMCORE_REDIS_URL";
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
@@ -274,6 +281,18 @@ pub struct Settings {
     pub provider_usage_persistence_enabled: bool,
     /// Default provider usage event retention window in days (`0` disables cleanup).
     pub provider_usage_retention_days: u32,
+    /// Global organization quota enforcement toggle.
+    pub quotas_enabled: bool,
+    /// Maximum users with active memories per org (`0` means unlimited).
+    pub max_users_per_org: u64,
+    /// Maximum active memories per user (`0` means unlimited).
+    pub max_memories_per_user: u64,
+    /// Maximum active memories per org (`0` means unlimited).
+    pub max_memories_per_org: u64,
+    /// Maximum persisted provider requests per UTC day (`0` means unlimited).
+    pub daily_provider_request_limit: u64,
+    /// Maximum persisted provider tokens per UTC day (`0` means unlimited).
+    pub daily_provider_token_limit: u64,
 }
 
 impl Default for Settings {
@@ -342,6 +361,12 @@ impl Default for Settings {
             provider_cost_tracking_enabled: false,
             provider_usage_persistence_enabled: false,
             provider_usage_retention_days: 180,
+            quotas_enabled: false,
+            max_users_per_org: 0,
+            max_memories_per_user: 0,
+            max_memories_per_org: 0,
+            daily_provider_request_limit: 0,
+            daily_provider_token_limit: 0,
         }
     }
 }
@@ -353,8 +378,7 @@ impl Settings {
         let environment = Environment::from_str(&read_env_or(MEMCORE_ENV, "development"))?;
         let host = read_env_or(MEMCORE_HOST, &defaults.host);
         let port = parse_u16(MEMCORE_PORT, defaults.port)?;
-        let storage_mode =
-            StorageMode::from_str(&read_env_or(MEMCORE_STORAGE_MODE, "embedded"))?;
+        let storage_mode = StorageMode::from_str(&read_env_or(MEMCORE_STORAGE_MODE, "embedded"))?;
         let vector_backend =
             VectorBackend::from_str(&read_env_or(MEMCORE_VECTOR_BACKEND, "lancedb"))?;
         let fact_backend = FactBackend::from_str(&read_env_or(MEMCORE_FACT_BACKEND, "sqlite"))?;
@@ -365,17 +389,13 @@ impl Settings {
         let database_url = read_env_or(MEMCORE_DATABASE_URL, &defaults.database_url);
         let postgres_url = read_env_optional(MEMCORE_POSTGRES_URL);
         let qdrant_url = read_env_or(MEMCORE_QDRANT_URL, &defaults.qdrant_url);
-        let qdrant_collection =
-            read_env_or(MEMCORE_QDRANT_COLLECTION, &defaults.qdrant_collection);
+        let qdrant_collection = read_env_or(MEMCORE_QDRANT_COLLECTION, &defaults.qdrant_collection);
         let lancedb_path = read_env_or(MEMCORE_LANCEDB_PATH, &defaults.lancedb_path);
         let lancedb_table = read_env_or(MEMCORE_LANCEDB_TABLE, &defaults.lancedb_table);
-        let llm_provider =
-            LlmProviderKind::from_str(&read_env_or(MEMCORE_LLM_PROVIDER, "mock"))?;
+        let llm_provider = LlmProviderKind::from_str(&read_env_or(MEMCORE_LLM_PROVIDER, "mock"))?;
         let llm_model = read_env_or(MEMCORE_LLM_MODEL, &defaults.llm_model);
-        let embedding_provider = EmbeddingProviderKind::from_str(&read_env_or(
-            MEMCORE_EMBEDDING_PROVIDER,
-            "mock",
-        ))?;
+        let embedding_provider =
+            EmbeddingProviderKind::from_str(&read_env_or(MEMCORE_EMBEDDING_PROVIDER, "mock"))?;
         let embedding_model = read_env_or(MEMCORE_EMBEDDING_MODEL, &defaults.embedding_model);
         let enable_pii_redaction =
             parse_bool(MEMCORE_ENABLE_PII_REDACTION, defaults.enable_pii_redaction)?;
@@ -394,11 +414,9 @@ impl Settings {
         )?;
         let log_format = LogFormat::from_str(&read_env_or(MEMCORE_LOG_FORMAT, "json"))?;
         let log_level = LogLevel::from_str(&read_env_or(MEMCORE_LOG_LEVEL, "info"))?;
-        let request_id_header =
-            read_env_or(MEMCORE_REQUEST_ID_HEADER, &defaults.request_id_header);
+        let request_id_header = read_env_or(MEMCORE_REQUEST_ID_HEADER, &defaults.request_id_header);
         let metrics_enabled = parse_bool(MEMCORE_METRICS_ENABLED, defaults.metrics_enabled)?;
-        let retention_enabled =
-            parse_bool(MEMCORE_RETENTION_ENABLED, defaults.retention_enabled)?;
+        let retention_enabled = parse_bool(MEMCORE_RETENTION_ENABLED, defaults.retention_enabled)?;
         let fact_retention_days =
             parse_u32(MEMCORE_FACT_RETENTION_DAYS, defaults.fact_retention_days)?;
         let event_retention_days =
@@ -406,7 +424,10 @@ impl Settings {
         let context_cache_backend = match read_env_optional(MEMCORE_CONTEXT_CACHE_BACKEND) {
             Some(value) => ContextCacheBackend::from_str(&value)?,
             None => {
-                if parse_bool(MEMCORE_CONTEXT_CACHE_ENABLED, defaults.context_cache_enabled)? {
+                if parse_bool(
+                    MEMCORE_CONTEXT_CACHE_ENABLED,
+                    defaults.context_cache_enabled,
+                )? {
                     ContextCacheBackend::Memory
                 } else {
                     ContextCacheBackend::Disabled
@@ -451,10 +472,8 @@ impl Settings {
             MEMCORE_PROVIDER_TIMEOUT_SECONDS,
             defaults.provider_timeout_seconds,
         )?;
-        let provider_max_retries = parse_usize(
-            MEMCORE_PROVIDER_MAX_RETRIES,
-            defaults.provider_max_retries,
-        )?;
+        let provider_max_retries =
+            parse_usize(MEMCORE_PROVIDER_MAX_RETRIES, defaults.provider_max_retries)?;
         let provider_initial_backoff_ms = parse_u64(
             MEMCORE_PROVIDER_INITIAL_BACKOFF_MS,
             defaults.provider_initial_backoff_ms,
@@ -518,6 +537,22 @@ impl Settings {
         let provider_usage_retention_days = parse_u32(
             MEMCORE_PROVIDER_USAGE_RETENTION_DAYS,
             defaults.provider_usage_retention_days,
+        )?;
+        let quotas_enabled = parse_bool(MEMCORE_QUOTAS_ENABLED, defaults.quotas_enabled)?;
+        let max_users_per_org = parse_u64(MEMCORE_MAX_USERS_PER_ORG, defaults.max_users_per_org)?;
+        let max_memories_per_user = parse_u64(
+            MEMCORE_MAX_MEMORIES_PER_USER,
+            defaults.max_memories_per_user,
+        )?;
+        let max_memories_per_org =
+            parse_u64(MEMCORE_MAX_MEMORIES_PER_ORG, defaults.max_memories_per_org)?;
+        let daily_provider_request_limit = parse_u64(
+            MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT,
+            defaults.daily_provider_request_limit,
+        )?;
+        let daily_provider_token_limit = parse_u64(
+            MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT,
+            defaults.daily_provider_token_limit,
         )?;
 
         if !(0.0..=1.0).contains(&min_importance) {
@@ -590,6 +625,12 @@ impl Settings {
             provider_cost_tracking_enabled,
             provider_usage_persistence_enabled,
             provider_usage_retention_days,
+            quotas_enabled,
+            max_users_per_org,
+            max_memories_per_user,
+            max_memories_per_org,
+            daily_provider_request_limit,
+            daily_provider_token_limit,
         };
 
         settings.validate()?;
@@ -929,9 +970,9 @@ fn parse_provider_fallback_order(key: &str, default: &[String]) -> MemcoreResult
 
 fn parse_u16(key: &str, default: u16) -> MemcoreResult<u16> {
     match env::var(key) {
-        Ok(value) => value.parse::<u16>().map_err(|_| {
-            MemcoreError::ValidationError(format!("{key} must be a valid u16 port"))
-        }),
+        Ok(value) => value
+            .parse::<u16>()
+            .map_err(|_| MemcoreError::ValidationError(format!("{key} must be a valid u16 port"))),
         Err(_) => Ok(default),
     }
 }
@@ -1166,7 +1207,7 @@ mod tests {
 
     use super::{Environment, Settings, StorageMode, VectorBackend};
 
-    const ENV_KEYS: [&str; 62] = [
+    const ENV_KEYS: &[&str] = &[
         "MEMCORE_ENV",
         "MEMCORE_HOST",
         "MEMCORE_PORT",
@@ -1226,6 +1267,13 @@ mod tests {
         "MEMCORE_PROVIDER_USAGE_METRICS_ENABLED",
         "MEMCORE_PROVIDER_COST_TRACKING_ENABLED",
         "MEMCORE_PROVIDER_USAGE_PERSISTENCE_ENABLED",
+        "MEMCORE_PROVIDER_USAGE_RETENTION_DAYS",
+        "MEMCORE_QUOTAS_ENABLED",
+        "MEMCORE_MAX_USERS_PER_ORG",
+        "MEMCORE_MAX_MEMORIES_PER_USER",
+        "MEMCORE_MAX_MEMORIES_PER_ORG",
+        "MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT",
+        "MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT",
         "MEMCORE_REDIS_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -1305,7 +1353,10 @@ mod tests {
     fn context_cache_disabled_by_default() {
         let settings = Settings::default();
         assert!(!settings.context_cache_enabled);
-        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Disabled);
+        assert_eq!(
+            settings.context_cache_backend,
+            super::ContextCacheBackend::Disabled
+        );
         assert_eq!(settings.context_cache_ttl_seconds, 300);
         assert_eq!(settings.context_cache_max_entries, 1000);
         assert_eq!(
@@ -1329,7 +1380,10 @@ mod tests {
 
         let settings = Settings::from_env().expect("memory backend should load");
         assert!(settings.context_cache_enabled);
-        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Memory);
+        assert_eq!(
+            settings.context_cache_backend,
+            super::ContextCacheBackend::Memory
+        );
     }
 
     #[test]
@@ -1347,7 +1401,10 @@ mod tests {
 
         let settings = Settings::from_env().expect("disabled backend should load");
         assert!(!settings.context_cache_enabled);
-        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Disabled);
+        assert_eq!(
+            settings.context_cache_backend,
+            super::ContextCacheBackend::Disabled
+        );
     }
 
     #[test]
@@ -1366,8 +1423,14 @@ mod tests {
 
         let settings = Settings::from_env().expect("redis backend should load");
         assert!(settings.context_cache_enabled);
-        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Redis);
-        assert_eq!(settings.redis_url.as_deref(), Some("redis://localhost:6379"));
+        assert_eq!(
+            settings.context_cache_backend,
+            super::ContextCacheBackend::Redis
+        );
+        assert_eq!(
+            settings.redis_url.as_deref(),
+            Some("redis://localhost:6379")
+        );
     }
 
     #[test]
@@ -1429,7 +1492,10 @@ mod tests {
 
         let settings = Settings::from_env().expect("legacy enabled flag should load");
         assert!(settings.context_cache_enabled);
-        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Memory);
+        assert_eq!(
+            settings.context_cache_backend,
+            super::ContextCacheBackend::Memory
+        );
     }
 
     #[test]
@@ -1480,7 +1546,10 @@ mod tests {
 
         unsafe {
             std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
-            std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED", "true");
+            std::env::set_var(
+                "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED",
+                "true",
+            );
             std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS", "90");
         }
 
@@ -1499,7 +1568,10 @@ mod tests {
 
         unsafe {
             std::env::set_var("MEMCORE_CONTEXT_CACHE_BACKEND", "memory");
-            std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED", "true");
+            std::env::set_var(
+                "MEMCORE_CONTEXT_CACHE_STALE_WHILE_REVALIDATE_ENABLED",
+                "true",
+            );
             std::env::set_var("MEMCORE_CONTEXT_CACHE_STALE_TTL_SECONDS", "0");
         }
 
@@ -1589,7 +1661,10 @@ mod tests {
             std::env::set_var("MEMCORE_SUMMARIZER_FALLBACK_ORDER", "mock");
             std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_ENABLED", "false");
             std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_FAILURE_THRESHOLD", "3");
-            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS", "30");
+            std::env::set_var(
+                "MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS",
+                "30",
+            );
             std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS", "2");
         }
 
@@ -1620,7 +1695,10 @@ mod tests {
 
         clear_env();
         unsafe {
-            std::env::set_var("MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS", "0");
+            std::env::set_var(
+                "MEMCORE_PROVIDER_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS",
+                "0",
+            );
         }
         assert!(Settings::from_env().is_err());
 
@@ -1668,8 +1746,7 @@ mod tests {
     fn redis_password_not_exposed_in_sanitized_url_output() {
         use memcore_common::sanitize_redis_url_for_display;
 
-        let sanitized =
-            sanitize_redis_url_for_display("redis://:super_secret@localhost:6379/0");
+        let sanitized = sanitize_redis_url_for_display("redis://:super_secret@localhost:6379/0");
         assert!(!sanitized.contains("super_secret"));
         assert!(sanitized.contains("***@"));
     }
@@ -1692,7 +1769,10 @@ mod tests {
 
         let settings = Settings::from_env().expect("context cache settings should load");
         assert!(settings.context_cache_enabled);
-        assert_eq!(settings.context_cache_backend, super::ContextCacheBackend::Memory);
+        assert_eq!(
+            settings.context_cache_backend,
+            super::ContextCacheBackend::Memory
+        );
         assert_eq!(settings.context_cache_ttl_seconds, 120);
         assert_eq!(settings.context_cache_max_entries, 50);
         assert_eq!(settings.context_cache_key_prefix, "custom");
@@ -1798,9 +1878,93 @@ mod tests {
             Settings::from_env().expect_err("negative provider usage retention days should fail");
         assert_eq!(error.code(), "validation_error");
         assert!(
-            error.to_string().contains(
-                "MEMCORE_PROVIDER_USAGE_RETENTION_DAYS must be a valid unsigned integer"
-            )
+            error
+                .to_string()
+                .contains("MEMCORE_PROVIDER_USAGE_RETENTION_DAYS must be a valid unsigned integer")
+        );
+    }
+
+    #[test]
+    fn quotas_disabled_by_default() {
+        let settings = Settings::default();
+        assert!(!settings.quotas_enabled);
+        assert_eq!(settings.max_users_per_org, 0);
+        assert_eq!(settings.max_memories_per_user, 0);
+        assert_eq!(settings.max_memories_per_org, 0);
+        assert_eq!(settings.daily_provider_request_limit, 0);
+        assert_eq!(settings.daily_provider_token_limit, 0);
+    }
+
+    #[test]
+    fn quota_zero_limits_parse_as_unlimited() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_QUOTAS_ENABLED", "true");
+            std::env::set_var("MEMCORE_MAX_USERS_PER_ORG", "0");
+            std::env::set_var("MEMCORE_MAX_MEMORIES_PER_USER", "0");
+            std::env::set_var("MEMCORE_MAX_MEMORIES_PER_ORG", "0");
+            std::env::set_var("MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT", "0");
+            std::env::set_var("MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT", "0");
+        }
+
+        let settings = Settings::from_env().expect("quota settings should load");
+        assert!(settings.quotas_enabled);
+        assert_eq!(settings.max_users_per_org, 0);
+        assert_eq!(settings.max_memories_per_user, 0);
+        assert_eq!(settings.max_memories_per_org, 0);
+        assert_eq!(settings.daily_provider_request_limit, 0);
+        assert_eq!(settings.daily_provider_token_limit, 0);
+    }
+
+    #[test]
+    fn positive_quota_limits_parse_correctly() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_QUOTAS_ENABLED", "true");
+            std::env::set_var("MEMCORE_MAX_USERS_PER_ORG", "10");
+            std::env::set_var("MEMCORE_MAX_MEMORIES_PER_USER", "20");
+            std::env::set_var("MEMCORE_MAX_MEMORIES_PER_ORG", "30");
+            std::env::set_var("MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT", "40");
+            std::env::set_var("MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT", "50");
+        }
+
+        let settings = Settings::from_env().expect("quota settings should load");
+        assert!(settings.quotas_enabled);
+        assert_eq!(settings.max_users_per_org, 10);
+        assert_eq!(settings.max_memories_per_user, 20);
+        assert_eq!(settings.max_memories_per_org, 30);
+        assert_eq!(settings.daily_provider_request_limit, 40);
+        assert_eq!(settings.daily_provider_token_limit, 50);
+    }
+
+    #[test]
+    fn negative_quota_limit_fails_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_MAX_MEMORIES_PER_ORG", "-1");
+        }
+
+        let error = Settings::from_env().expect_err("negative quota should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_MAX_MEMORIES_PER_ORG must be a valid unsigned integer")
         );
     }
 
@@ -2056,9 +2220,9 @@ mod tests {
         let error = Settings::from_env().expect_err("invalid rate limit should fail");
         assert_eq!(error.code(), "validation_error");
         assert!(
-            error
-                .to_string()
-                .contains("MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be a valid unsigned integer")
+            error.to_string().contains(
+                "MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE must be a valid unsigned integer"
+            )
         );
     }
 
