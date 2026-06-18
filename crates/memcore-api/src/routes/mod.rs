@@ -71,6 +71,12 @@ pub fn router(state: &AppState) -> Router<AppState> {
         )
         .route("/api/v1/admin/org/quotas", get(admin::get_org_quotas))
         .route(
+            "/api/v1/admin/org/plan",
+            get(admin::get_org_plan)
+                .put(admin::upsert_org_plan)
+                .delete(admin::delete_org_plan),
+        )
+        .route(
             "/api/v1/admin/org/provider-usage",
             get(admin::get_provider_usage),
         )

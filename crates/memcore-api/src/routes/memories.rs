@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, DeleteMemoryResponse, ListMemoriesQuery,
     ListMemoriesResponse, MemoryMessageRequest, SearchMemoryRequest, SearchMemoryResponse,
-    org_quota_limits_from_settings, parse_keyword_query, parse_memory_type_label,
+    parse_keyword_query, parse_memory_type_label,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{ApiError, check_scope};
@@ -32,20 +32,16 @@ pub async fn add_memory(
     let tenant = organization.tenant_with_user_id(request.user_id)?;
     let messages = map_messages(&request.messages)?;
 
-    let limits = org_quota_limits_from_settings(&state.settings);
-    if limits.enabled {
-        let quota = state
-            .memory_engine
-            .check_memory_write_quota(CheckMemoryWriteQuotaInput {
-                org_id: tenant.org_id.clone(),
-                user_id: tenant.user_id.clone(),
-                limits,
-                requested_new_memories: 1,
-            })
-            .await?;
-        if let Some(violation) = quota.violations.into_iter().next() {
-            return Err(violation.into_error().into());
-        }
+    let quota = state
+        .memory_engine
+        .check_memory_write_quota(CheckMemoryWriteQuotaInput {
+            org_id: tenant.org_id.clone(),
+            user_id: tenant.user_id.clone(),
+            requested_new_memories: 1,
+        })
+        .await?;
+    if let Some(violation) = quota.violations.into_iter().next() {
+        return Err(violation.into_error().into());
     }
 
     let output = state

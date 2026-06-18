@@ -6,11 +6,12 @@ use crate::dto::{
     AddMemoryRequest, AddMemoryResponse, ApplyProviderUsageRetentionRequest,
     ApplyProviderUsageRetentionResponse, ApplyRetentionRequest, ApplyRetentionResponse,
     BuildContextRequest, BuildContextResponse, ContextCacheMetricsResponse, CreateApiKeyRequest,
-    CreateApiKeyResponse, DeleteMemoryResponse, ExportUserResponse, ForgetUserResponse,
-    ImportUserDataRequest, ImportUserDataResponse, ListApiKeysResponse, ListMemoriesResponse,
-    ListMemoryEventsResponse, ListOrgUsersResponse, OrgQuotaStatusResponse, OrgSummaryResponse,
-    ProviderUsageResponse, RevokeApiKeyResponse, SearchMemoryRequest, SearchMemoryResponse,
-    SearchOrgMemoryEventsResponse,
+    CreateApiKeyResponse, DeleteMemoryResponse, DeleteOrgPlanResponse, ExportUserResponse,
+    ForgetUserResponse, GetOrgPlanResponse, ImportUserDataRequest, ImportUserDataResponse,
+    ListApiKeysResponse, ListMemoriesResponse, ListMemoryEventsResponse, ListOrgUsersResponse,
+    OrgQuotaStatusResponse, OrgSummaryResponse, ProviderUsageResponse, RevokeApiKeyResponse,
+    SearchMemoryRequest, SearchMemoryResponse, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
+    UpsertOrgPlanResponse,
 };
 use crate::response::ErrorBody;
 use crate::routes::health::{HealthResponse, ReadyResponse};
@@ -447,6 +448,65 @@ pub fn get_context_cache_metrics() {}
     )
 )]
 pub fn get_org_quotas() {}
+
+/// Current organization plan configuration and resolved quota defaults.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/org/plan",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization plan configuration", body = GetOrgPlanResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminRead or AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn get_org_plan() {}
+
+/// Create or update the current organization's plan configuration.
+#[utoipa::path(
+    put,
+    path = "/api/v1/admin/org/plan",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    request_body = UpsertOrgPlanRequest,
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization plan upserted", body = UpsertOrgPlanResponse),
+        (status = 400, description = "Invalid tier, limits, or metadata", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn upsert_org_plan() {}
+
+/// Delete the current organization's plan configuration.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/org/plan",
+    tag = "Admin",
+    params(
+        ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
+        ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
+    ),
+    security(("BearerAuth" = [])),
+    responses(
+        (status = 200, description = "Organization plan deletion result", body = DeleteOrgPlanResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 403, description = "Missing AdminWrite scope in database auth mode", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody),
+    )
+)]
+pub fn delete_org_plan() {}
 
 /// Provider usage events (persistent store) or process-local aggregates (`source=memory`).
 #[utoipa::path(

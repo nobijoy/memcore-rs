@@ -4,50 +4,80 @@ use chrono::{Duration, Utc};
 use memcore_common::MemcoreResult;
 
 use crate::ports::{
-    DEFAULT_PROVIDER_USAGE_LIMIT, FactStore, ProviderUsageQuery, ProviderUsageStore,
+    DEFAULT_PROVIDER_USAGE_LIMIT, FactStore, OrgPlanStore, ProviderUsageQuery, ProviderUsageStore,
 };
 use crate::{TenantContext, validate_event_date_range};
 
 use super::types::{
-    CheckMemoryWriteQuotaInput, CheckProviderQuotaInput, GetOrgQuotaStatusInput, OrgQuotaUsage,
-    QuotaCheckResult, QuotaLimitKind, QuotaViolation,
+    CheckMemoryWriteQuotaInput, CheckProviderQuotaInput, GetOrgQuotaStatusInput, OrgQuotaLimits,
+    OrgQuotaUsage, QuotaCheckResult, QuotaLimitKind, QuotaLimitSource, QuotaViolation,
+    ResolvedOrgQuotaLimits,
 };
 
 #[derive(Clone)]
 pub struct QuotaService {
     fact_store: Arc<dyn FactStore>,
     provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
+    org_plan_store: Option<Arc<dyn OrgPlanStore>>,
+    global_limits: OrgQuotaLimits,
 }
 
 impl QuotaService {
     pub fn new(
         fact_store: Arc<dyn FactStore>,
         provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
+        org_plan_store: Option<Arc<dyn OrgPlanStore>>,
+        global_limits: OrgQuotaLimits,
     ) -> Self {
         Self {
             fact_store,
             provider_usage_store,
+            org_plan_store,
+            global_limits,
         }
+    }
+
+    pub async fn resolve_org_quota_limits(
+        &self,
+        org_id: &str,
+    ) -> MemcoreResult<ResolvedOrgQuotaLimits> {
+        if let Some(store) = &self.org_plan_store {
+            if let Some(plan) = store.get_org_plan(org_id).await? {
+                if plan.is_active {
+                    return Ok(ResolvedOrgQuotaLimits {
+                        source: QuotaLimitSource::OrgPlan,
+                        limits: plan.limits.to_quota_limits(self.global_limits.enabled),
+                    });
+                }
+            }
+        }
+
+        Ok(ResolvedOrgQuotaLimits {
+            source: QuotaLimitSource::GlobalConfig,
+            limits: self.global_limits.clone(),
+        })
     }
 
     pub async fn get_org_quota_status(
         &self,
         input: GetOrgQuotaStatusInput,
     ) -> MemcoreResult<QuotaCheckResult> {
+        let resolved = self.resolve_org_quota_limits(&input.org_id).await?;
         let usage = self
             .collect_usage(&input.org_id, input.user_id.as_deref())
             .await?;
-        let violations = if input.limits.enabled {
-            self.evaluate_limits(&input.limits, &usage, 0, 0)
+        let violations = if resolved.limits.enabled {
+            self.evaluate_limits(&resolved.limits, &usage, 0, 0)
         } else {
             Vec::new()
         };
 
         Ok(QuotaCheckResult {
             allowed: violations.is_empty(),
+            source: resolved.source,
             violations,
             usage,
-            limits: input.limits,
+            limits: resolved.limits,
         })
     }
 
@@ -55,20 +85,22 @@ impl QuotaService {
         &self,
         input: CheckMemoryWriteQuotaInput,
     ) -> MemcoreResult<QuotaCheckResult> {
+        let resolved = self.resolve_org_quota_limits(&input.org_id).await?;
         let usage = self
             .collect_usage(&input.org_id, Some(input.user_id.as_str()))
             .await?;
-        let violations = if input.limits.enabled {
-            self.evaluate_memory_limits(&input.limits, &usage, input.requested_new_memories)
+        let violations = if resolved.limits.enabled {
+            self.evaluate_memory_limits(&resolved.limits, &usage, input.requested_new_memories)
         } else {
             Vec::new()
         };
 
         Ok(QuotaCheckResult {
             allowed: violations.is_empty(),
+            source: resolved.source,
             violations,
             usage,
-            limits: input.limits,
+            limits: resolved.limits,
         })
     }
 
@@ -76,19 +108,21 @@ impl QuotaService {
         &self,
         input: CheckProviderQuotaInput,
     ) -> MemcoreResult<QuotaCheckResult> {
+        let resolved = self.resolve_org_quota_limits(&input.org_id).await?;
         let requested_tokens = input.requested_tokens.unwrap_or(0);
         let usage = self.collect_usage(&input.org_id, None).await?;
-        let violations = if input.limits.enabled {
-            self.evaluate_provider_limits(&input.limits, &usage, 1, requested_tokens)
+        let violations = if resolved.limits.enabled {
+            self.evaluate_provider_limits(&resolved.limits, &usage, 1, requested_tokens)
         } else {
             Vec::new()
         };
 
         Ok(QuotaCheckResult {
             allowed: violations.is_empty(),
+            source: resolved.source,
             violations,
             usage,
-            limits: input.limits,
+            limits: resolved.limits,
         })
     }
 

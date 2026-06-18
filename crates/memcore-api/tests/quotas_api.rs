@@ -42,6 +42,27 @@ fn get_request(path: &str, org_id: Option<&str>, with_auth: bool) -> Request<Bod
     builder.body(Body::empty()).expect("request")
 }
 
+fn put_plan(body: &str, org_id: &str, bearer: &str) -> Request<Body> {
+    Request::builder()
+        .method("PUT")
+        .uri("/api/v1/admin/org/plan")
+        .header("content-type", "application/json")
+        .header("X-Organization-ID", org_id)
+        .header("Authorization", format!("Bearer {bearer}"))
+        .body(Body::from(body.to_string()))
+        .expect("request")
+}
+
+fn delete_plan(org_id: &str, bearer: &str) -> Request<Body> {
+    Request::builder()
+        .method("DELETE")
+        .uri("/api/v1/admin/org/plan")
+        .header("X-Organization-ID", org_id)
+        .header("Authorization", format!("Bearer {bearer}"))
+        .body(Body::empty())
+        .expect("request")
+}
+
 fn post_memory(content: &str, org_id: &str, user_id: &str, bearer: &str) -> Request<Body> {
     let body = format!(
         r#"{{
@@ -155,6 +176,7 @@ async fn quotas_returns_configured_limits_and_org_usage_without_content() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "success");
+    assert_eq!(json["quotas"]["source"], "global_config");
     assert_eq!(json["quotas"]["limits"]["enabled"], true);
     assert_eq!(json["quotas"]["limits"]["max_memories_per_org"], 10);
     assert_eq!(json["quotas"]["usage"]["org_id"], ORG_ID);
@@ -252,4 +274,102 @@ async fn quota_disabled_mode_preserves_existing_behavior() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn org_plan_get_put_delete_and_quota_source() {
+    let mut settings = quota_settings();
+    settings.max_memories_per_org = 10;
+    let app = create_app(AppState::new(settings));
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        get_request("/api/v1/admin/org/plan", Some(ORG_ID), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["plan"], serde_json::Value::Null);
+    assert_eq!(json["resolved_source"], "global_config");
+
+    let body = r#"{
+        "tier": "Pro",
+        "limits": {
+            "max_users_per_org": 100,
+            "max_memories_per_user": 5000,
+            "max_memories_per_org": 1,
+            "daily_provider_request_limit": 10000,
+            "daily_provider_token_limit": 5000000
+        },
+        "is_active": true,
+        "metadata": {"note": "admin-set"}
+    }"#;
+    let (status, json, body_text) =
+        response_parts(app.clone(), put_plan(body, ORG_ID, DEV_API_KEY)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["plan"]["tier"], "Pro");
+    assert_eq!(json["plan"]["limits"]["max_memories_per_org"], 1);
+    assert!(!body_text.contains("payment"));
+
+    let (status, json, _) = response_parts(
+        app.clone(),
+        get_request("/api/v1/admin/org/quotas", Some(ORG_ID), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["quotas"]["source"], "org_plan");
+    assert_eq!(json["quotas"]["limits"]["max_memories_per_org"], 1);
+
+    seed_memory(&app, "first plan-limited memory", USER_ID).await;
+    let (status, json, _) = response_parts(
+        app.clone(),
+        post_memory("blocked by org plan", ORG_ID, "other_user", DEV_API_KEY),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(json["error"]["details"]["kind"], "MemoriesPerOrg");
+
+    let (status, json, _) = response_parts(app.clone(), delete_plan(ORG_ID, DEV_API_KEY)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["deleted"], true);
+
+    let (status, json, _) = response_parts(
+        app,
+        get_request("/api/v1/admin/org/quotas", Some(ORG_ID), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["quotas"]["source"], "global_config");
+    assert_eq!(json["quotas"]["limits"]["max_memories_per_org"], 10);
+}
+
+#[tokio::test]
+async fn org_plan_rejects_invalid_tier_negative_limit_and_secret_metadata() {
+    let app = create_app(AppState::new(quota_settings()));
+
+    let invalid_tier = r#"{
+        "tier": "Gold",
+        "limits": {},
+        "is_active": true
+    }"#;
+    let (status, _, _) =
+        response_parts(app.clone(), put_plan(invalid_tier, ORG_ID, DEV_API_KEY)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let negative_limit = r#"{
+        "tier": "Pro",
+        "limits": {"max_users_per_org": -1},
+        "is_active": true
+    }"#;
+    let (status, _, _) =
+        response_parts(app.clone(), put_plan(negative_limit, ORG_ID, DEV_API_KEY)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let secret_metadata = r#"{
+        "tier": "Pro",
+        "limits": {},
+        "is_active": true,
+        "metadata": {"api_key": "do-not-store"}
+    }"#;
+    let (status, _, _) = response_parts(app, put_plan(secret_metadata, ORG_ID, DEV_API_KEY)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

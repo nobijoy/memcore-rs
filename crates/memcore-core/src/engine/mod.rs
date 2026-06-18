@@ -32,14 +32,14 @@ use crate::pagination::{PageCursor, build_page, parse_optional_cursor};
 use crate::ports::MemoryMessage;
 use crate::ports::{
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
-    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgUserListQuery,
-    ProviderUsageAttributionSlot, ProviderUsageStore, VectorRecord, VectorStore,
+    LlmProvider, MemoryEventQuery, MemoryEventStore, OrgMemoryEventQuery, OrgPlanStore,
+    OrgUserListQuery, ProviderUsageAttributionSlot, ProviderUsageStore, VectorRecord, VectorStore,
     validate_event_date_range,
 };
 use crate::privacy::redact_messages_for_extraction;
 use crate::quota::{
     CheckMemoryWriteQuotaInput, CheckProviderQuotaInput, GetOrgQuotaStatusInput, QuotaCheckResult,
-    QuotaService,
+    QuotaService, ResolvedOrgQuotaLimits,
 };
 use crate::ranking::{
     RankedCandidate, RankingConfig, RankingSource, RrfConfig, reciprocal_rank_fusion,
@@ -52,9 +52,9 @@ use crate::retention::{
 use crate::{
     BuildContextInput, BuildContextOutput, ContextCache, ContextCacheConfig,
     ContextCacheMetricsRecorder, ContextCacheMetricsSnapshot, ContextCacheUsage, Fact,
-    FactOperation, FactOperationDecision, MemoryEvent, MemorySearchResult, SimpleTokenEstimator,
-    TenantContext, apply_provider_compression_summary, assemble_context_with_budget,
-    build_context_cache_key, cached_entry_from_output,
+    FactOperation, FactOperationDecision, MemoryEvent, MemorySearchResult, OrgQuotaLimits,
+    SimpleTokenEstimator, TenantContext, apply_provider_compression_summary,
+    assemble_context_with_budget, build_context_cache_key, cached_entry_from_output,
 };
 use crate::{ContextCacheCoordinator, DEFAULT_CONTEXT_CACHE_MAX_ENTRIES, InMemoryContextCache};
 use uuid::Uuid;
@@ -87,6 +87,8 @@ pub struct MemoryEngine {
     context_cache_metrics: Arc<dyn ContextCacheMetricsRecorder>,
     usage_attribution: Option<Arc<ProviderUsageAttributionSlot>>,
     provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
+    org_plan_store: Option<Arc<dyn OrgPlanStore>>,
+    global_quota_limits: OrgQuotaLimits,
 }
 
 impl MemoryEngine {
@@ -120,11 +122,23 @@ impl MemoryEngine {
             context_cache_metrics: metrics,
             usage_attribution: None,
             provider_usage_store: None,
+            org_plan_store: None,
+            global_quota_limits: OrgQuotaLimits::disabled(),
         }
     }
 
     pub fn with_event_store(mut self, event_store: Arc<dyn MemoryEventStore>) -> Self {
         self.event_store = Some(event_store);
+        self
+    }
+
+    pub fn with_org_plan_store(mut self, org_plan_store: Arc<dyn OrgPlanStore>) -> Self {
+        self.org_plan_store = Some(org_plan_store);
+        self
+    }
+
+    pub fn with_global_quota_limits(mut self, limits: OrgQuotaLimits) -> Self {
+        self.global_quota_limits = limits;
         self
     }
 
@@ -959,6 +973,14 @@ impl MemoryEngine {
         self.quota_service().get_org_quota_status(input).await
     }
 
+    pub async fn resolve_org_quota_limits(
+        &self,
+        org_id: &str,
+    ) -> MemcoreResult<ResolvedOrgQuotaLimits> {
+        validate_org_id(org_id)?;
+        self.quota_service().resolve_org_quota_limits(org_id).await
+    }
+
     pub async fn check_memory_write_quota(
         &self,
         input: CheckMemoryWriteQuotaInput,
@@ -979,7 +1001,12 @@ impl MemoryEngine {
     }
 
     fn quota_service(&self) -> QuotaService {
-        QuotaService::new(self.fact_store.clone(), self.provider_usage_store.clone())
+        QuotaService::new(
+            self.fact_store.clone(),
+            self.provider_usage_store.clone(),
+            self.org_plan_store.clone(),
+            self.global_quota_limits.clone(),
+        )
     }
 
     pub async fn forget_user(&self, input: ForgetUserInput) -> MemcoreResult<ForgetUserOutput> {

@@ -8,14 +8,15 @@ use memcore_core::{
 use uuid::Uuid;
 
 use crate::dto::{
-    ContextCacheMetricsResponse, ListOrgUsersQuery, ListOrgUsersResponse, OrgQuotaStatusResponse,
-    OrgQuotasQuery, OrgSummaryResponse, ProviderUsageQueryParams, ProviderUsageResponse,
-    SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, context_cache_metrics_response,
-    org_quota_limits_from_settings, org_quota_status_response, org_summary_input,
-    parse_event_date_filters, parse_keyword_query, parse_memory_event_operation_label,
-    parse_provider_usage_capability, provider_usage_memory_response,
-    provider_usage_persisted_response, validate_list_org_users_limit,
-    validate_search_org_memory_events_limit,
+    ContextCacheMetricsResponse, DeleteOrgPlanResponse, GetOrgPlanResponse, ListOrgUsersQuery,
+    ListOrgUsersResponse, OrgQuotaStatusResponse, OrgQuotasQuery, OrgSummaryResponse,
+    ProviderUsageQueryParams, ProviderUsageResponse, SearchOrgMemoryEventsQuery,
+    SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest, UpsertOrgPlanResponse,
+    context_cache_metrics_response, get_org_plan_response, org_quota_status_response,
+    org_summary_input, parse_event_date_filters, parse_keyword_query,
+    parse_memory_event_operation_label, parse_provider_usage_capability,
+    provider_usage_memory_response, provider_usage_persisted_response, upsert_org_plan_response,
+    validate_list_org_users_limit, validate_search_org_memory_events_limit,
 };
 use crate::middleware::OrganizationContext;
 use crate::routes::common::{ApiError, check_any_scope};
@@ -133,17 +134,75 @@ pub async fn get_org_quotas(
         &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
     )?;
 
-    let limits = org_quota_limits_from_settings(&state.settings);
     let result = state
         .memory_engine
         .get_org_quota_status(GetOrgQuotaStatusInput {
             org_id: organization.org_id,
             user_id: query.user_id,
-            limits,
         })
         .await?;
 
     Ok(Json(org_quota_status_response(result)))
+}
+
+pub async fn get_org_plan(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+) -> Result<Json<GetOrgPlanResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    let org_id = organization.org_id;
+    let plan = state.org_plan_store.get_org_plan(&org_id).await?;
+    let resolved = state
+        .memory_engine
+        .resolve_org_quota_limits(&org_id)
+        .await?;
+
+    Ok(Json(get_org_plan_response(plan, resolved)))
+}
+
+pub async fn upsert_org_plan(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+    Json(body): Json<UpsertOrgPlanRequest>,
+) -> Result<Json<UpsertOrgPlanResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite],
+    )?;
+
+    let org_id = organization.org_id;
+    let existing = state.org_plan_store.get_org_plan(&org_id).await?;
+    let plan = body.into_plan(org_id, existing.as_ref())?;
+    let plan = state.org_plan_store.upsert_org_plan(plan).await?;
+
+    Ok(Json(upsert_org_plan_response(plan)))
+}
+
+pub async fn delete_org_plan(
+    State(state): State<AppState>,
+    Extension(organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+) -> Result<Json<DeleteOrgPlanResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminWrite],
+    )?;
+
+    let deleted = state
+        .org_plan_store
+        .delete_org_plan(&organization.org_id)
+        .await?;
+
+    Ok(Json(DeleteOrgPlanResponse {
+        status: "success",
+        deleted,
+    }))
 }
 
 pub async fn get_provider_usage(

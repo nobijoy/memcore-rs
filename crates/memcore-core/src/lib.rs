@@ -8,6 +8,7 @@ pub mod import;
 pub mod importance;
 pub mod lifecycle;
 pub mod models;
+pub mod org;
 pub mod pagination;
 pub mod ports;
 pub mod privacy;
@@ -63,6 +64,7 @@ pub use models::{
     ApiKeyRecord, ApiKeyScope, CandidateFact, Fact, FactOperation, FactOperationDecision,
     MemoryEvent, MemoryEventOperation, MemorySearchResult, MemorySource, MemoryType, TenantContext,
 };
+pub use org::{OrgPlanConfig, OrgPlanLimits, OrgPlanTier, validate_org_plan_metadata};
 pub use pagination::{
     Page, PageCursor, build_page, decode_cursor, encode_cursor, is_after_cursor_in_desc_order,
     page_fetch_limit, parse_optional_cursor,
@@ -71,17 +73,18 @@ pub use ports::{
     ApiKeyListQuery, ApiKeyStore, DEFAULT_MEMORY_EVENT_LIST_LIMIT, DEFAULT_PROVIDER_USAGE_LIMIT,
     EmbeddingProvider, FactClassificationInput, FactExtractionInput, FactSearchQuery, FactStore,
     LlmProvider, MAX_MEMORY_EVENT_LIST_LIMIT, MAX_PROVIDER_USAGE_LIMIT, MemoryEventQuery,
-    MemoryEventStore, MemoryMessage, MessageRole, OrgMemoryEventQuery, OrgUserListQuery,
-    OrgUserSummary, ProviderCallStatus, ProviderUsageAttribution, ProviderUsageAttributionSlot,
-    ProviderUsageCapability, ProviderUsageEventRecord, ProviderUsagePersistedSummary,
-    ProviderUsageQuery, ProviderUsageQueryResult, ProviderUsageStore, RetentionPruneResult,
-    SummarizationInput, VectorRecord, VectorSearchQuery, VectorSearchResult, VectorStore,
-    validate_event_date_range, validate_provider_usage_limit,
+    MemoryEventStore, MemoryMessage, MessageRole, OrgMemoryEventQuery, OrgPlanStore,
+    OrgUserListQuery, OrgUserSummary, ProviderCallStatus, ProviderUsageAttribution,
+    ProviderUsageAttributionSlot, ProviderUsageCapability, ProviderUsageEventRecord,
+    ProviderUsagePersistedSummary, ProviderUsageQuery, ProviderUsageQueryResult,
+    ProviderUsageStore, RetentionPruneResult, SummarizationInput, VectorRecord, VectorSearchQuery,
+    VectorSearchResult, VectorStore, validate_event_date_range, validate_provider_usage_limit,
 };
 pub use privacy::PiiRedactor;
 pub use quota::{
     CheckMemoryWriteQuotaInput, CheckProviderQuotaInput, GetOrgQuotaStatusInput, OrgQuotaLimits,
-    OrgQuotaUsage, QuotaCheckResult, QuotaLimitKind, QuotaService, QuotaViolation, utc_day_window,
+    OrgQuotaUsage, QuotaCheckResult, QuotaLimitKind, QuotaLimitSource, QuotaService,
+    QuotaViolation, ResolvedOrgQuotaLimits, utc_day_window,
 };
 pub use ranking::{
     MemoryRanker, RankedCandidate, RankingConfig, RankingSource, RrfConfig, apply_ranking, clamp01,

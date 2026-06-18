@@ -4,9 +4,10 @@ use memcore_config::Settings;
 use memcore_core::{
     ContextCacheMetricsSnapshot, DEFAULT_LIST_ORG_USERS_LIMIT,
     DEFAULT_SEARCH_ORG_MEMORY_EVENTS_LIMIT, ListOrgUsersInput, ListOrgUsersOutput,
-    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryEvent, OrgQuotaLimits,
-    OrgQuotaUsage, OrgSummaryInput, OrgSummaryOutput, OrgUserSummary, QuotaCheckResult,
-    QuotaLimitKind, QuotaViolation, SearchOrgMemoryEventsOutput,
+    MAX_LIST_ORG_USERS_LIMIT, MAX_SEARCH_ORG_MEMORY_EVENTS_LIMIT, MemoryEvent, OrgPlanConfig,
+    OrgPlanLimits, OrgPlanTier, OrgQuotaLimits, OrgQuotaUsage, OrgSummaryInput, OrgSummaryOutput,
+    OrgUserSummary, QuotaCheckResult, QuotaLimitKind, QuotaViolation, SearchOrgMemoryEventsOutput,
+    validate_org_plan_metadata,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -101,6 +102,7 @@ pub struct OrgQuotaStatusResponse {
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct OrgQuotaStatusBodyResponse {
+    pub source: String,
     pub allowed: bool,
     pub limits: OrgQuotaLimitsResponse,
     pub usage: OrgQuotaUsageResponse,
@@ -136,6 +138,65 @@ pub struct QuotaViolationResponse {
     pub current: u64,
     pub requested: u64,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgPlanResponse {
+    pub org_id: String,
+    pub tier: String,
+    pub limits: OrgPlanLimitsResponse,
+    pub is_active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OrgPlanLimitsResponse {
+    pub max_users_per_org: Option<u64>,
+    pub max_memories_per_user: Option<u64>,
+    pub max_memories_per_org: Option<u64>,
+    pub daily_provider_request_limit: Option<u64>,
+    pub daily_provider_token_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct GetOrgPlanResponse {
+    pub status: &'static str,
+    pub plan: Option<OrgPlanResponse>,
+    pub resolved_source: String,
+    pub resolved_limits: OrgQuotaLimitsResponse,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct UpsertOrgPlanRequest {
+    pub tier: String,
+    pub limits: UpsertOrgPlanLimitsRequest,
+    #[serde(default = "default_true")]
+    pub is_active: bool,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct UpsertOrgPlanLimitsRequest {
+    pub max_users_per_org: Option<i64>,
+    pub max_memories_per_user: Option<i64>,
+    pub max_memories_per_org: Option<i64>,
+    pub daily_provider_request_limit: Option<i64>,
+    pub daily_provider_token_limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UpsertOrgPlanResponse {
+    pub status: &'static str,
+    pub plan: OrgPlanResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DeleteOrgPlanResponse {
+    pub status: &'static str,
+    pub deleted: bool,
 }
 
 impl From<ContextCacheMetricsSnapshot> for ContextCacheMetricsBodyResponse {
@@ -182,6 +243,7 @@ pub fn org_quota_status_response(result: QuotaCheckResult) -> OrgQuotaStatusResp
     OrgQuotaStatusResponse {
         status: "success",
         quotas: OrgQuotaStatusBodyResponse {
+            source: result.source.as_str().to_string(),
             allowed: result.allowed,
             limits: result.limits.into(),
             usage: result.usage.into(),
@@ -191,6 +253,113 @@ pub fn org_quota_status_response(result: QuotaCheckResult) -> OrgQuotaStatusResp
                 .map(QuotaViolationResponse::from)
                 .collect(),
         },
+    }
+}
+
+pub fn get_org_plan_response(
+    plan: Option<OrgPlanConfig>,
+    resolved: memcore_core::ResolvedOrgQuotaLimits,
+) -> GetOrgPlanResponse {
+    GetOrgPlanResponse {
+        status: "success",
+        plan: plan.map(OrgPlanResponse::from),
+        resolved_source: resolved.source.as_str().to_string(),
+        resolved_limits: resolved.limits.into(),
+    }
+}
+
+pub fn upsert_org_plan_response(plan: OrgPlanConfig) -> UpsertOrgPlanResponse {
+    UpsertOrgPlanResponse {
+        status: "success",
+        plan: plan.into(),
+    }
+}
+
+impl UpsertOrgPlanRequest {
+    pub fn into_plan(
+        self,
+        org_id: String,
+        existing: Option<&OrgPlanConfig>,
+    ) -> Result<OrgPlanConfig, MemcoreError> {
+        let now = Utc::now();
+        let tier = self.tier.parse::<OrgPlanTier>()?;
+        validate_org_plan_metadata(self.metadata.as_ref())?;
+
+        let plan = OrgPlanConfig {
+            org_id,
+            tier,
+            limits: self.limits.into_limits()?,
+            is_active: self.is_active,
+            metadata: self.metadata,
+            created_at: existing.map(|plan| plan.created_at).unwrap_or(now),
+            updated_at: now,
+        };
+        plan.validate()?;
+        Ok(plan)
+    }
+}
+
+impl UpsertOrgPlanLimitsRequest {
+    fn into_limits(self) -> Result<OrgPlanLimits, MemcoreError> {
+        Ok(OrgPlanLimits {
+            max_users_per_org: normalize_plan_limit(self.max_users_per_org, "max_users_per_org")?,
+            max_memories_per_user: normalize_plan_limit(
+                self.max_memories_per_user,
+                "max_memories_per_user",
+            )?,
+            max_memories_per_org: normalize_plan_limit(
+                self.max_memories_per_org,
+                "max_memories_per_org",
+            )?,
+            daily_provider_request_limit: normalize_plan_limit(
+                self.daily_provider_request_limit,
+                "daily_provider_request_limit",
+            )?,
+            daily_provider_token_limit: normalize_plan_limit(
+                self.daily_provider_token_limit,
+                "daily_provider_token_limit",
+            )?,
+        })
+    }
+}
+
+impl From<OrgPlanConfig> for OrgPlanResponse {
+    fn from(plan: OrgPlanConfig) -> Self {
+        Self {
+            org_id: plan.org_id,
+            tier: plan.tier.as_str().to_string(),
+            limits: plan.limits.into(),
+            is_active: plan.is_active,
+            metadata: plan.metadata,
+            created_at: plan.created_at,
+            updated_at: plan.updated_at,
+        }
+    }
+}
+
+impl From<OrgPlanLimits> for OrgPlanLimitsResponse {
+    fn from(limits: OrgPlanLimits) -> Self {
+        Self {
+            max_users_per_org: limits.max_users_per_org,
+            max_memories_per_user: limits.max_memories_per_user,
+            max_memories_per_org: limits.max_memories_per_org,
+            daily_provider_request_limit: limits.daily_provider_request_limit,
+            daily_provider_token_limit: limits.daily_provider_token_limit,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn normalize_plan_limit(value: Option<i64>, field: &str) -> Result<Option<u64>, MemcoreError> {
+    match value {
+        Some(value) if value < 0 => Err(MemcoreError::ValidationError(format!(
+            "{field} cannot be negative"
+        ))),
+        Some(0) | None => Ok(None),
+        Some(value) => Ok(Some(value as u64)),
     }
 }
 

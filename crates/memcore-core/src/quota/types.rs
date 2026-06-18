@@ -56,6 +56,27 @@ pub struct OrgQuotaUsage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuotaLimitSource {
+    GlobalConfig,
+    OrgPlan,
+}
+
+impl QuotaLimitSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GlobalConfig => "global_config",
+            Self::OrgPlan => "org_plan",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedOrgQuotaLimits {
+    pub source: QuotaLimitSource,
+    pub limits: OrgQuotaLimits,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuotaLimitKind {
     UsersPerOrg,
     MemoriesPerUser,
@@ -110,6 +131,7 @@ impl QuotaViolation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuotaCheckResult {
     pub allowed: bool,
+    pub source: QuotaLimitSource,
     pub violations: Vec<QuotaViolation>,
     pub usage: OrgQuotaUsage,
     pub limits: OrgQuotaLimits,
@@ -119,21 +141,18 @@ pub struct QuotaCheckResult {
 pub struct GetOrgQuotaStatusInput {
     pub org_id: String,
     pub user_id: Option<String>,
-    pub limits: OrgQuotaLimits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckMemoryWriteQuotaInput {
     pub org_id: String,
     pub user_id: String,
-    pub limits: OrgQuotaLimits,
     pub requested_new_memories: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckProviderQuotaInput {
     pub org_id: String,
-    pub limits: OrgQuotaLimits,
     pub requested_tokens: Option<u64>,
 }
 

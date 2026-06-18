@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::middleware::RateLimiter;
+use crate::observability::Metrics;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
@@ -8,33 +10,36 @@ use memcore_config::{
 };
 use memcore_core::{
     ApiKeyStore, ContextCacheConfig, EmbeddingProvider, FactStore, InMemoryContextCache,
-    LlmProvider, MemoryEngine, MemoryEventStore, ProviderUsageAttributionSlot, ProviderUsageStore,
-    VectorStore,
+    LlmProvider, MemoryEngine, MemoryEventStore, OrgPlanStore, OrgQuotaLimits,
+    ProviderUsageAttributionSlot, ProviderUsageStore, VectorStore,
 };
 use memcore_providers::{
-    build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
-    validate_embedding_provider_name, validate_llm_provider_name, validate_provider_fallback_order,
-    validate_summarizer_provider_name, CircuitBreakerConfig, MockEmbeddingProvider,
-    MockLlmProvider, OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider, PersistentProviderUsageRecorder,
-    ProviderCandidate, ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
-    ProviderRoutingMetrics, ProviderUsageRecorder, default_embedding_dimensions_for_model,
-    new_token_usage_slot, provider_usage_recorder,
+    CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, OpenAiClient,
+    OpenAiEmbeddingProvider, OpenAiLlmProvider, PersistentProviderUsageRecorder, ProviderCandidate,
+    ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
+    ProviderRoutingMetrics, ProviderUsageRecorder, build_resilient_embedding_from_candidates,
+    build_resilient_llm_from_candidates, default_embedding_dimensions_for_model,
+    new_token_usage_slot, provider_usage_recorder, validate_embedding_provider_name,
+    validate_llm_provider_name, validate_provider_fallback_order,
+    validate_summarizer_provider_name,
 };
-use memcore_storage::{
-    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockProviderUsageStore, MockVectorStore,
-    SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore,
-};
-#[cfg(feature = "postgres")]
-use memcore_storage::{PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore, PostgresProviderUsageStore};
-use memcore_storage::SqliteProviderUsageStore;
-use crate::middleware::RateLimiter;
-use crate::observability::Metrics;
 #[cfg(feature = "lancedb")]
 use memcore_storage::LanceDbVectorStore;
 #[cfg(feature = "qdrant")]
 use memcore_storage::QdrantVectorStore;
 #[cfg(feature = "redis-cache")]
 use memcore_storage::RedisContextCache;
+use memcore_storage::SqliteProviderUsageStore;
+use memcore_storage::{
+    MockApiKeyStore, MockFactStore, MockMemoryEventStore, MockOrgPlanStore, MockProviderUsageStore,
+    MockVectorStore, SqliteApiKeyStore, SqliteFactStore, SqliteMemoryEventStore,
+    SqliteOrgPlanStore,
+};
+#[cfg(feature = "postgres")]
+use memcore_storage::{
+    PostgresApiKeyStore, PostgresFactStore, PostgresMemoryEventStore, PostgresOrgPlanStore,
+    PostgresProviderUsageStore,
+};
 
 /// Default embedding dimensions for the mock embedding provider.
 const MOCK_EMBEDDING_DIMENSIONS: usize = 8;
@@ -186,7 +191,10 @@ fn build_llm_provider_by_name(
             )?;
             let client = OpenAiClient::new(&api_key, &settings.openai_base_url)
                 .map_err(|err| provider_init_error("OpenAI LLM", err))?;
-            Ok(Arc::new(OpenAiLlmProvider::new(client, settings.llm_model.clone())))
+            Ok(Arc::new(OpenAiLlmProvider::new(
+                client,
+                settings.llm_model.clone(),
+            )))
         }
         "openrouter" => Err(MemcoreError::ValidationError(
             "openrouter LLM provider is not wired into the API yet".to_string(),
@@ -208,7 +216,9 @@ fn build_embedding_provider_by_name(
     settings: &Settings,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
     match name {
-        "mock" => Ok(Arc::new(MockEmbeddingProvider::new(MOCK_EMBEDDING_DIMENSIONS))),
+        "mock" => Ok(Arc::new(MockEmbeddingProvider::new(
+            MOCK_EMBEDDING_DIMENSIONS,
+        ))),
         "openai" => {
             let api_key = require_openai_api_key(
                 settings,
@@ -216,14 +226,10 @@ fn build_embedding_provider_by_name(
             )?;
             let client = OpenAiClient::new(&api_key, &settings.openai_base_url)
                 .map_err(|err| provider_init_error("OpenAI embedding", err))?;
-            let dimensions =
-                default_embedding_dimensions_for_model(&settings.embedding_model);
-            let provider = OpenAiEmbeddingProvider::new(
-                client,
-                settings.embedding_model.clone(),
-                dimensions,
-            )
-            .map_err(|err| provider_init_error("OpenAI embedding", err))?;
+            let dimensions = default_embedding_dimensions_for_model(&settings.embedding_model);
+            let provider =
+                OpenAiEmbeddingProvider::new(client, settings.embedding_model.clone(), dimensions)
+                    .map_err(|err| provider_init_error("OpenAI embedding", err))?;
             Ok(Arc::new(provider))
         }
         _ => Err(MemcoreError::ValidationError(format!(
@@ -279,13 +285,16 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub provider_usage: Arc<dyn ProviderUsageRecorder>,
     pub provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
+    pub org_plan_store: Arc<dyn OrgPlanStore>,
 }
 
 impl AppState {
     /// Builds application state using configured storage and providers.
     pub async fn initialize(settings: Settings) -> MemcoreResult<Self> {
         let wiring = ProviderWiring::from_settings(&settings).await?;
-        let memory_engine = Arc::new(create_memory_engine(&settings, &wiring).await?);
+        let org_plan_store = create_org_plan_store(&settings).await?;
+        let memory_engine =
+            Arc::new(create_memory_engine(&settings, &wiring, org_plan_store.clone()).await?);
         let api_key_store = create_api_key_store(&settings).await?;
         Ok(Self {
             settings: settings.clone(),
@@ -296,6 +305,7 @@ impl AppState {
             metrics: Arc::new(Metrics::default()),
             provider_usage: wiring.usage_recorder,
             provider_usage_store: wiring.usage_store,
+            org_plan_store,
         })
     }
 
@@ -308,11 +318,16 @@ impl AppState {
             && settings.vector_backend == VectorBackend::Mock
         {
             let wiring = ProviderWiring::for_mock_tests(&settings);
+            let org_plan_store = Arc::new(MockOrgPlanStore::new());
             Self {
                 started_at: Utc::now(),
                 memory_engine: Arc::new(
-                    create_mock_memory_engine_with_wiring(&settings, &wiring)
-                        .expect("failed to create mock memory engine"),
+                    create_mock_memory_engine_with_wiring_and_org_plan_store(
+                        &settings,
+                        &wiring,
+                        org_plan_store.clone(),
+                    )
+                    .expect("failed to create mock memory engine"),
                 ),
                 api_key_store: Arc::new(MockApiKeyStore::new()),
                 settings: settings.clone(),
@@ -320,11 +335,11 @@ impl AppState {
                 metrics: Arc::new(Metrics::default()),
                 provider_usage: wiring.usage_recorder,
                 provider_usage_store: wiring.usage_store,
+                org_plan_store,
             }
         } else {
             tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(Self::initialize(settings))
+                tokio::runtime::Handle::current().block_on(Self::initialize(settings))
             })
             .expect("failed to initialize AppState")
         }
@@ -340,6 +355,7 @@ impl AppState {
             metrics: Arc::new(Metrics::default()),
             provider_usage: provider_usage_recorder(settings.provider_usage_metrics_enabled),
             provider_usage_store: None,
+            org_plan_store: Arc::new(MockOrgPlanStore::new()),
         }
     }
 
@@ -357,6 +373,7 @@ impl AppState {
             metrics: Arc::new(Metrics::default()),
             provider_usage,
             provider_usage_store: None,
+            org_plan_store: Arc::new(MockOrgPlanStore::new()),
         }
     }
 
@@ -375,6 +392,7 @@ impl AppState {
             metrics: Arc::new(Metrics::default()),
             provider_usage,
             provider_usage_store,
+            org_plan_store: Arc::new(MockOrgPlanStore::new()),
         }
     }
 }
@@ -386,10 +404,22 @@ fn create_rate_limiter(settings: &Settings) -> Arc<RateLimiter> {
     ))
 }
 
+fn org_quota_limits_from_settings(settings: &Settings) -> OrgQuotaLimits {
+    OrgQuotaLimits::from_raw(
+        settings.quotas_enabled,
+        settings.max_users_per_org,
+        settings.max_memories_per_user,
+        settings.max_memories_per_org,
+        settings.daily_provider_request_limit,
+        settings.daily_provider_token_limit,
+    )
+}
+
 /// Wires `MemoryEngine` from settings: configurable fact/vector stores and LLM/embedding providers.
 pub async fn create_memory_engine(
     settings: &Settings,
     wiring: &ProviderWiring,
+    org_plan_store: Arc<dyn OrgPlanStore>,
 ) -> MemcoreResult<MemoryEngine> {
     let (fact_store, event_store) = create_storage(settings).await?;
     let llm_provider = create_llm_provider(
@@ -402,24 +432,20 @@ pub async fn create_memory_engine(
         wiring.usage_recorder.clone(),
         wiring.attribution_slot.clone(),
     )?;
-    let vector_store =
-        create_vector_store(settings, embedding_provider.dimensions()).await?;
+    let vector_store = create_vector_store(settings, embedding_provider.dimensions()).await?;
 
     Ok(apply_context_cache_async(
-        MemoryEngine::new(
-            fact_store,
-            vector_store,
-            llm_provider,
-            embedding_provider,
-        )
-        .with_pii_redaction(settings.enable_pii_redaction)
-        .with_event_store(event_store)
-        .with_usage_attribution(wiring.attribution_slot.clone())
-        .with_provider_usage_store(wiring.usage_store.clone())
-        .with_audit_provider_info(
-            Some(llm_provider_name(settings)),
-            Some(settings.llm_model.clone()),
-        ),
+        MemoryEngine::new(fact_store, vector_store, llm_provider, embedding_provider)
+            .with_pii_redaction(settings.enable_pii_redaction)
+            .with_event_store(event_store)
+            .with_usage_attribution(wiring.attribution_slot.clone())
+            .with_provider_usage_store(wiring.usage_store.clone())
+            .with_org_plan_store(org_plan_store)
+            .with_global_quota_limits(org_quota_limits_from_settings(settings))
+            .with_audit_provider_info(
+                Some(llm_provider_name(settings)),
+                Some(settings.llm_model.clone()),
+            ),
         settings,
     )
     .await?)
@@ -452,14 +478,45 @@ async fn create_api_key_store(settings: &Settings) -> MemcoreResult<Arc<dyn ApiK
     Ok(Arc::new(store))
 }
 
+async fn create_org_plan_store(settings: &Settings) -> MemcoreResult<Arc<dyn OrgPlanStore>> {
+    if settings.fact_backend == FactBackend::Mock && settings.event_backend == EventBackend::Mock {
+        return Ok(Arc::new(MockOrgPlanStore::new()));
+    }
+
+    #[cfg(feature = "postgres")]
+    if settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres
+    {
+        let postgres_url = require_postgres_url(settings)?;
+        let store = PostgresOrgPlanStore::connect(&postgres_url).await?;
+        return Ok(Arc::new(store));
+    }
+
+    #[cfg(not(feature = "postgres"))]
+    if settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres
+    {
+        if settings.event_backend == EventBackend::Postgres {
+            return Err(MemcoreError::ValidationError(
+                "Postgres event backend requires the `postgres` cargo feature".to_string(),
+            ));
+        }
+        return Err(MemcoreError::ValidationError(
+            "Postgres fact backend requires the `postgres` cargo feature".to_string(),
+        ));
+    }
+
+    let store = SqliteOrgPlanStore::connect(&settings.database_url).await?;
+    Ok(Arc::new(store))
+}
+
 async fn create_storage(
     settings: &Settings,
 ) -> MemcoreResult<(Arc<dyn FactStore>, Arc<dyn MemoryEventStore>)> {
-    let needs_postgres = settings.fact_backend == FactBackend::Postgres
-        || settings.event_backend == EventBackend::Postgres;
-
     #[cfg(not(feature = "postgres"))]
-    if needs_postgres {
+    if settings.fact_backend == FactBackend::Postgres
+        || settings.event_backend == EventBackend::Postgres
+    {
         if settings.event_backend == EventBackend::Postgres {
             return Err(MemcoreError::ValidationError(
                 "Postgres event backend requires the `postgres` cargo feature".to_string(),
@@ -482,18 +539,11 @@ async fn create_storage(
         }
         (FactBackend::Sqlite, EventBackend::Mock) => {
             let fact_store = SqliteFactStore::connect(&settings.database_url).await?;
-            Ok((
-                Arc::new(fact_store),
-                Arc::new(MockMemoryEventStore::new()),
-            ))
+            Ok((Arc::new(fact_store), Arc::new(MockMemoryEventStore::new())))
         }
         (FactBackend::Mock, EventBackend::Sqlite) => {
-            let event_store =
-                SqliteMemoryEventStore::connect(&settings.database_url).await?;
-            Ok((
-                Arc::new(MockFactStore::new()),
-                Arc::new(event_store),
-            ))
+            let event_store = SqliteMemoryEventStore::connect(&settings.database_url).await?;
+            Ok((Arc::new(MockFactStore::new()), Arc::new(event_store)))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Postgres, EventBackend::Postgres) => {
@@ -506,19 +556,13 @@ async fn create_storage(
         (FactBackend::Postgres, EventBackend::Mock) => {
             let postgres_url = require_postgres_url(settings)?;
             let fact_store = PostgresFactStore::connect(&postgres_url).await?;
-            Ok((
-                Arc::new(fact_store),
-                Arc::new(MockMemoryEventStore::new()),
-            ))
+            Ok((Arc::new(fact_store), Arc::new(MockMemoryEventStore::new())))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Mock, EventBackend::Postgres) => {
             let postgres_url = require_postgres_url(settings)?;
             let event_store = PostgresMemoryEventStore::connect(&postgres_url).await?;
-            Ok((
-                Arc::new(MockFactStore::new()),
-                Arc::new(event_store),
-            ))
+            Ok((Arc::new(MockFactStore::new()), Arc::new(event_store)))
         }
         #[cfg(feature = "postgres")]
         (FactBackend::Sqlite, EventBackend::Postgres) => {
@@ -531,16 +575,15 @@ async fn create_storage(
         (FactBackend::Postgres, EventBackend::Sqlite) => {
             let postgres_url = require_postgres_url(settings)?;
             let fact_store = PostgresFactStore::connect(&postgres_url).await?;
-            let event_store =
-                SqliteMemoryEventStore::connect(&settings.database_url).await?;
+            let event_store = SqliteMemoryEventStore::connect(&settings.database_url).await?;
             Ok((Arc::new(fact_store), Arc::new(event_store)))
         }
         #[cfg(not(feature = "postgres"))]
-        (FactBackend::Postgres, _) | (_, EventBackend::Postgres) => Err(
-            MemcoreError::ValidationError(
+        (FactBackend::Postgres, _) | (_, EventBackend::Postgres) => {
+            Err(MemcoreError::ValidationError(
                 "Postgres storage requires the `postgres` cargo feature".to_string(),
-            ),
-        ),
+            ))
+        }
     }
 }
 
@@ -638,9 +681,7 @@ fn create_embedding_provider(
     let names = if settings.provider_fallback_enabled {
         settings.embedding_fallback_order.clone()
     } else {
-        vec![
-            embedding_provider_kind_name(&settings.embedding_provider).to_string(),
-        ]
+        vec![embedding_provider_kind_name(&settings.embedding_provider).to_string()]
     };
 
     if settings.provider_fallback_enabled {
@@ -703,12 +744,9 @@ async fn create_vector_store(
             #[cfg(feature = "qdrant")]
             {
                 let url = require_qdrant_url(settings)?;
-                let store = QdrantVectorStore::connect(
-                    &url,
-                    &settings.qdrant_collection,
-                    dimensions,
-                )
-                .await?;
+                let store =
+                    QdrantVectorStore::connect(&url, &settings.qdrant_collection, dimensions)
+                        .await?;
                 Ok(Arc::new(store))
             }
             #[cfg(not(feature = "qdrant"))]
@@ -742,15 +780,24 @@ pub fn create_mock_memory_engine_with_usage(
     settings: &Settings,
     usage_recorder: Arc<dyn ProviderUsageRecorder>,
 ) -> MemcoreResult<MemoryEngine> {
-    create_mock_memory_engine_with_wiring(
-        settings,
-        &ProviderWiring::for_tests(usage_recorder),
-    )
+    create_mock_memory_engine_with_wiring(settings, &ProviderWiring::for_tests(usage_recorder))
 }
 
 pub fn create_mock_memory_engine_with_wiring(
     settings: &Settings,
     wiring: &ProviderWiring,
+) -> MemcoreResult<MemoryEngine> {
+    create_mock_memory_engine_with_wiring_and_org_plan_store(
+        settings,
+        wiring,
+        Arc::new(MockOrgPlanStore::new()),
+    )
+}
+
+pub fn create_mock_memory_engine_with_wiring_and_org_plan_store(
+    settings: &Settings,
+    wiring: &ProviderWiring,
+    org_plan_store: Arc<dyn OrgPlanStore>,
 ) -> MemcoreResult<MemoryEngine> {
     apply_context_cache(
         MemoryEngine::new(
@@ -771,6 +818,8 @@ pub fn create_mock_memory_engine_with_wiring(
         .with_event_store(Arc::new(MockMemoryEventStore::new()))
         .with_usage_attribution(wiring.attribution_slot.clone())
         .with_provider_usage_store(wiring.usage_store.clone())
+        .with_org_plan_store(org_plan_store)
+        .with_global_quota_limits(org_quota_limits_from_settings(settings))
         .with_audit_provider_info(
             Some(llm_provider_name(settings)),
             Some(settings.llm_model.clone()),
@@ -803,7 +852,9 @@ fn apply_context_cache(engine: MemoryEngine, settings: &Settings) -> MemcoreResu
     config.validate()?;
 
     Ok(engine.with_context_cache(
-        Arc::new(InMemoryContextCache::new(settings.context_cache_max_entries)),
+        Arc::new(InMemoryContextCache::new(
+            settings.context_cache_max_entries,
+        )),
         config,
     ))
 }
