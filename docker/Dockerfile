@@ -7,6 +7,9 @@
 #   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES=postgres -t memcore-api:postgres .
 #   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES="postgres,qdrant" -t memcore-api:prod .
 #   docker build -f docker/Dockerfile --build-arg CARGO_FEATURES="postgres,lancedb" -t memcore-api:lancedb .
+#
+# Security notes: runtime runs as non-root `memcore`; do not bake secrets into the image.
+# See docs/CONTAINER_SECURITY.md.
 
 ARG CARGO_FEATURES=
 
@@ -28,12 +31,17 @@ FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 memcore \
+    && useradd --system --uid 10001 --gid memcore --home-dir /app --shell /usr/sbin/nologin memcore
 
 WORKDIR /app
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data \
+    && chown -R memcore:memcore /app
 
 COPY --from=builder /app/target/release/memcore-api /usr/local/bin/memcore-api
+
+USER memcore:memcore
 
 EXPOSE 8080
 

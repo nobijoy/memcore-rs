@@ -1,0 +1,6 @@
+# Hadolint config for docker/Dockerfile.
+# Prefer fixing issues; only ignore style rules that conflict with practical apt usage.
+
+ignored:
+  # debian bookworm-slim packages are intentionally unpinned for security updates via apt.
+  - DL3008

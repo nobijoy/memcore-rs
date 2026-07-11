@@ -1,0 +1,124 @@
+name: Docker security
+
+# Build the default memcore image locally (no registry push), scan it, and generate an SBOM.
+# Does not require Postgres, Redis, Qdrant, LanceDB, or OpenAI.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: memcore:ci
+  CARGO_TERM_COLOR: always
+
+jobs:
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile
+          failure-threshold: warning
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image for dependent jobs
+        run: docker save "${IMAGE_NAME}" -o /tmp/memcore-ci.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: memcore-ci-image
+          path: /tmp/memcore-ci.tar
+          retention-days: 1
+
+  image-scan:
+    name: Image scan
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: memcore-ci-image
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/memcore-ci.tar
+
+      - name: Trivy filesystem scan (vuln + misconfig)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          exit-code: "1"
+          scanners: vuln,misconfig
+          ignore-unfixed: true
+
+      - name: Trivy image scan (CRITICAL fail)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          format: table
+
+      - name: Trivy image scan (HIGH report only)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}
+          severity: HIGH
+          exit-code: "0"
+          ignore-unfixed: true
+          format: table
+
+  sbom:
+    name: SBOM
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: memcore-ci-image
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/memcore-ci.tar
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SPDX SBOM
+        run: syft "${IMAGE_NAME}" -o spdx-json=sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: memcore-sbom
+          path: sbom.spdx.json
+          retention-days: 30
