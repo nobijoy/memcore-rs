@@ -13,6 +13,7 @@ pub mod state;
 pub use app::{create_app, run};
 pub use middleware::OrganizationContext;
 pub use observability::RequestId;
+pub use openapi::ApiDoc;
 pub use security::AuthContext;
 pub use state::{
     AppState, ProviderWiring, create_memory_engine, create_mock_memory_engine,

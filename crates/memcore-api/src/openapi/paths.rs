@@ -129,7 +129,7 @@ pub fn search_memory() {}
 )]
 pub fn build_context() {}
 
-/// List memories for a user. Cursor pagination is accepted but not fully implemented.
+/// List memories for a user (forward-only opaque cursor pagination).
 #[utoipa::path(
     get,
     path = "/api/v1/users/{user_id}/memories",
@@ -139,7 +139,7 @@ pub fn build_context() {}
         ("memory_type" = Option<String>, Query, description = "Filter by memory type (PascalCase label)"),
         ("q" = Option<String>, Query, description = "Case-insensitive keyword search over content and summary (max 200 chars)"),
         ("limit" = Option<usize>, Query, description = "Maximum results to return"),
-        ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but ignored)"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor from a previous next_cursor"),
         ("include_deleted" = Option<bool>, Query, description = "Include soft-deleted memories"),
         ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
         ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
@@ -266,7 +266,7 @@ pub fn apply_retention() {}
 )]
 pub fn forget_user() {}
 
-/// List memory audit events for a user. `input_text` is not exposed. Cursor pagination is accepted but not fully implemented.
+/// List memory audit events for a user. `input_text` is not exposed. Forward-only opaque cursor pagination.
 #[utoipa::path(
     get,
     path = "/api/v1/users/{user_id}/memory-events",
@@ -279,7 +279,7 @@ pub fn forget_user() {}
         ("created_before" = Option<String>, Query, description = "Exclusive RFC3339 upper bound on created_at"),
         ("q" = Option<String>, Query, description = "Case-insensitive keyword search over event fields (max 200 chars; does not search input_text)"),
         ("limit" = Option<usize>, Query, description = "Maximum results to return"),
-        ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but ignored)"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor from a previous next_cursor"),
         ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
         ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
     ),
@@ -469,7 +469,7 @@ pub fn run_background_job() {}
     tag = "Admin",
     params(
         ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
-        ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but not implemented yet)"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor from a previous next_cursor"),
         ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
         ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
     ),
@@ -497,7 +497,7 @@ pub fn list_org_users() {}
         ("created_before" = Option<String>, Query, description = "Exclusive RFC3339 upper bound on created_at"),
         ("q" = Option<String>, Query, description = "Case-insensitive keyword search over event fields and user_id (max 200 chars; does not search input_text)"),
         ("limit" = Option<usize>, Query, description = "Page size (default 50, max 100)"),
-        ("cursor" = Option<String>, Query, description = "Pagination cursor (accepted but not implemented yet)"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor from a previous next_cursor"),
         ("X-Organization-ID" = String, Header, description = "Organization tenant id", example = "org_123"),
         ("X-Request-ID" = Option<String>, Header, description = "Optional request correlation id"),
     ),

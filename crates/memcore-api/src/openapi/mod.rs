@@ -189,7 +189,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse, VersionInfo, VersionR
     )),
     tags(
         (name = "Health", description = "Liveness and readiness probes"),
-        (name = "Metrics", description = "Basic in-process Prometheus metrics (local-dev oriented)"),
+        (name = "Metrics", description = "Prometheus scrape endpoint (disabled by default; auth required by default)"),
         (name = "Memories", description = "Memory lifecycle and search"),
         (name = "Context", description = "Context assembly for LLM prompts"),
         (name = "Users", description = "User-scoped data management"),

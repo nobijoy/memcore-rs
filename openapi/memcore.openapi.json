@@ -1,0 +1,6582 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "memcore API",
+    "description": "Production-grade long-term memory engine for AI agents. Protected routes require `Authorization: Bearer <api_key>` and `X-Organization-ID`. `MEMCORE_AUTH_MODE=dev` accepts `MEMCORE_DEV_API_KEY` for local development without scope checks.",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/admin/jobs": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List in-process background job definitions and recent process-local runs.",
+        "operationId": "get_background_jobs",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Background job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/jobs/runs": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List persisted background job run history.",
+        "operationId": "query_background_job_runs",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Optional job kind filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Optional job status filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "description": "Optional RFC3339 lower bound on started_at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "description": "Optional RFC3339 upper bound on started_at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque pagination cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Background job run history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryBackgroundJobRunsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/jobs/runs/retention/apply": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Apply retention cleanup to persisted background job run history only.",
+        "operationId": "apply_background_job_run_retention",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyBackgroundJobRunRetentionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Background job run history retention summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyBackgroundJobRunRetentionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/jobs/{job_kind}/run": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Manually run one registered background job once.",
+        "operationId": "run_background_job",
+        "parameters": [
+          {
+            "name": "job_kind",
+            "in": "path",
+            "description": "Job kind: memory-usage-snapshot, provider-usage-retention, or memory-retention",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Background job run result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBackgroundJobResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/cache/context/metrics": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Process-local aggregate context cache counters for debugging and operations.",
+        "operationId": "get_context_cache_metrics",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Process-local context cache metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextCacheMetricsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/memory-events": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Search memory audit events across the organization. Does not return input_text.",
+        "operationId": "search_org_memory_events",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "description": "Filter by user id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fact_id",
+            "in": "query",
+            "description": "Filter by fact UUID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "description": "Filter by operation (Add, Update, Delete, NoOp, ForgetUser)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "description": "Inclusive RFC3339 lower bound on created_at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "description": "Exclusive RFC3339 upper bound on created_at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive keyword search over event fields and user_id (max 200 chars; does not search input_text)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque pagination cursor from a previous next_cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization memory audit events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchOrgMemoryEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead, AdminWrite, or AuditRead scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/plan": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Current organization plan configuration and resolved quota defaults.",
+        "operationId": "get_org_plan",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization plan configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetOrgPlanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create or update the current organization's plan configuration.",
+        "operationId": "upsert_org_plan",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertOrgPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Organization plan upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpsertOrgPlanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid tier, limits, or metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Delete the current organization's plan configuration.",
+        "operationId": "delete_org_plan",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization plan deletion result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteOrgPlanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/provider-usage": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Provider usage events (persistent store) or process-local aggregates (`source=memory`).",
+        "operationId": "get_provider_usage",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "description": "Filter by user id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider_name",
+            "in": "query",
+            "description": "Filter by provider name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model_name",
+            "in": "query",
+            "description": "Filter by model name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "query",
+            "description": "Filter by capability: llm, embedding, summarization",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation_name",
+            "in": "query",
+            "description": "Filter by operation name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "description": "Inclusive lower bound (RFC3339)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "description": "Exclusive upper bound (RFC3339)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Pagination cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "persistent (default when store configured) or memory",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization provider usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderUsageResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/provider-usage/retention/apply": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Apply org-scoped provider usage event retention cleanup. `dry_run` defaults to `true`.",
+        "operationId": "apply_provider_usage_retention",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyProviderUsageRetentionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Provider usage retention dry-run or apply summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyProviderUsageRetentionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/quotas": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Organization quota status and configured limits.",
+        "operationId": "get_org_quotas",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "description": "Optional user id for per-user memory count",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization quota status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgQuotaStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/summary": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Organization-level aggregate counts for admin visibility. Does not return memory content.",
+        "operationId": "get_org_summary",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/usage/dashboard": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Dashboard-ready organization usage summary over a UTC time window.",
+        "operationId": "get_org_usage_dashboard",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "description": "Inclusive RFC3339 lower bound. Must be paired with created_before.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "description": "Exclusive RFC3339 upper bound. Must be paired with created_after.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Relative UTC window ending now (default 30, max 90). Ignored when both timestamps are provided.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization usage dashboard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgUsageDashboardResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/usage/memory/snapshots": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List org-scoped memory usage snapshots. Does not expose memory content.",
+        "operationId": "query_memory_usage_snapshots",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "description": "Inclusive RFC3339 lower bound",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "description": "Exclusive RFC3339 upper bound",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Pagination cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory usage snapshots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryMemoryUsageSnapshotsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create an org-scoped memory usage snapshot from current aggregate counts.",
+        "operationId": "create_memory_usage_snapshot",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMemoryUsageSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Created memory usage snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateMemoryUsageSnapshotResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/usage/provider/daily": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Daily provider usage buckets over a UTC time window. Does not expose prompts or memory content.",
+        "operationId": "get_provider_usage_daily",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "provider_name",
+            "in": "query",
+            "description": "Filter by provider name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model_name",
+            "in": "query",
+            "description": "Filter by model name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "query",
+            "description": "Filter by capability: llm, embedding, summarization",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "description": "Inclusive RFC3339 lower bound. Must be paired with created_before.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "description": "Exclusive RFC3339 upper bound. Must be paired with created_after.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Relative UTC window ending now (default 30, max 90). Ignored when both timestamps are provided.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily provider usage buckets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderUsageDailyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/org/users": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List users in the organization with memory aggregates. Does not return memory content.",
+        "operationId": "list_org_users",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque pagination cursor from a previous next_cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOrgUsersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/api-keys": {
+      "get": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "List API keys for the organization. Does not include raw keys or key hashes.",
+        "operationId": "list_api_keys",
+        "parameters": [
+          {
+            "name": "include_revoked",
+            "in": "query",
+            "description": "Include revoked keys when true",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization API keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListApiKeysResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminRead or AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Create an API key for the organization. Returns the raw key once; it is never returned again in list responses.",
+        "operationId": "create_api_key",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "API key created (raw_key shown only in this response)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateApiKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}": {
+      "delete": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Revoke an API key. Revoked keys can no longer authenticate.",
+        "operationId": "revoke_api_key",
+        "parameters": [
+          {
+            "name": "api_key_id",
+            "in": "path",
+            "description": "API key UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API key revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeApiKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid api_key_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing AdminWrite scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API key not found in organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/context": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Build a formatted context string from relevant memories.",
+        "operationId": "build_context",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Context assembled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildContextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/memories": {
+      "post": {
+        "tags": [
+          "Memories"
+        ],
+        "summary": "Extract and store memories from a user message conversation.",
+        "operationId": "add_memory",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Memories processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/memories/search": {
+      "post": {
+        "tags": [
+          "Memories"
+        ],
+        "summary": "Semantic search over stored memories.",
+        "operationId": "search_memory",
+        "parameters": [
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchMemoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}": {
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Delete all memories and vectors for a user within the organization.",
+        "operationId": "forget_user",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User data forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgetUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/export": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Export memory facts and optional audit events for a user as JSON. Does not include API keys or event `input_text`.",
+        "operationId": "export_user_data",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_events",
+            "in": "query",
+            "description": "Include memory audit events (default true)",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "description": "Include soft-deleted facts (default false)",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User memory export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing required scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/import": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Import user memory data from a `memcore.user_export.v1` JSON export. Set `dry_run=true` to validate without writes.",
+        "operationId": "import_user_data",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportUserDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Import completed or dry-run validation summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportUserDataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing required scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/memories": {
+      "get": {
+        "tags": [
+          "Memories"
+        ],
+        "summary": "List memories for a user (forward-only opaque cursor pagination).",
+        "operationId": "list_user_memories",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "memory_type",
+            "in": "query",
+            "description": "Filter by memory type (PascalCase label)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive keyword search over content and summary (max 200 chars)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum results to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque pagination cursor from a previous next_cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "description": "Include soft-deleted memories",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User memories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoriesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/memories/{memory_id}": {
+      "delete": {
+        "tags": [
+          "Memories"
+        ],
+        "summary": "Soft-delete a single memory for a user.",
+        "operationId": "delete_user_memory",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "memory_id",
+            "in": "path",
+            "description": "Memory (fact) UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Memory not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/memory-events": {
+      "get": {
+        "tags": [
+          "Memory Events"
+        ],
+        "summary": "List memory audit events for a user. `input_text` is not exposed. Forward-only opaque cursor pagination.",
+        "operationId": "list_user_memory_events",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "description": "Filter by operation (PascalCase label)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fact_id",
+            "in": "query",
+            "description": "Filter by fact UUID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "description": "Inclusive RFC3339 lower bound on created_at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "description": "Exclusive RFC3339 upper bound on created_at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive keyword search over event fields (max 200 chars; does not search input_text)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum results to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque pagination cursor from a previous next_cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/retention/apply": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Apply user-scoped retention cleanup for facts and audit events. `dry_run` defaults to `true`.",
+        "operationId": "apply_retention",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Organization-ID",
+            "in": "header",
+            "description": "Organization tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "org_123"
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "description": "Optional request correlation id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRetentionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Retention dry-run or apply summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyRetentionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing required scope in database auth mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/version": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Safe build/version metadata (no secrets, no runtime env dump).",
+        "operationId": "version",
+        "responses": {
+          "200": {
+            "description": "Package and build metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Liveness probe.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Service is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "Metrics"
+        ],
+        "summary": "Prometheus scrape endpoint (path configurable; auth optional).",
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus text metrics when MEMCORE_METRICS_ENABLED=true",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized when metrics auth is required"
+          },
+          "404": {
+            "description": "Metrics endpoint disabled"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Readiness probe with configured backend labels.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "Service is ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddMemoryRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryMessageRequest"
+            }
+          },
+          "metadata": {},
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AddMemoryResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "summary",
+          "memories"
+        ],
+        "properties": {
+          "memories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryItemResponse"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/MemoryOperationSummaryResponse"
+          }
+        }
+      },
+      "AdminOrgMemoryEventItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "operation",
+          "metadata",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metadata": {},
+          "model_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new_content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation": {
+            "$ref": "#/components/schemas/MemoryEventOperationResponse"
+          },
+          "previous_content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiKeyItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "name",
+          "scopes",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyScopeResponse"
+            }
+          }
+        }
+      },
+      "ApiKeyScopeResponse": {
+        "type": "string",
+        "description": "API-facing scope labels (PascalCase) separate from core snake_case serde.",
+        "enum": [
+          "MemoryRead",
+          "MemoryWrite",
+          "MemoryDelete",
+          "UserDelete",
+          "AuditRead",
+          "AdminRead",
+          "AdminWrite"
+        ]
+      },
+      "ApplyBackgroundJobRunRetentionRequest": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "retention_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ApplyBackgroundJobRunRetentionResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "summary"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ApplyBackgroundJobRunRetentionSummaryResponse"
+          }
+        }
+      },
+      "ApplyBackgroundJobRunRetentionSummaryResponse": {
+        "type": "object",
+        "required": [
+          "dry_run",
+          "matched_runs",
+          "deleted_runs",
+          "cutoff"
+        ],
+        "properties": {
+          "cutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_runs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "matched_runs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ApplyProviderUsageRetentionRequest": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "retention_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ApplyProviderUsageRetentionResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "summary"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ApplyProviderUsageRetentionSummaryResponse"
+          }
+        }
+      },
+      "ApplyProviderUsageRetentionSummaryResponse": {
+        "type": "object",
+        "required": [
+          "dry_run",
+          "matched_events",
+          "deleted_events",
+          "cutoff"
+        ],
+        "properties": {
+          "cutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_events": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "matched_events": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ApplyRetentionRequest": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "event_retention_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "fact_retention_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ApplyRetentionResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "summary"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ApplyRetentionSummaryResponse"
+          }
+        }
+      },
+      "ApplyRetentionSummaryResponse": {
+        "type": "object",
+        "required": [
+          "dry_run",
+          "facts_matched",
+          "facts_deleted",
+          "events_matched",
+          "events_deleted"
+        ],
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "events_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "events_matched": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "facts_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "facts_matched": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "BackgroundJobDefinitionResponse": {
+        "type": "object",
+        "required": [
+          "kind",
+          "enabled",
+          "interval_seconds"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "lock": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BackgroundJobLockStatusResponse"
+              }
+            ]
+          }
+        }
+      },
+      "BackgroundJobLockStatusResponse": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "is_locked"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "locked_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "owner_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "BackgroundJobRunResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "started_at",
+          "attempt_count",
+          "max_attempts",
+          "retried",
+          "org_count",
+          "affected_count"
+        ],
+        "properties": {
+          "affected_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "org_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "retried": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "BackgroundJobSnapshotResponse": {
+        "type": "object",
+        "required": [
+          "jobs_enabled",
+          "jobs",
+          "recent_runs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackgroundJobDefinitionResponse"
+            }
+          },
+          "jobs_enabled": {
+            "type": "boolean"
+          },
+          "latest_persisted_runs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/BackgroundJobRunResponse"
+            }
+          },
+          "recent_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackgroundJobRunResponse"
+            }
+          }
+        }
+      },
+      "BackgroundJobsResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "$ref": "#/components/schemas/BackgroundJobSnapshotResponse"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "BuildContextRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "query"
+        ],
+        "properties": {
+          "compression_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Compression mode: `disabled`, `simple_extractive`, or `provider_summary`."
+          },
+          "filters": {
+            "$ref": "#/components/schemas/SearchMemoryFiltersRequest"
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Output format: `plain_text`, `markdown`, or `json`."
+          },
+          "include_confidence": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "include_importance": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "include_memory_ids": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "include_memory_types": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "include_metadata": {
+            "type": "boolean"
+          },
+          "include_scores": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "include_summary_section": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "include_timestamps": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "max_memories": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "query": {
+            "type": "string"
+          },
+          "reserved_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "section_by_memory_type": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "summary_max_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "BuildContextResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "context",
+          "memories",
+          "budget"
+        ],
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/ContextBudgetResponse"
+          },
+          "cache": {
+            "$ref": "#/components/schemas/ContextCacheResponse"
+          },
+          "compression": {
+            "$ref": "#/components/schemas/ContextCompressionResponse"
+          },
+          "context": {
+            "type": "string"
+          },
+          "memories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextMemoryResponse"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ContextBudgetResponse": {
+        "type": "object",
+        "required": [
+          "max_tokens",
+          "reserved_tokens",
+          "available_tokens",
+          "used_tokens",
+          "included_memories",
+          "skipped_memories"
+        ],
+        "properties": {
+          "available_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "included_memories": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reserved_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_memories": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "used_tokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ContextCacheMetricsBodyResponse": {
+        "type": "object",
+        "required": [
+          "hits",
+          "misses",
+          "sets",
+          "invalidations",
+          "invalidated_entries",
+          "stale_served",
+          "refresh_started",
+          "refresh_succeeded",
+          "refresh_failed",
+          "stampede_waits",
+          "stampede_timeouts",
+          "compute_errors"
+        ],
+        "properties": {
+          "compute_errors": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "hits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "invalidated_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "invalidations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "misses": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "refresh_failed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "refresh_started": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "refresh_succeeded": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sets": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stale_served": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stampede_timeouts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stampede_waits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ContextCacheMetricsResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "scope",
+          "metrics"
+        ],
+        "properties": {
+          "metrics": {
+            "$ref": "#/components/schemas/ContextCacheMetricsBodyResponse"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Metrics are aggregate counters for this API process only."
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ContextCacheResponse": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "hit"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "hit": {
+            "type": "boolean"
+          },
+          "refresh_started": {
+            "type": "boolean"
+          },
+          "served_stale": {
+            "type": "boolean"
+          },
+          "stale_while_revalidate_enabled": {
+            "type": "boolean"
+          },
+          "stampede_protection_enabled": {
+            "type": "boolean"
+          },
+          "ttl_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "waited_for_inflight": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ContextCompressionResponse": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "mode",
+          "summarized_memories",
+          "summary_tokens"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "summarized_memories": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary_tokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ContextMemoryResponse": {
+        "type": "object",
+        "required": [
+          "fact_id",
+          "content",
+          "memory_type",
+          "score",
+          "metadata"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "fact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memory_type": {
+            "$ref": "#/components/schemas/MemoryTypeResponse"
+          },
+          "metadata": {},
+          "score": {
+            "type": "number",
+            "format": "float"
+          }
+        }
+      },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateApiKeyResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "api_key",
+          "raw_key"
+        ],
+        "properties": {
+          "api_key": {
+            "$ref": "#/components/schemas/ApiKeyItemResponse"
+          },
+          "raw_key": {
+            "type": "string",
+            "description": "Raw API key returned only once at creation time."
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateMemoryUsageSnapshotRequest": {
+        "type": "object",
+        "properties": {
+          "captured_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateMemoryUsageSnapshotResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "snapshot"
+        ],
+        "properties": {
+          "snapshot": {
+            "$ref": "#/components/schemas/MemoryUsageSnapshotResponse"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DatabaseReadyCheck": {
+        "type": "object",
+        "required": [
+          "connected",
+          "migrations_clean",
+          "warning_count"
+        ],
+        "properties": {
+          "applied_migrations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "migrations_clean": {
+            "type": "boolean"
+          },
+          "pending_migrations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "warning_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "DeleteMemoryResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteOrgPlanResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "details": {},
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ExportFactItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "user_id",
+          "content",
+          "memory_type",
+          "source",
+          "confidence",
+          "importance",
+          "recorded_at",
+          "updated_at",
+          "metadata"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "number",
+            "format": "float"
+          },
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "importance": {
+            "type": "number",
+            "format": "float"
+          },
+          "invalid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "memory_type": {
+            "$ref": "#/components/schemas/MemoryTypeResponse"
+          },
+          "metadata": {},
+          "org_id": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ExportMemorySourceResponse"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "valid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "ExportMemorySourceResponse": {
+        "type": "string",
+        "enum": [
+          "user_message",
+          "assistant_message",
+          "manual",
+          "api_import",
+          "system"
+        ]
+      },
+      "ExportUserResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "export"
+        ],
+        "properties": {
+          "export": {
+            "$ref": "#/components/schemas/UserMemoryExportResponse"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ForgetUserResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "GetOrgPlanResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "resolved_source",
+          "resolved_limits"
+        ],
+        "properties": {
+          "plan": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OrgPlanResponse"
+              }
+            ]
+          },
+          "resolved_limits": {
+            "$ref": "#/components/schemas/OrgQuotaLimitsResponse"
+          },
+          "resolved_source": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "service",
+          "version"
+        ],
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ImportUserDataRequest": {
+        "type": "object",
+        "required": [
+          "export"
+        ],
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "export": {
+            "$ref": "#/components/schemas/UserMemoryExportResponse"
+          },
+          "mode": {
+            "type": "string",
+            "example": "append"
+          },
+          "restore_events": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ImportUserDataResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "summary"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ImportUserDataSummaryResponse"
+          }
+        }
+      },
+      "ImportUserDataSummaryResponse": {
+        "type": "object",
+        "required": [
+          "imported_facts",
+          "imported_events",
+          "skipped_facts",
+          "replaced_existing",
+          "dry_run",
+          "validation"
+        ],
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "imported_events": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "imported_facts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "replaced_existing": {
+            "type": "boolean"
+          },
+          "skipped_facts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "validation": {
+            "$ref": "#/components/schemas/ImportValidationSummaryResponse"
+          }
+        }
+      },
+      "ImportValidationIssueResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ImportValidationSummaryResponse": {
+        "type": "object",
+        "required": [
+          "valid",
+          "errors",
+          "warnings"
+        ],
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportValidationIssueResponse"
+            }
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportValidationIssueResponse"
+            }
+          }
+        }
+      },
+      "ListApiKeysResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "api_keys"
+        ],
+        "properties": {
+          "api_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyItemResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ListMemoriesResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "memories"
+        ],
+        "properties": {
+          "memories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ListMemoryItemResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ListMemoryEventsResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEventItemResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ListMemoryItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "memory_type",
+          "confidence",
+          "importance",
+          "metadata"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "number",
+            "format": "float"
+          },
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "importance": {
+            "type": "number",
+            "format": "float"
+          },
+          "memory_type": {
+            "$ref": "#/components/schemas/MemoryTypeResponse"
+          },
+          "metadata": {}
+        }
+      },
+      "ListOrgUsersResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "users"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrgUserSummaryResponse"
+            }
+          }
+        }
+      },
+      "MemoryEventItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "operation",
+          "metadata",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metadata": {},
+          "model_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new_content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation": {
+            "$ref": "#/components/schemas/MemoryEventOperationResponse"
+          },
+          "previous_content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MemoryEventOperationResponse": {
+        "type": "string",
+        "description": "API-facing operation labels (PascalCase) separate from core snake_case serde.",
+        "enum": [
+          "Add",
+          "Update",
+          "Delete",
+          "NoOp",
+          "ForgetUser"
+        ]
+      },
+      "MemoryItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "memory_type",
+          "confidence",
+          "importance"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "number",
+            "format": "float"
+          },
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "importance": {
+            "type": "number",
+            "format": "float"
+          },
+          "memory_type": {
+            "$ref": "#/components/schemas/MemoryTypeResponse"
+          }
+        }
+      },
+      "MemoryMessageRequest": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryOperationSummaryResponse": {
+        "type": "object",
+        "required": [
+          "added",
+          "updated",
+          "deleted",
+          "noop"
+        ],
+        "properties": {
+          "added": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "noop": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "MemoryTypeResponse": {
+        "type": "string",
+        "description": "API-facing memory type labels (PascalCase) separate from core snake_case serde.",
+        "enum": [
+          "Profile",
+          "Preference",
+          "Project",
+          "Conversation",
+          "Task",
+          "Entity",
+          "Skill",
+          "System"
+        ]
+      },
+      "MemoryUsageLatestSnapshotResponse": {
+        "type": "object",
+        "required": [
+          "captured_at",
+          "total_users",
+          "total_memories",
+          "active_memories"
+        ],
+        "properties": {
+          "active_memories": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_memories": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_memories": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_users": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "MemoryUsageSnapshotResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "total_users",
+          "total_memories",
+          "active_memories",
+          "captured_at"
+        ],
+        "properties": {
+          "active_memories": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_memories": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "total_memories": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_users": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "OrgMemoryUsageSummaryResponse": {
+        "type": "object",
+        "required": [
+          "total_users",
+          "total_memories",
+          "active_memories"
+        ],
+        "properties": {
+          "active_memories": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "deleted_memories": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "latest_snapshot": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MemoryUsageLatestSnapshotResponse"
+              }
+            ]
+          },
+          "total_memories": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_users": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "OrgPlanLimitsResponse": {
+        "type": "object",
+        "properties": {
+          "daily_provider_request_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "daily_provider_token_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_memories_per_org": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_memories_per_user": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_users_per_org": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "OrgPlanResponse": {
+        "type": "object",
+        "required": [
+          "org_id",
+          "tier",
+          "limits",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/OrgPlanLimitsResponse"
+          },
+          "metadata": {},
+          "org_id": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrgQuotaLimitsResponse": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "daily_provider_request_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "daily_provider_token_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_memories_per_org": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_memories_per_user": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_users_per_org": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "OrgQuotaStatusBodyResponse": {
+        "type": "object",
+        "required": [
+          "source",
+          "allowed",
+          "limits",
+          "usage",
+          "violations"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/OrgQuotaLimitsResponse"
+          },
+          "source": {
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/OrgQuotaUsageResponse"
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuotaViolationResponse"
+            }
+          }
+        }
+      },
+      "OrgQuotaStatusResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "quotas"
+        ],
+        "properties": {
+          "quotas": {
+            "$ref": "#/components/schemas/OrgQuotaStatusBodyResponse"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "OrgQuotaUsageResponse": {
+        "type": "object",
+        "required": [
+          "org_id",
+          "total_users",
+          "total_memories",
+          "daily_provider_requests",
+          "daily_provider_tokens",
+          "window_start",
+          "window_end"
+        ],
+        "properties": {
+          "daily_provider_requests": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "daily_provider_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "total_memories": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_users": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "user_memory_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrgSummaryBodyResponse": {
+        "type": "object",
+        "required": [
+          "org_id",
+          "total_users",
+          "total_facts"
+        ],
+        "properties": {
+          "org_id": {
+            "type": "string"
+          },
+          "total_events": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "total_facts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_users": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OrgSummaryResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "summary"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/OrgSummaryBodyResponse"
+          }
+        }
+      },
+      "OrgUsageDashboardBodyResponse": {
+        "type": "object",
+        "required": [
+          "org_id",
+          "generated_at",
+          "window_start",
+          "window_end",
+          "quota",
+          "memory",
+          "provider"
+        ],
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/OrgMemoryUsageSummaryResponse"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OrgPlanResponse"
+              }
+            ]
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderUsageSummaryResponse"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/OrgQuotaStatusBodyResponse"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrgUsageDashboardResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "dashboard"
+        ],
+        "properties": {
+          "dashboard": {
+            "$ref": "#/components/schemas/OrgUsageDashboardBodyResponse"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "OrgUsageDateRangeQuery": {
+        "type": "object",
+        "properties": {
+          "created_after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_before": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "OrgUserSummaryResponse": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "memory_count"
+        ],
+        "properties": {
+          "last_memory_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "memory_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ProviderUsageDailyBodyResponse": {
+        "type": "object",
+        "required": [
+          "org_id",
+          "window_start",
+          "window_end",
+          "buckets"
+        ],
+        "properties": {
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderUsageDailyBucketResponse"
+            }
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProviderUsageDailyBucketResponse": {
+        "type": "object",
+        "required": [
+          "date",
+          "total_requests",
+          "total_successes",
+          "total_errors",
+          "total_retries",
+          "total_fallbacks",
+          "total_circuit_blocks",
+          "total_timeouts",
+          "total_input_tokens",
+          "total_output_tokens",
+          "total_tokens"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "total_circuit_blocks": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_errors": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_estimated_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "total_fallbacks": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_requests": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_retries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_successes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_timeouts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ProviderUsageDailyQueryParams": {
+        "type": "object",
+        "properties": {
+          "capability": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_before": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "model_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ProviderUsageDailyResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "usage"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/ProviderUsageDailyBodyResponse"
+          }
+        }
+      },
+      "ProviderUsageEventItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "provider_name",
+          "capability",
+          "operation_name",
+          "status",
+          "retry_count",
+          "fallback_used",
+          "circuit_blocked",
+          "timed_out",
+          "created_at"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "circuit_blocked": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "estimated_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "fallback_used": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "model_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_name": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "retry_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "timed_out": {
+            "type": "boolean"
+          },
+          "total_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ProviderUsageQueryParams": {
+        "type": "object",
+        "properties": {
+          "capability": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_before": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "model_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ProviderUsageResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "source",
+          "summary",
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderUsageEventItemResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "`persistent` reads stored events; `memory` returns process-local aggregates only."
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ProviderUsageSummaryResponse"
+          }
+        }
+      },
+      "ProviderUsageSummaryResponse": {
+        "type": "object",
+        "required": [
+          "total_requests",
+          "total_successes",
+          "total_errors",
+          "total_retries",
+          "total_fallbacks",
+          "total_circuit_blocks",
+          "total_timeouts",
+          "total_input_tokens",
+          "total_output_tokens",
+          "total_tokens"
+        ],
+        "properties": {
+          "total_circuit_blocks": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_errors": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_estimated_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "total_fallbacks": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_requests": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_retries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_successes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_timeouts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ProvidersReadyCheck": {
+        "type": "object",
+        "required": [
+          "configured"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QueryBackgroundJobRunsParams": {
+        "type": "object",
+        "properties": {
+          "created_after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_before": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "QueryBackgroundJobRunsResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "runs"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackgroundJobRunResponse"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "QueryMemoryUsageSnapshotsParams": {
+        "type": "object",
+        "properties": {
+          "created_after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_before": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "QueryMemoryUsageSnapshotsResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "snapshots"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryUsageSnapshotResponse"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "QuotaViolationResponse": {
+        "type": "object",
+        "required": [
+          "kind",
+          "limit",
+          "current",
+          "requested",
+          "message"
+        ],
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ReadyChecks": {
+        "type": "object",
+        "required": [
+          "database",
+          "providers"
+        ],
+        "properties": {
+          "database": {
+            "$ref": "#/components/schemas/DatabaseReadyCheck"
+          },
+          "providers": {
+            "$ref": "#/components/schemas/ProvidersReadyCheck"
+          }
+        }
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "environment",
+          "storage_mode",
+          "vector_backend",
+          "fact_backend",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ReadyChecks"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "fact_backend": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "storage_mode": {
+            "type": "string"
+          },
+          "vector_backend": {
+            "type": "string"
+          }
+        }
+      },
+      "RevokeApiKeyResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "RunBackgroundJobResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "run"
+        ],
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/BackgroundJobRunResponse"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SearchMemoryFiltersRequest": {
+        "type": "object",
+        "properties": {
+          "memory_type": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SearchMemoryRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "query"
+        ],
+        "properties": {
+          "filters": {
+            "$ref": "#/components/schemas/SearchMemoryFiltersRequest"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "query": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "SearchMemoryResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchMemoryResultResponse"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SearchMemoryResultResponse": {
+        "type": "object",
+        "required": [
+          "fact_id",
+          "content",
+          "memory_type",
+          "score",
+          "metadata"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "fact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memory_type": {
+            "$ref": "#/components/schemas/MemoryTypeResponse"
+          },
+          "metadata": {},
+          "score": {
+            "type": "number",
+            "format": "float"
+          }
+        }
+      },
+      "SearchOrgMemoryEventsResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminOrgMemoryEventItemResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "UpsertOrgPlanLimitsRequest": {
+        "type": "object",
+        "properties": {
+          "daily_provider_request_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "daily_provider_token_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "max_memories_per_org": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "max_memories_per_user": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "max_users_per_org": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "UpsertOrgPlanRequest": {
+        "type": "object",
+        "required": [
+          "tier",
+          "limits"
+        ],
+        "properties": {
+          "is_active": {
+            "type": "boolean"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/UpsertOrgPlanLimitsRequest"
+          },
+          "metadata": {},
+          "tier": {
+            "type": "string"
+          }
+        }
+      },
+      "UpsertOrgPlanResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/OrgPlanResponse"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "UserMemoryExportResponse": {
+        "type": "object",
+        "required": [
+          "org_id",
+          "user_id",
+          "exported_at",
+          "format_version",
+          "facts",
+          "memory_events"
+        ],
+        "properties": {
+          "exported_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportFactItemResponse"
+            }
+          },
+          "format_version": {
+            "type": "string"
+          },
+          "memory_events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEventItemResponse"
+            }
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionInfo": {
+        "type": "object",
+        "required": [
+          "package_version",
+          "git_sha",
+          "build_timestamp",
+          "rustc_version",
+          "profile"
+        ],
+        "properties": {
+          "build_timestamp": {
+            "type": "string"
+          },
+          "git_sha": {
+            "type": "string"
+          },
+          "package_version": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "rustc_version": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "version"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/VersionInfo"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API key",
+        "description": "Bearer API key. In dev mode use MEMCORE_DEV_API_KEY; in database mode use a stored key hash lookup."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Liveness and readiness probes"
+    },
+    {
+      "name": "Metrics",
+      "description": "Prometheus scrape endpoint (disabled by default; auth required by default)"
+    },
+    {
+      "name": "Memories",
+      "description": "Memory lifecycle and search"
+    },
+    {
+      "name": "Context",
+      "description": "Context assembly for LLM prompts"
+    },
+    {
+      "name": "Users",
+      "description": "User-scoped data management"
+    },
+    {
+      "name": "Memory Events",
+      "description": "User-scoped memory audit events"
+    },
+    {
+      "name": "API Keys",
+      "description": "Organization API key management"
+    },
+    {
+      "name": "Admin",
+      "description": "Organization-level admin read endpoints"
+    }
+  ]
+}

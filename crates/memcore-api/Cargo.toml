@@ -22,6 +22,10 @@ redis-cache = ["memcore-storage/redis-cache"]
 name = "memcore-api"
 path = "src/main.rs"
 
+[[bin]]
+name = "export_openapi"
+path = "src/bin/export_openapi.rs"
+
 [[test]]
 name = "bootstrap_postgres_api"
 required-features = ["postgres"]
