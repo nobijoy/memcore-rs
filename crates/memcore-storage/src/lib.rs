@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod context_cache;
 pub mod jobs;
 pub mod keyword_search;
@@ -20,6 +21,11 @@ pub mod startup_checks;
 pub mod traits;
 pub mod vector;
 
+pub use backup::DatabaseBackupProvider;
+#[cfg(feature = "postgres")]
+pub use backup::PostgresBackupProvider;
+#[cfg(feature = "sqlite")]
+pub use backup::{SqliteBackupProvider, sqlite_path_from_database_url};
 #[cfg(feature = "redis-cache")]
 pub use context_cache::RedisContextCache;
 pub use context_cache::{

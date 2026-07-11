@@ -15,6 +15,10 @@ const MEMCORE_POSTGRES_URL: &str = "MEMCORE_POSTGRES_URL";
 const MEMCORE_DATABASE_MIGRATIONS_ENABLED: &str = "MEMCORE_DATABASE_MIGRATIONS_ENABLED";
 const MEMCORE_DATABASE_MIGRATION_MODE: &str = "MEMCORE_DATABASE_MIGRATION_MODE";
 const MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS: &str = "MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS";
+const MEMCORE_BACKUP_ENABLED: &str = "MEMCORE_BACKUP_ENABLED";
+const MEMCORE_BACKUP_DIR: &str = "MEMCORE_BACKUP_DIR";
+const MEMCORE_BACKUP_MAX_FILES: &str = "MEMCORE_BACKUP_MAX_FILES";
+const MEMCORE_RESTORE_ENABLED: &str = "MEMCORE_RESTORE_ENABLED";
 const MEMCORE_QDRANT_URL: &str = "MEMCORE_QDRANT_URL";
 const MEMCORE_QDRANT_COLLECTION: &str = "MEMCORE_QDRANT_COLLECTION";
 const MEMCORE_LANCEDB_PATH: &str = "MEMCORE_LANCEDB_PATH";
@@ -242,6 +246,14 @@ pub struct Settings {
     pub database_migrations_enabled: bool,
     pub database_migration_mode: DatabaseMigrationMode,
     pub database_require_clean_migrations: bool,
+    /// Enable operational database backup helpers (disabled by default).
+    pub backup_enabled: bool,
+    /// Directory used for local database backup files.
+    pub backup_dir: String,
+    /// Maximum number of memcore backup files retained in `backup_dir`.
+    pub backup_max_files: usize,
+    /// Explicitly allow destructive restore helpers. Dangerous; defaults to false.
+    pub restore_enabled: bool,
     pub qdrant_url: String,
     pub qdrant_collection: String,
     pub lancedb_path: String,
@@ -415,6 +427,10 @@ impl Default for Settings {
             database_migrations_enabled: true,
             database_migration_mode: DatabaseMigrationMode::Auto,
             database_require_clean_migrations: true,
+            backup_enabled: false,
+            backup_dir: "./backups".to_string(),
+            backup_max_files: 10,
+            restore_enabled: false,
             qdrant_url: "http://localhost:6333".to_string(),
             qdrant_collection: "memcore_vectors".to_string(),
             lancedb_path: "./data/lancedb".to_string(),
@@ -531,6 +547,10 @@ impl Settings {
             MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS,
             defaults.database_require_clean_migrations,
         )?;
+        let backup_enabled = parse_bool(MEMCORE_BACKUP_ENABLED, defaults.backup_enabled)?;
+        let backup_dir = read_env_or(MEMCORE_BACKUP_DIR, &defaults.backup_dir);
+        let backup_max_files = parse_usize(MEMCORE_BACKUP_MAX_FILES, defaults.backup_max_files)?;
+        let restore_enabled = parse_bool(MEMCORE_RESTORE_ENABLED, defaults.restore_enabled)?;
         let qdrant_url = read_env_or(MEMCORE_QDRANT_URL, &defaults.qdrant_url);
         let qdrant_collection = read_env_or(MEMCORE_QDRANT_COLLECTION, &defaults.qdrant_collection);
         let lancedb_path = read_env_or(MEMCORE_LANCEDB_PATH, &defaults.lancedb_path);
@@ -808,6 +828,10 @@ impl Settings {
             database_migrations_enabled,
             database_migration_mode,
             database_require_clean_migrations,
+            backup_enabled,
+            backup_dir,
+            backup_max_files,
+            restore_enabled,
             qdrant_url,
             qdrant_collection,
             lancedb_path,
@@ -948,6 +972,18 @@ impl Settings {
         if self.database_url.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
                 "MEMCORE_DATABASE_URL cannot be empty".to_string(),
+            ));
+        }
+
+        if self.backup_dir.trim().is_empty() {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKUP_DIR cannot be empty".to_string(),
+            ));
+        }
+
+        if self.backup_max_files == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_BACKUP_MAX_FILES must be greater than 0".to_string(),
             ));
         }
 
@@ -1586,6 +1622,10 @@ mod tests {
         "MEMCORE_DATABASE_MIGRATIONS_ENABLED",
         "MEMCORE_DATABASE_MIGRATION_MODE",
         "MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS",
+        "MEMCORE_BACKUP_ENABLED",
+        "MEMCORE_BACKUP_DIR",
+        "MEMCORE_BACKUP_MAX_FILES",
+        "MEMCORE_RESTORE_ENABLED",
         "MEMCORE_QDRANT_URL",
         "MEMCORE_QDRANT_COLLECTION",
         "MEMCORE_LANCEDB_PATH",
@@ -1774,6 +1814,72 @@ mod tests {
             super::DatabaseMigrationMode::Auto
         );
         assert!(settings.database_require_clean_migrations);
+        assert!(!settings.backup_enabled);
+        assert_eq!(settings.backup_dir, "./backups");
+        assert_eq!(settings.backup_max_files, 10);
+        assert!(!settings.restore_enabled);
+    }
+
+    #[test]
+    fn backup_settings_parse_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_BACKUP_ENABLED", "true");
+            std::env::set_var("MEMCORE_BACKUP_DIR", "./tmp/backups");
+            std::env::set_var("MEMCORE_BACKUP_MAX_FILES", "3");
+            std::env::set_var("MEMCORE_RESTORE_ENABLED", "true");
+        }
+
+        let settings = Settings::from_env().expect("backup settings should load");
+        assert!(settings.backup_enabled);
+        assert_eq!(settings.backup_dir, "./tmp/backups");
+        assert_eq!(settings.backup_max_files, 3);
+        assert!(settings.restore_enabled);
+    }
+
+    #[test]
+    fn empty_backup_dir_fails_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_BACKUP_DIR", "   ");
+        }
+
+        let error = Settings::from_env().expect_err("empty backup dir should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_BACKUP_DIR cannot be empty")
+        );
+    }
+
+    #[test]
+    fn zero_backup_max_files_fails_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_BACKUP_MAX_FILES", "0");
+        }
+
+        let error = Settings::from_env().expect_err("zero backup max files should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_BACKUP_MAX_FILES must be greater than 0")
+        );
     }
 
     #[test]

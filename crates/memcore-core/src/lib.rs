@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod audit;
+pub mod backup;
 pub mod context;
 pub mod dedup;
 pub mod engine;
@@ -30,6 +31,12 @@ pub use admin::{
     QueryMemoryUsageSnapshotsOutput, SearchOrgMemoryEventsInput, SearchOrgMemoryEventsOutput,
     empty_provider_usage_summary, resolve_org_usage_window, validate_memory_usage_snapshot_limit,
     validate_org_usage_days,
+};
+pub use backup::{
+    BACKUP_FILE_PREFIX, BACKUP_FILE_SUFFIX, BackupBackend, BackupRequest, BackupResult,
+    RestoreConfirmation, RestoreResult, RestoreValidationResult, build_sqlite_backup_filename,
+    file_sha256_hex, is_memcore_sqlite_backup_filename, resolve_backup_path,
+    rotate_memcore_sqlite_backups, sanitize_backup_label, validate_backup_output_dir,
 };
 pub use context::{
     AssembledContext, BuildContextInput, BuildContextOutput, CachedContextEntry, ContextBudget,

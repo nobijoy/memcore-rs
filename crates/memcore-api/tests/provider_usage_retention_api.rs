@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use chrono::{TimeZone, Utc};
+use chrono::Utc;
 use http_body_util::BodyExt;
 use memcore_api::{AppState, ProviderWiring, create_app, create_mock_memory_engine_with_wiring};
 use memcore_common::hash_api_key;
@@ -95,8 +95,9 @@ async fn response_parts(
 }
 
 async fn seed_events(store: Arc<dyn ProviderUsageStore>, org_id: &str) {
-    let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
-    let recent = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+    let now = Utc::now();
+    let old = now - chrono::Duration::days(60);
+    let recent = now - chrono::Duration::days(1);
     store
         .record_usage_event(sample_event(org_id, old))
         .await

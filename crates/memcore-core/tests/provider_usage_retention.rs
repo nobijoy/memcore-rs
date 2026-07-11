@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, TimeZone, Utc};
 use memcore_core::{
     ApplyProviderUsageRetentionInput, MemoryEngine, ProviderCallStatus, ProviderUsageCapability,
     ProviderUsageEventRecord, ProviderUsageQuery, ProviderUsageStore,
@@ -73,8 +73,9 @@ async fn retention_days_zero_returns_zero_counts() {
 async fn dry_run_returns_matched_without_deleting() {
     let store = Arc::new(MockProviderUsageStore::new());
     let engine = engine_with_store(store.clone());
-    let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
-    let recent = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+    let now = Utc::now();
+    let old = now - Duration::days(60);
+    let recent = now - Duration::days(1);
 
     store
         .record_usage_event(sample_event("org_dry", old))
@@ -107,8 +108,9 @@ async fn dry_run_returns_matched_without_deleting() {
 async fn non_dry_run_deletes_matched_events() {
     let store = Arc::new(MockProviderUsageStore::new());
     let engine = engine_with_store(store.clone());
-    let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
-    let recent = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+    let now = Utc::now();
+    let old = now - Duration::days(60);
+    let recent = now - Duration::days(1);
 
     store
         .record_usage_event(sample_event("org_apply", old))

@@ -3679,6 +3679,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",
@@ -3724,6 +3725,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
