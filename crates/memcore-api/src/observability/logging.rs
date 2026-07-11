@@ -41,6 +41,19 @@ pub fn log_startup(settings: &Settings) {
         security_headers_enabled = settings.security_headers_enabled,
         max_request_body_bytes = settings.max_request_body_bytes,
         cors_enabled = settings.cors_enabled,
+        auth_mode = ?settings.auth_mode,
+        openai_api_key_configured = settings
+            .openai_api_key
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty()),
+        postgres_url_configured = settings
+            .postgres_url
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty()),
+        redis_url_configured = settings
+            .redis_url
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty()),
         "memcore-api starting"
     );
 }

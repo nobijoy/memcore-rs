@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt;
 use std::str::FromStr;
 
 use memcore_common::{MemcoreError, MemcoreResult};
@@ -244,7 +245,7 @@ pub enum EmbeddingProviderKind {
     OpenAi,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Settings {
     pub environment: Environment,
     pub host: String,
@@ -438,6 +439,106 @@ pub struct Settings {
     pub graceful_shutdown_timeout_seconds: u64,
     /// Maximum time to wait for a background job attempt to finish after shutdown starts.
     pub background_job_shutdown_timeout_seconds: u64,
+}
+
+impl fmt::Debug for Settings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Settings")
+            .field("environment", &self.environment)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("storage_mode", &self.storage_mode)
+            .field("vector_backend", &self.vector_backend)
+            .field("fact_backend", &self.fact_backend)
+            .field("event_backend", &self.event_backend)
+            .field("database_url", &redacted_secret(&self.database_url))
+            .field(
+                "postgres_url",
+                &self.postgres_url.as_ref().map(|value| redacted_secret(value)),
+            )
+            .field(
+                "database_migrations_enabled",
+                &self.database_migrations_enabled,
+            )
+            .field("database_migration_mode", &self.database_migration_mode)
+            .field(
+                "database_require_clean_migrations",
+                &self.database_require_clean_migrations,
+            )
+            .field("backup_enabled", &self.backup_enabled)
+            .field("backup_dir", &self.backup_dir)
+            .field("backup_max_files", &self.backup_max_files)
+            .field("restore_enabled", &self.restore_enabled)
+            .field("security_headers_enabled", &self.security_headers_enabled)
+            .field("max_request_body_bytes", &self.max_request_body_bytes)
+            .field("cors_enabled", &self.cors_enabled)
+            .field("cors_allowed_origins", &self.cors_allowed_origins)
+            .field("cors_allowed_methods", &self.cors_allowed_methods)
+            .field("cors_allowed_headers", &self.cors_allowed_headers)
+            .field("cors_exposed_headers", &self.cors_exposed_headers)
+            .field("cors_allow_credentials", &self.cors_allow_credentials)
+            .field("qdrant_url", &self.qdrant_url)
+            .field("qdrant_collection", &self.qdrant_collection)
+            .field("lancedb_path", &self.lancedb_path)
+            .field("lancedb_table", &self.lancedb_table)
+            .field("llm_provider", &self.llm_provider)
+            .field("llm_model", &self.llm_model)
+            .field("embedding_provider", &self.embedding_provider)
+            .field("embedding_model", &self.embedding_model)
+            .field("enable_pii_redaction", &self.enable_pii_redaction)
+            .field("min_importance", &self.min_importance)
+            .field("auth_enabled", &self.auth_enabled)
+            .field("auth_mode", &self.auth_mode)
+            .field("dev_api_key", &redacted_secret(&self.dev_api_key))
+            .field(
+                "api_key_pepper",
+                &self
+                    .api_key_pepper
+                    .as_ref()
+                    .map(|value| redacted_present(value)),
+            )
+            .field(
+                "openai_api_key",
+                &self
+                    .openai_api_key
+                    .as_ref()
+                    .map(|value| redacted_present(value)),
+            )
+            .field("openai_base_url", &self.openai_base_url)
+            .field("rate_limit_enabled", &self.rate_limit_enabled)
+            .field(
+                "rate_limit_requests_per_minute",
+                &self.rate_limit_requests_per_minute,
+            )
+            .field("log_format", &self.log_format)
+            .field("log_level", &self.log_level)
+            .field("request_id_header", &self.request_id_header)
+            .field("metrics_enabled", &self.metrics_enabled)
+            .field("context_cache_backend", &self.context_cache_backend)
+            .field(
+                "redis_url",
+                &self.redis_url.as_ref().map(|value| redacted_secret(value)),
+            )
+            .field("quotas_enabled", &self.quotas_enabled)
+            .field("background_jobs_enabled", &self.background_jobs_enabled)
+            .finish_non_exhaustive()
+    }
+}
+
+fn redacted_secret(value: &str) -> &'static str {
+    if value.trim().is_empty() {
+        ""
+    } else {
+        "[REDACTED]"
+    }
+}
+
+fn redacted_present(value: &str) -> &'static str {
+    if value.trim().is_empty() {
+        ""
+    } else {
+        "[REDACTED]"
+    }
 }
 
 impl Default for Settings {
@@ -2107,6 +2208,23 @@ mod tests {
 
         let error = Settings::from_env().expect_err("invalid header should fail");
         assert!(error.to_string().contains("Invalid CORS header name"));
+    }
+
+    #[test]
+    fn settings_debug_output_redacts_secrets() {
+        let settings = Settings {
+            database_url: "postgres://user:dbpass@localhost/memcore".to_string(),
+            openai_api_key: Some("sk-test-key".to_string()),
+            api_key_pepper: Some("super-pepper-secret".to_string()),
+            redis_url: Some("redis://:rpass@localhost:6379/0".to_string()),
+            ..Settings::default()
+        };
+        let debug = format!("{settings:?}");
+        assert!(!debug.contains("dbpass"));
+        assert!(!debug.contains("sk-test-key"));
+        assert!(!debug.contains("super-pepper-secret"));
+        assert!(!debug.contains("rpass"));
+        assert!(debug.contains("[REDACTED]"));
     }
 
     #[test]

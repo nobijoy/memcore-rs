@@ -167,6 +167,15 @@ mod tests {
                 ))
             }
 
+            async fn query_usage_daily(
+                &self,
+                _query: memcore_core::ports::ProviderUsageDailyQuery,
+            ) -> memcore_common::MemcoreResult<Vec<memcore_core::ProviderUsageDailyBucket>> {
+                Err(memcore_common::MemcoreError::StorageError(
+                    "fail".to_string(),
+                ))
+            }
+
             async fn delete_usage_events_older_than(
                 &self,
                 _org_id: &str,

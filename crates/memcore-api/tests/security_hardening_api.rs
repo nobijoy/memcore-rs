@@ -388,5 +388,5 @@ async fn storage_error_message_is_sanitized() {
         "failed postgres://user:secret@db/memcore".to_string(),
     ));
     assert!(!body.error.message.contains("secret"));
-    assert!(body.error.message.contains("postgres://***"));
+    assert_eq!(body.error.message, "database operation failed");
 }

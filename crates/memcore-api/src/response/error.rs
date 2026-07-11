@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use memcore_common::{MemcoreError, sanitize_error_message};
+use memcore_common::{MemcoreError, safe_error_message};
 use serde::Serialize;
 use serde_json::{Value, json};
 use utoipa::ToSchema;
@@ -74,7 +74,7 @@ impl ErrorBody {
             MemcoreError::QuotaExceeded { .. } => "QUOTA_EXCEEDED",
         };
 
-        let body = Self::new(code, api_error_message(&error));
+        let body = Self::new(code, safe_error_message(&error));
         let body = match &error {
             MemcoreError::QuotaExceeded {
                 kind,
@@ -92,23 +92,5 @@ impl ErrorBody {
         };
 
         (status, body)
-    }
-}
-
-fn api_error_message(error: &MemcoreError) -> String {
-    match error {
-        MemcoreError::ValidationError(message)
-        | MemcoreError::BadRequest(message)
-        | MemcoreError::NotFound(message)
-        | MemcoreError::Conflict(message)
-        | MemcoreError::Timeout(message)
-        | MemcoreError::QuotaExceeded { message, .. } => message.clone(),
-        MemcoreError::ProviderError(message)
-        | MemcoreError::StorageError(message)
-        | MemcoreError::MigrationError(message)
-        | MemcoreError::Internal(message) => sanitize_error_message(message),
-        MemcoreError::Unauthorized => "unauthorized".to_string(),
-        MemcoreError::Forbidden => "forbidden".to_string(),
-        MemcoreError::RateLimited => "rate limit exceeded".to_string(),
     }
 }

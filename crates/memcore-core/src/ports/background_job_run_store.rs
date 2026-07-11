@@ -168,22 +168,7 @@ pub fn validate_background_job_run_limit(limit: usize) -> MemcoreResult<usize> {
 }
 
 pub fn sanitize_background_job_error_message(message: impl Into<String>) -> String {
-    let mut sanitized = message.into();
-    for marker in [
-        "Bearer ",
-        "OPENAI_API_KEY=",
-        "MEMCORE_DEV_API_KEY=",
-        "MEMCORE_API_KEY_PEPPER=",
-        "MEMCORE_POSTGRES_URL=",
-        "MEMCORE_REDIS_URL=",
-        "postgres://",
-        "redis://",
-    ] {
-        if let Some(index) = sanitized.find(marker) {
-            sanitized.truncate(index);
-            sanitized.push_str("[redacted]");
-        }
-    }
+    let mut sanitized = memcore_common::Redactor::redact_str(&message.into());
 
     if sanitized.len() > 512 {
         sanitized.truncate(512);
@@ -213,6 +198,6 @@ mod tests {
             "failed to connect postgres://user:pass@localhost/db",
         );
         assert!(!message.contains("pass"));
-        assert!(message.contains("[redacted]"));
+        assert!(message.contains("[REDACTED]"));
     }
 }

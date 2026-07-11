@@ -139,7 +139,9 @@ impl From<BackgroundJobRun> for BackgroundJobRunResponse {
             max_attempts: run.max_attempts,
             retried: run.retried,
             error_code: run.error_code,
-            error_message: run.error_message,
+            error_message: run
+                .error_message
+                .map(memcore_core::sanitize_background_job_error_message),
             org_count: run.org_count,
             affected_count: run.affected_count,
         }
