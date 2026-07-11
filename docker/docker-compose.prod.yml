@@ -1,40 +1,28 @@
 # Production-shaped Docker Compose: Postgres (facts/events/API keys) + Qdrant (vectors).
 # LanceDB is not enabled in this stack.
 #
-# Override secrets via a `.env` file or environment — do not use placeholder values
-# in real deployments.
+# Secrets: use an env file with placeholders replaced — never commit real values.
 #
-# Build with Postgres + Qdrant support (required for configured backends):
-#   docker compose -f docker/docker-compose.prod.yml up --build
+#   cp .env.production.example .env.production
+#   # edit CHANGE_ME values
+#   ./scripts/ops/validate_env.sh .env.production
+#   docker compose --env-file .env.production -f docker/docker-compose.prod.yml up --build
 #
-# Enable OpenAI providers (optional):
-#   Set MEMCORE_LLM_PROVIDER=openai, MEMCORE_EMBEDDING_PROVIDER=openai, and OPENAI_API_KEY
-#   in a `.env` file or under `memcore.environment` below.
-#
-# Revert to mock vector backend (optional):
-#   build.args.CARGO_FEATURES: "postgres"
-#   MEMCORE_VECTOR_BACKEND: mock
-#
-# Enable Redis context cache (optional, requires redis-cache feature in build):
-#   build.args.CARGO_FEATURES: "postgres,qdrant,redis-cache"
-#   Uncomment the redis service and memcore env vars below
-#
-# Enable LanceDB vector backend instead (optional, heavier image build — not recommended here):
-#   build.args.CARGO_FEATURES: "postgres,lancedb"
-#   MEMCORE_VECTOR_BACKEND: lancedb
-#   MEMCORE_LANCEDB_PATH: /app/data/lancedb
+# Required build features: postgres,qdrant
+# Backups: prefer managed Postgres snapshots / pg_dump; protect volumes.
+# See docs/DEPLOYMENT.md and docs/runbooks/
 
 services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: memcore
-      POSTGRES_USER: memcore
-      POSTGRES_PASSWORD: memcore_password
+      POSTGRES_DB: ${POSTGRES_DB:-memcore}
+      POSTGRES_USER: ${POSTGRES_USER:-memcore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env file}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U memcore -d memcore"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-memcore} -d $${POSTGRES_DB:-memcore}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,8 +34,7 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    # The official Qdrant image does not include curl/wget; health is checked via
-    # host: curl http://localhost:6333/healthz (see docs/DEPLOYMENT.md).
+    # Official image has no curl/wget; check from host: curl http://localhost:6333/healthz
 
   # Optional Redis for shared context cache (disabled by default):
   # redis:
@@ -66,6 +53,9 @@ services:
       dockerfile: docker/Dockerfile
       args:
         CARGO_FEATURES: postgres,qdrant
+        APP_VERSION: ${APP_VERSION:-unknown}
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:-unknown}
     ports:
       - "8080:8080"
     depends_on:
@@ -74,46 +64,42 @@ services:
       qdrant:
         condition: service_started
     environment:
-      MEMCORE_ENV: production
+      MEMCORE_ENV: ${MEMCORE_ENV:-production}
       MEMCORE_HOST: 0.0.0.0
       MEMCORE_PORT: 8080
 
       MEMCORE_STORAGE_MODE: production
-
       MEMCORE_FACT_BACKEND: postgres
       MEMCORE_EVENT_BACKEND: postgres
-      MEMCORE_POSTGRES_URL: postgres://memcore:memcore_password@postgres:5432/memcore
+      MEMCORE_POSTGRES_URL: ${MEMCORE_POSTGRES_URL:?set MEMCORE_POSTGRES_URL}
+      MEMCORE_DATABASE_MIGRATION_MODE: ${MEMCORE_DATABASE_MIGRATION_MODE:-auto}
+      MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS: ${MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS:-true}
 
       MEMCORE_VECTOR_BACKEND: qdrant
-      MEMCORE_QDRANT_URL: http://qdrant:6333
-      MEMCORE_QDRANT_COLLECTION: memcore_vectors
+      MEMCORE_QDRANT_URL: ${MEMCORE_QDRANT_URL:-http://qdrant:6333}
+      MEMCORE_QDRANT_COLLECTION: ${MEMCORE_QDRANT_COLLECTION:-memcore_vectors}
 
-      MEMCORE_LLM_PROVIDER: mock
-      MEMCORE_LLM_MODEL: mock-llm
-      MEMCORE_EMBEDDING_PROVIDER: mock
-      MEMCORE_EMBEDDING_MODEL: mock-embedding
-      # Optional OpenAI providers (uncomment and set OPENAI_API_KEY):
-      # MEMCORE_LLM_PROVIDER: openai
-      # MEMCORE_LLM_MODEL: gpt-4.1-mini
-      # MEMCORE_EMBEDDING_PROVIDER: openai
-      # MEMCORE_EMBEDDING_MODEL: text-embedding-3-small
-      # OPENAI_API_KEY: your_key_here
+      MEMCORE_LLM_PROVIDER: ${MEMCORE_LLM_PROVIDER:-mock}
+      MEMCORE_LLM_MODEL: ${MEMCORE_LLM_MODEL:-mock-llm}
+      MEMCORE_EMBEDDING_PROVIDER: ${MEMCORE_EMBEDDING_PROVIDER:-mock}
+      MEMCORE_EMBEDDING_MODEL: ${MEMCORE_EMBEDDING_MODEL:-mock-embedding}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
 
-      MEMCORE_AUTH_ENABLED: "true"
-      MEMCORE_AUTH_MODE: dev
-      MEMCORE_DEV_API_KEY: change_this_dev_key
-      MEMCORE_API_KEY_PEPPER: change_this_pepper
+      MEMCORE_AUTH_ENABLED: ${MEMCORE_AUTH_ENABLED:-true}
+      MEMCORE_AUTH_MODE: ${MEMCORE_AUTH_MODE:-dev}
+      MEMCORE_DEV_API_KEY: ${MEMCORE_DEV_API_KEY:-}
+      MEMCORE_API_KEY_PEPPER: ${MEMCORE_API_KEY_PEPPER:-}
 
-      MEMCORE_RATE_LIMIT_ENABLED: "true"
-      MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: 120
+      MEMCORE_RATE_LIMIT_ENABLED: ${MEMCORE_RATE_LIMIT_ENABLED:-true}
+      MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: ${MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE:-120}
 
-      MEMCORE_LOG_FORMAT: json
-      MEMCORE_LOG_LEVEL: info
-      MEMCORE_METRICS_ENABLED: "true"
-      # Optional Redis context cache (requires CARGO_FEATURES=redis-cache):
-      # MEMCORE_CONTEXT_CACHE_BACKEND: redis
-      # MEMCORE_REDIS_URL: redis://redis:6379
-      # MEMCORE_CONTEXT_CACHE_TTL_SECONDS: "300"
+      MEMCORE_LOG_FORMAT: ${MEMCORE_LOG_FORMAT:-json}
+      MEMCORE_LOG_LEVEL: ${MEMCORE_LOG_LEVEL:-info}
+      MEMCORE_METRICS_ENABLED: ${MEMCORE_METRICS_ENABLED:-true}
+      MEMCORE_CORS_ENABLED: ${MEMCORE_CORS_ENABLED:-false}
+      MEMCORE_SECURITY_HEADERS_ENABLED: ${MEMCORE_SECURITY_HEADERS_ENABLED:-true}
+      MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS: ${MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:-30}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s

@@ -1,5 +1,10 @@
 # Local development: SQLite facts + mock vector + mock LLM/embedding providers.
-# LanceDB is not enabled in this compose file (see docs/DEVELOPMENT.md).
+# LanceDB is not enabled in this compose file (see docs/LOCAL_DEVELOPMENT.md).
+#
+# Env guidance: copy `.env.local.example` → `.env` for binary runs.
+# This compose file sets safe local defaults inline (no secrets required).
+#
+#   docker compose -f docker/docker-compose.local.yml up --build
 
 services:
   memcore:
@@ -15,9 +20,11 @@ services:
 
       MEMCORE_STORAGE_MODE: embedded
       MEMCORE_FACT_BACKEND: sqlite
+      MEMCORE_EVENT_BACKEND: sqlite
       MEMCORE_VECTOR_BACKEND: mock
 
       MEMCORE_DATABASE_URL: sqlite:///app/data/memcore.db
+      MEMCORE_DATABASE_MIGRATION_MODE: auto
 
       MEMCORE_LLM_PROVIDER: mock
       MEMCORE_LLM_MODEL: mock-llm
@@ -25,6 +32,7 @@ services:
       MEMCORE_EMBEDDING_MODEL: mock-embedding
 
       MEMCORE_AUTH_ENABLED: "true"
+      MEMCORE_AUTH_MODE: dev
       MEMCORE_DEV_API_KEY: memcore_dev_key
 
       MEMCORE_RATE_LIMIT_ENABLED: "true"
@@ -33,6 +41,7 @@ services:
       MEMCORE_LOG_FORMAT: pretty
       MEMCORE_LOG_LEVEL: info
       MEMCORE_METRICS_ENABLED: "true"
+      MEMCORE_CORS_ENABLED: "false"
     volumes:
       - memcore_data:/app/data
     healthcheck:
