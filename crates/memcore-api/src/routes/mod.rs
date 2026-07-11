@@ -1,3 +1,18 @@
+use axum::Router;
+use axum::extract::DefaultBodyLimit;
+use axum::middleware::{from_fn, from_fn_with_state};
+use axum::routing::{delete, get, post};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+
+use crate::middleware::{
+    apply_security_headers, build_cors_layer, enforce_json_content_type, enforce_rate_limit,
+    enforce_request_body_limit, require_api_key, require_organization,
+};
+use crate::observability::{log_protected_request, observe_request_lifecycle};
+use crate::openapi::ApiDoc;
+use crate::state::AppState;
+
 pub mod admin;
 pub mod api_keys;
 pub mod common;
@@ -7,22 +22,15 @@ pub mod memories;
 pub mod memory_events;
 pub mod users;
 
-use axum::Router;
-use axum::middleware::{from_fn, from_fn_with_state};
-use axum::routing::{delete, get, post};
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
-
-use crate::middleware::{enforce_rate_limit, require_api_key, require_organization};
-use crate::observability::{log_protected_request, observe_request_lifecycle};
-use crate::openapi::ApiDoc;
-use crate::state::AppState;
-
 /// Protected routes middleware order (incoming request):
 /// `observe_request_lifecycle` → `require_api_key` → `require_organization` →
 /// `enforce_rate_limit` → `log_protected_request` → handler.
 ///
-/// Axum applies `.route_layer()` in reverse add order on the protected sub-router.
+/// Global middleware order (incoming request):
+/// request ID / tracing → security headers → CORS (optional) → body limit →
+/// content-type validation → routes.
+///
+/// Axum applies `.layer()` / `.route_layer()` in reverse add order.
 pub fn router(state: &AppState) -> Router<AppState> {
     let protected = Router::new()
         .route("/api/v1/memories", post(memories::add_memory))
@@ -114,11 +122,26 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 
-    Router::new()
+    let router = Router::new()
         .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
         .route("/metrics", get(health::metrics))
         .merge(protected)
+        .layer(from_fn(enforce_json_content_type))
+        .layer(from_fn_with_state(
+            state.clone(),
+            enforce_request_body_limit,
+        ))
+        .layer(DefaultBodyLimit::max(state.settings.max_request_body_bytes));
+
+    let router = if let Some(cors_layer) = build_cors_layer(&state.settings) {
+        router.layer(cors_layer)
+    } else {
+        router
+    };
+
+    router
+        .layer(from_fn_with_state(state.clone(), apply_security_headers))
         .layer(from_fn_with_state(state.clone(), observe_request_lifecycle))
 }

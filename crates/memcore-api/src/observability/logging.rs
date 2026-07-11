@@ -38,6 +38,9 @@ pub fn log_startup(settings: &Settings) {
         log_level = settings.log_level.as_filter_str(),
         metrics_enabled = settings.metrics_enabled,
         rate_limit_enabled = settings.rate_limit_enabled,
+        security_headers_enabled = settings.security_headers_enabled,
+        max_request_body_bytes = settings.max_request_body_bytes,
+        cors_enabled = settings.cors_enabled,
         "memcore-api starting"
     );
 }

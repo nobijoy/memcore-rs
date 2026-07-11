@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use memcore_common::MemcoreError;
+use memcore_common::{MemcoreError, sanitize_error_message};
 use serde::Serialize;
 use serde_json::{Value, json};
 use utoipa::ToSchema;
@@ -101,12 +101,12 @@ fn api_error_message(error: &MemcoreError) -> String {
         | MemcoreError::BadRequest(message)
         | MemcoreError::NotFound(message)
         | MemcoreError::Conflict(message)
-        | MemcoreError::ProviderError(message)
+        | MemcoreError::Timeout(message)
+        | MemcoreError::QuotaExceeded { message, .. } => message.clone(),
+        MemcoreError::ProviderError(message)
         | MemcoreError::StorageError(message)
         | MemcoreError::MigrationError(message)
-        | MemcoreError::Internal(message)
-        | MemcoreError::Timeout(message) => message.clone(),
-        MemcoreError::QuotaExceeded { message, .. } => message.clone(),
+        | MemcoreError::Internal(message) => sanitize_error_message(message),
         MemcoreError::Unauthorized => "unauthorized".to_string(),
         MemcoreError::Forbidden => "forbidden".to_string(),
         MemcoreError::RateLimited => "rate limit exceeded".to_string(),

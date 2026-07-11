@@ -19,6 +19,14 @@ const MEMCORE_BACKUP_ENABLED: &str = "MEMCORE_BACKUP_ENABLED";
 const MEMCORE_BACKUP_DIR: &str = "MEMCORE_BACKUP_DIR";
 const MEMCORE_BACKUP_MAX_FILES: &str = "MEMCORE_BACKUP_MAX_FILES";
 const MEMCORE_RESTORE_ENABLED: &str = "MEMCORE_RESTORE_ENABLED";
+const MEMCORE_SECURITY_HEADERS_ENABLED: &str = "MEMCORE_SECURITY_HEADERS_ENABLED";
+const MEMCORE_MAX_REQUEST_BODY_BYTES: &str = "MEMCORE_MAX_REQUEST_BODY_BYTES";
+const MEMCORE_CORS_ENABLED: &str = "MEMCORE_CORS_ENABLED";
+const MEMCORE_CORS_ALLOWED_ORIGINS: &str = "MEMCORE_CORS_ALLOWED_ORIGINS";
+const MEMCORE_CORS_ALLOWED_METHODS: &str = "MEMCORE_CORS_ALLOWED_METHODS";
+const MEMCORE_CORS_ALLOWED_HEADERS: &str = "MEMCORE_CORS_ALLOWED_HEADERS";
+const MEMCORE_CORS_EXPOSED_HEADERS: &str = "MEMCORE_CORS_EXPOSED_HEADERS";
+const MEMCORE_CORS_ALLOW_CREDENTIALS: &str = "MEMCORE_CORS_ALLOW_CREDENTIALS";
 const MEMCORE_QDRANT_URL: &str = "MEMCORE_QDRANT_URL";
 const MEMCORE_QDRANT_COLLECTION: &str = "MEMCORE_QDRANT_COLLECTION";
 const MEMCORE_LANCEDB_PATH: &str = "MEMCORE_LANCEDB_PATH";
@@ -121,6 +129,10 @@ const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_REQUEST_ID_HEADER: &str = "X-Request-ID";
 pub const DEFAULT_CONTEXT_CACHE_KEY_PREFIX: &str = "memcore";
+pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 1_048_576;
+pub const DEFAULT_CORS_ALLOWED_METHODS: &[&str] = &["GET", "POST", "PUT", "DELETE", "OPTIONS"];
+pub const DEFAULT_CORS_ALLOWED_HEADERS: &[&str] =
+    &["Authorization", "Content-Type", "X-Organization-ID"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextCacheBackend {
@@ -254,6 +266,22 @@ pub struct Settings {
     pub backup_max_files: usize,
     /// Explicitly allow destructive restore helpers. Dangerous; defaults to false.
     pub restore_enabled: bool,
+    /// Apply default HTTP security headers on responses.
+    pub security_headers_enabled: bool,
+    /// Maximum accepted HTTP request body size in bytes.
+    pub max_request_body_bytes: usize,
+    /// Enable CORS responses (disabled by default for machine-to-machine APIs).
+    pub cors_enabled: bool,
+    /// Allowed CORS origins (`*` only when credentials are disabled).
+    pub cors_allowed_origins: Vec<String>,
+    /// Allowed CORS methods.
+    pub cors_allowed_methods: Vec<String>,
+    /// Allowed CORS request headers.
+    pub cors_allowed_headers: Vec<String>,
+    /// Headers exposed to browsers via CORS.
+    pub cors_exposed_headers: Vec<String>,
+    /// Whether CORS responses may include credentials.
+    pub cors_allow_credentials: bool,
     pub qdrant_url: String,
     pub qdrant_collection: String,
     pub lancedb_path: String,
@@ -431,6 +459,20 @@ impl Default for Settings {
             backup_dir: "./backups".to_string(),
             backup_max_files: 10,
             restore_enabled: false,
+            security_headers_enabled: true,
+            max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
+            cors_enabled: false,
+            cors_allowed_origins: Vec::new(),
+            cors_allowed_methods: DEFAULT_CORS_ALLOWED_METHODS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            cors_allowed_headers: DEFAULT_CORS_ALLOWED_HEADERS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            cors_exposed_headers: Vec::new(),
+            cors_allow_credentials: false,
             qdrant_url: "http://localhost:6333".to_string(),
             qdrant_collection: "memcore_vectors".to_string(),
             lancedb_path: "./data/lancedb".to_string(),
@@ -551,6 +593,27 @@ impl Settings {
         let backup_dir = read_env_or(MEMCORE_BACKUP_DIR, &defaults.backup_dir);
         let backup_max_files = parse_usize(MEMCORE_BACKUP_MAX_FILES, defaults.backup_max_files)?;
         let restore_enabled = parse_bool(MEMCORE_RESTORE_ENABLED, defaults.restore_enabled)?;
+        let security_headers_enabled = parse_bool(
+            MEMCORE_SECURITY_HEADERS_ENABLED,
+            defaults.security_headers_enabled,
+        )?;
+        let max_request_body_bytes = parse_usize(
+            MEMCORE_MAX_REQUEST_BODY_BYTES,
+            defaults.max_request_body_bytes,
+        )?;
+        let cors_enabled = parse_bool(MEMCORE_CORS_ENABLED, defaults.cors_enabled)?;
+        let cors_allowed_origins =
+            parse_string_list(MEMCORE_CORS_ALLOWED_ORIGINS, &defaults.cors_allowed_origins);
+        let cors_allowed_methods =
+            parse_string_list(MEMCORE_CORS_ALLOWED_METHODS, &defaults.cors_allowed_methods);
+        let cors_allowed_headers =
+            parse_string_list(MEMCORE_CORS_ALLOWED_HEADERS, &defaults.cors_allowed_headers);
+        let cors_exposed_headers =
+            parse_string_list(MEMCORE_CORS_EXPOSED_HEADERS, &defaults.cors_exposed_headers);
+        let cors_allow_credentials = parse_bool(
+            MEMCORE_CORS_ALLOW_CREDENTIALS,
+            defaults.cors_allow_credentials,
+        )?;
         let qdrant_url = read_env_or(MEMCORE_QDRANT_URL, &defaults.qdrant_url);
         let qdrant_collection = read_env_or(MEMCORE_QDRANT_COLLECTION, &defaults.qdrant_collection);
         let lancedb_path = read_env_or(MEMCORE_LANCEDB_PATH, &defaults.lancedb_path);
@@ -832,6 +895,14 @@ impl Settings {
             backup_dir,
             backup_max_files,
             restore_enabled,
+            security_headers_enabled,
+            max_request_body_bytes,
+            cors_enabled,
+            cors_allowed_origins,
+            cors_allowed_methods,
+            cors_allowed_headers,
+            cors_exposed_headers,
+            cors_allow_credentials,
             qdrant_url,
             qdrant_collection,
             lancedb_path,
@@ -986,6 +1057,14 @@ impl Settings {
                 "MEMCORE_BACKUP_MAX_FILES must be greater than 0".to_string(),
             ));
         }
+
+        if self.max_request_body_bytes == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_MAX_REQUEST_BODY_BYTES must be greater than 0".to_string(),
+            ));
+        }
+
+        validate_cors_settings(self)?;
 
         if self.lancedb_path.trim().is_empty() {
             return Err(MemcoreError::ValidationError(
@@ -1342,6 +1421,73 @@ fn parse_string_list(key: &str, default: &[String]) -> Vec<String> {
     }
 }
 
+fn validate_cors_settings(settings: &Settings) -> MemcoreResult<()> {
+    for origin in &settings.cors_allowed_origins {
+        if !is_valid_cors_origin(origin) {
+            return Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_CORS_ALLOWED_ORIGINS value: {origin}"
+            )));
+        }
+    }
+
+    if settings.cors_allow_credentials
+        && settings
+            .cors_allowed_origins
+            .iter()
+            .any(|origin| origin.trim() == "*")
+    {
+        return Err(MemcoreError::ValidationError(
+            "MEMCORE_CORS_ALLOWED_ORIGINS cannot include * when MEMCORE_CORS_ALLOW_CREDENTIALS=true"
+                .to_string(),
+        ));
+    }
+
+    for method in &settings.cors_allowed_methods {
+        if !is_valid_http_method(method) {
+            return Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_CORS_ALLOWED_METHODS value: {method}"
+            )));
+        }
+    }
+
+    for header in settings
+        .cors_allowed_headers
+        .iter()
+        .chain(settings.cors_exposed_headers.iter())
+    {
+        if header.trim().is_empty() {
+            return Err(MemcoreError::ValidationError(
+                "CORS header names cannot be empty".to_string(),
+            ));
+        }
+        if header.chars().any(|ch| ch.is_whitespace()) {
+            return Err(MemcoreError::ValidationError(format!(
+                "Invalid CORS header name: {header}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_valid_cors_origin(origin: &str) -> bool {
+    let origin = origin.trim();
+    if origin == "*" {
+        return true;
+    }
+    if origin.contains(char::is_whitespace) {
+        return false;
+    }
+    (origin.starts_with("http://") || origin.starts_with("https://")) && origin.len() > 8
+}
+
+fn is_valid_http_method(method: &str) -> bool {
+    matches!(
+        method.trim().to_ascii_uppercase().as_str(),
+        "GET" | "POST" | "PUT" | "DELETE" | "OPTIONS" | "PATCH" | "HEAD"
+    )
+}
+
 fn parse_u16(key: &str, default: u16) -> MemcoreResult<u16> {
     match env::var(key) {
         Ok(value) => value
@@ -1626,6 +1772,14 @@ mod tests {
         "MEMCORE_BACKUP_DIR",
         "MEMCORE_BACKUP_MAX_FILES",
         "MEMCORE_RESTORE_ENABLED",
+        "MEMCORE_SECURITY_HEADERS_ENABLED",
+        "MEMCORE_MAX_REQUEST_BODY_BYTES",
+        "MEMCORE_CORS_ENABLED",
+        "MEMCORE_CORS_ALLOWED_ORIGINS",
+        "MEMCORE_CORS_ALLOWED_METHODS",
+        "MEMCORE_CORS_ALLOWED_HEADERS",
+        "MEMCORE_CORS_EXPOSED_HEADERS",
+        "MEMCORE_CORS_ALLOW_CREDENTIALS",
         "MEMCORE_QDRANT_URL",
         "MEMCORE_QDRANT_COLLECTION",
         "MEMCORE_LANCEDB_PATH",
@@ -1818,6 +1972,141 @@ mod tests {
         assert_eq!(settings.backup_dir, "./backups");
         assert_eq!(settings.backup_max_files, 10);
         assert!(!settings.restore_enabled);
+        assert!(settings.security_headers_enabled);
+        assert_eq!(settings.max_request_body_bytes, super::DEFAULT_MAX_REQUEST_BODY_BYTES);
+        assert!(!settings.cors_enabled);
+        assert!(settings.cors_allowed_origins.is_empty());
+        assert_eq!(
+            settings.cors_allowed_methods,
+            vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        );
+        assert_eq!(
+            settings.cors_allowed_headers,
+            vec!["Authorization", "Content-Type", "X-Organization-ID"]
+        );
+        assert!(settings.cors_exposed_headers.is_empty());
+        assert!(!settings.cors_allow_credentials);
+    }
+
+    #[test]
+    fn security_settings_parse_from_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_SECURITY_HEADERS_ENABLED", "false");
+            std::env::set_var("MEMCORE_MAX_REQUEST_BODY_BYTES", "2048");
+            std::env::set_var("MEMCORE_CORS_ENABLED", "true");
+            std::env::set_var(
+                "MEMCORE_CORS_ALLOWED_ORIGINS",
+                "https://app.example.com,https://admin.example.com",
+            );
+            std::env::set_var("MEMCORE_CORS_ALLOWED_METHODS", "GET,POST,OPTIONS");
+            std::env::set_var(
+                "MEMCORE_CORS_ALLOWED_HEADERS",
+                "Authorization,Content-Type,X-Organization-ID,X-Request-ID",
+            );
+            std::env::set_var("MEMCORE_CORS_EXPOSED_HEADERS", "X-Request-ID");
+            std::env::set_var("MEMCORE_CORS_ALLOW_CREDENTIALS", "true");
+        }
+
+        let settings = Settings::from_env().expect("security settings should load");
+        assert!(!settings.security_headers_enabled);
+        assert_eq!(settings.max_request_body_bytes, 2048);
+        assert!(settings.cors_enabled);
+        assert_eq!(
+            settings.cors_allowed_origins,
+            vec!["https://app.example.com", "https://admin.example.com"]
+        );
+        assert_eq!(settings.cors_allowed_methods, vec!["GET", "POST", "OPTIONS"]);
+        assert_eq!(
+            settings.cors_allowed_headers,
+            vec![
+                "Authorization",
+                "Content-Type",
+                "X-Organization-ID",
+                "X-Request-ID"
+            ]
+        );
+        assert_eq!(settings.cors_exposed_headers, vec!["X-Request-ID"]);
+        assert!(settings.cors_allow_credentials);
+    }
+
+    #[test]
+    fn zero_max_request_body_bytes_fails_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_MAX_REQUEST_BODY_BYTES", "0");
+        }
+
+        let error = Settings::from_env().expect_err("zero body limit should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("MEMCORE_MAX_REQUEST_BODY_BYTES must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn wildcard_cors_origin_rejected_when_credentials_enabled() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_CORS_ALLOW_CREDENTIALS", "true");
+            std::env::set_var("MEMCORE_CORS_ALLOWED_ORIGINS", "*");
+        }
+
+        let error = Settings::from_env().expect_err("wildcard with credentials should fail");
+        assert!(error.to_string().contains("cannot include *"));
+    }
+
+    #[test]
+    fn invalid_cors_http_method_fails_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            std::env::set_var("MEMCORE_CORS_ALLOWED_METHODS", "GET,TRACE");
+        }
+
+        let error = Settings::from_env().expect_err("invalid method should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid MEMCORE_CORS_ALLOWED_METHODS value")
+        );
+    }
+
+    #[test]
+    fn invalid_empty_cors_header_fails_validation() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        unsafe {
+            // Comma-separated parser drops empties; force validation via exposed headers with spaces.
+            std::env::set_var("MEMCORE_CORS_ALLOWED_HEADERS", "Authorization, Bad Header");
+        }
+
+        let error = Settings::from_env().expect_err("invalid header should fail");
+        assert!(error.to_string().contains("Invalid CORS header name"));
     }
 
     #[test]
