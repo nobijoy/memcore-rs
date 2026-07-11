@@ -37,7 +37,7 @@ use crate::dto::{
     UserMemoryExportResponse,
 };
 use crate::response::{ErrorBody, ErrorDetail};
-use crate::routes::health::{HealthResponse, ReadyResponse};
+use crate::routes::health::{HealthResponse, ReadyResponse, VersionInfo, VersionResponse};
 
 /// OpenAPI document for the memcore HTTP API.
 #[derive(OpenApi)]
@@ -53,6 +53,7 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         paths::health,
         paths::ready,
         paths::metrics,
+        paths::version,
         paths::add_memory,
         paths::search_memory,
         paths::build_context,
@@ -90,6 +91,8 @@ use crate::routes::health::{HealthResponse, ReadyResponse};
         ErrorDetail,
         HealthResponse,
         ReadyResponse,
+        VersionResponse,
+        VersionInfo,
         AddMemoryRequest,
         MemoryMessageRequest,
         AddMemoryResponse,

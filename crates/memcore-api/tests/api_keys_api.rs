@@ -527,7 +527,7 @@ async fn database_auth_allows_admin_read_for_list() {
 #[tokio::test]
 async fn health_ready_metrics_remain_public() {
     let app = dev_app();
-    for path in ["/health", "/ready", "/metrics"] {
+    for path in ["/health", "/ready", "/metrics", "/api/v1/version"] {
         let response = app
             .clone()
             .oneshot(

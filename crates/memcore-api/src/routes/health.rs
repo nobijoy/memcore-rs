@@ -54,6 +54,35 @@ pub async fn health() -> Json<HealthResponse> {
     })
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VersionResponse {
+    pub status: &'static str,
+    pub version: VersionInfo,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VersionInfo {
+    pub package_version: &'static str,
+    pub git_sha: &'static str,
+    pub build_timestamp: &'static str,
+    pub rustc_version: &'static str,
+    pub profile: &'static str,
+}
+
+/// Public build metadata. Never reads process environment at request time.
+pub async fn version() -> Json<VersionResponse> {
+    Json(VersionResponse {
+        status: "success",
+        version: VersionInfo {
+            package_version: env!("CARGO_PKG_VERSION"),
+            git_sha: env!("MEMCORE_BUILD_GIT_SHA"),
+            build_timestamp: env!("MEMCORE_BUILD_TIMESTAMP"),
+            rustc_version: env!("MEMCORE_BUILD_RUSTC_VERSION"),
+            profile: env!("MEMCORE_BUILD_PROFILE"),
+        },
+    })
+}
+
 pub async fn ready(State(state): State<AppState>) -> Json<ReadyResponse> {
     let settings = &state.settings;
 

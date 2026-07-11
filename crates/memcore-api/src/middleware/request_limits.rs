@@ -60,7 +60,13 @@ fn should_validate_json_content_type(request: &Request) -> bool {
 fn is_exempt_path(path: &str) -> bool {
     matches!(
         path,
-        "/health" | "/ready" | "/metrics" | "/openapi.json" | "/docs" | "/docs/"
+        "/health"
+            | "/ready"
+            | "/metrics"
+            | "/api/v1/version"
+            | "/openapi.json"
+            | "/docs"
+            | "/docs/"
     ) || path.starts_with("/docs/")
 }
 

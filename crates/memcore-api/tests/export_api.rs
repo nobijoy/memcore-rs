@@ -318,7 +318,7 @@ async fn include_deleted_true_includes_deleted_fact() {
 async fn health_ready_metrics_remain_public() {
     let app = test_app();
 
-    for path in ["/health", "/ready", "/metrics"] {
+    for path in ["/health", "/ready", "/metrics", "/api/v1/version"] {
         let (status, _) = response_parts(
             app.clone(),
             Request::builder()

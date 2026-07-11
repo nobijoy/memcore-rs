@@ -18,7 +18,7 @@ use crate::dto::{
     UpsertOrgPlanResponse,
 };
 use crate::response::ErrorBody;
-use crate::routes::health::{HealthResponse, ReadyResponse};
+use crate::routes::health::{HealthResponse, ReadyResponse, VersionResponse};
 
 /// Liveness probe.
 #[utoipa::path(
@@ -53,6 +53,17 @@ pub fn ready() {}
     )
 )]
 pub fn metrics() {}
+
+/// Safe build/version metadata (no secrets, no runtime env dump).
+#[utoipa::path(
+    get,
+    path = "/api/v1/version",
+    tag = "Health",
+    responses(
+        (status = 200, description = "Package and build metadata", body = VersionResponse),
+    )
+)]
+pub fn version() {}
 
 /// Extract and store memories from a user message conversation.
 #[utoipa::path(

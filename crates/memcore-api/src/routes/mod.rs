@@ -127,6 +127,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
         .route("/metrics", get(health::metrics))
+        .route("/api/v1/version", get(health::version))
         .merge(protected)
         .layer(from_fn(enforce_json_content_type))
         .layer(from_fn_with_state(
