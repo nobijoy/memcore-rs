@@ -46,12 +46,12 @@ pub fn validate_event_date_range(
 ) -> memcore_common::MemcoreResult<()> {
     use memcore_common::MemcoreError;
 
-    if let (Some(after), Some(before)) = (created_after, created_before) {
-        if after >= before {
-            return Err(MemcoreError::ValidationError(
-                "created_after must be earlier than created_before".to_string(),
-            ));
-        }
+    if let (Some(after), Some(before)) = (created_after, created_before)
+        && after >= before
+    {
+        return Err(MemcoreError::ValidationError(
+            "created_after must be earlier than created_before".to_string(),
+        ));
     }
 
     Ok(())

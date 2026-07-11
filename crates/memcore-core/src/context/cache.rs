@@ -504,7 +504,7 @@ mod tests {
 
         for index in 0..3 {
             let mut input = sample_input(&format!("query {index}"));
-            input.tenant = TenantContext::new("org_a", &format!("user_{index}")).expect("tenant");
+            input.tenant = TenantContext::new("org_a", format!("user_{index}")).expect("tenant");
             let key = build_context_cache_key(&input);
             cache
                 .set(

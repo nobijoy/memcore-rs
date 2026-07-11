@@ -1,8 +1,6 @@
 use serde_json::{Map, Value};
 
-use crate::error::{
-    MemcoreError, PROVIDER_CIRCUIT_OPEN_MESSAGE, PROVIDER_TIMEOUT_MESSAGE,
-};
+use crate::error::{MemcoreError, PROVIDER_CIRCUIT_OPEN_MESSAGE, PROVIDER_TIMEOUT_MESSAGE};
 
 use super::patterns::{
     DATABASE_URL_SCHEMES, KEY_VALUE_SECRET_KEYS, PROVIDER_KEY_PREFIXES, REDACTED_PLACEHOLDER,
@@ -413,9 +411,8 @@ mod tests {
 
     #[test]
     fn safe_error_message_uses_generic_infrastructure_text() {
-        let storage = MemcoreError::StorageError(
-            "failed postgres://user:secret@localhost/db".to_string(),
-        );
+        let storage =
+            MemcoreError::StorageError("failed postgres://user:secret@localhost/db".to_string());
         assert_eq!(safe_error_message(&storage), "database operation failed");
         assert!(!safe_error_message(&storage).contains("secret"));
 

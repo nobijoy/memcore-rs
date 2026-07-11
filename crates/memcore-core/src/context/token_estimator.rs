@@ -16,7 +16,7 @@ impl TokenEstimator for SimpleTokenEstimator {
         if char_count == 0 {
             0
         } else {
-            ((char_count + 3) / 4).max(1)
+            char_count.div_ceil(4).max(1)
         }
     }
 }

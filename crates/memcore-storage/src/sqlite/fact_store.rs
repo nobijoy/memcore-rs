@@ -251,15 +251,15 @@ impl FactStore for SqliteFactStore {
             builder.push(" AND deleted_at IS NULL");
         }
 
-        if let Some(memory_types) = &query.memory_types {
-            if !memory_types.is_empty() {
-                builder.push(" AND memory_type IN (");
-                let mut separated = builder.separated(", ");
-                for memory_type in memory_types {
-                    separated.push_bind(memory_type_to_str(*memory_type));
-                }
-                separated.push_unseparated(") ");
+        if let Some(memory_types) = &query.memory_types
+            && !memory_types.is_empty()
+        {
+            builder.push(" AND memory_type IN (");
+            let mut separated = builder.separated(", ");
+            for memory_type in memory_types {
+                separated.push_bind(memory_type_to_str(*memory_type));
             }
+            separated.push_unseparated(") ");
         }
 
         if let Some(query_text) = &query.query_text {

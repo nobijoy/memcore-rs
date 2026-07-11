@@ -454,7 +454,10 @@ impl fmt::Debug for Settings {
             .field("database_url", &redacted_secret(&self.database_url))
             .field(
                 "postgres_url",
-                &self.postgres_url.as_ref().map(|value| redacted_secret(value)),
+                &self
+                    .postgres_url
+                    .as_ref()
+                    .map(|value| redacted_secret(value)),
             )
             .field(
                 "database_migrations_enabled",
@@ -2074,7 +2077,10 @@ mod tests {
         assert_eq!(settings.backup_max_files, 10);
         assert!(!settings.restore_enabled);
         assert!(settings.security_headers_enabled);
-        assert_eq!(settings.max_request_body_bytes, super::DEFAULT_MAX_REQUEST_BODY_BYTES);
+        assert_eq!(
+            settings.max_request_body_bytes,
+            super::DEFAULT_MAX_REQUEST_BODY_BYTES
+        );
         assert!(!settings.cors_enabled);
         assert!(settings.cors_allowed_origins.is_empty());
         assert_eq!(
@@ -2122,7 +2128,10 @@ mod tests {
             settings.cors_allowed_origins,
             vec!["https://app.example.com", "https://admin.example.com"]
         );
-        assert_eq!(settings.cors_allowed_methods, vec!["GET", "POST", "OPTIONS"]);
+        assert_eq!(
+            settings.cors_allowed_methods,
+            vec!["GET", "POST", "OPTIONS"]
+        );
         assert_eq!(
             settings.cors_allowed_headers,
             vec![

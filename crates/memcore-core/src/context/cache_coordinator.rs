@@ -117,25 +117,25 @@ impl ContextCacheCoordinator {
 
         if self.cache_config.stale_while_revalidate_active() {
             let now = Utc::now();
-            if let Some(entry) = self.cache.get_any(&key).await? {
-                if entry.is_stale_servable(now) {
-                    let refresh_started = self.try_start_refresh(&key).await;
-                    self.metrics.record_stale_served();
-                    if refresh_started {
-                        self.metrics.record_refresh_started();
-                    }
-                    self.log_cache_event(
-                        "context_cache_stale_served",
-                        &key,
-                        true,
-                        refresh_started,
-                        false,
-                    );
-                    return Ok((
-                        entry,
-                        ContextCacheUsage::stale_hit(&self.cache_config, refresh_started),
-                    ));
+            if let Some(entry) = self.cache.get_any(&key).await?
+                && entry.is_stale_servable(now)
+            {
+                let refresh_started = self.try_start_refresh(&key).await;
+                self.metrics.record_stale_served();
+                if refresh_started {
+                    self.metrics.record_refresh_started();
                 }
+                self.log_cache_event(
+                    "context_cache_stale_served",
+                    &key,
+                    true,
+                    refresh_started,
+                    false,
+                );
+                return Ok((
+                    entry,
+                    ContextCacheUsage::stale_hit(&self.cache_config, refresh_started),
+                ));
             }
         }
 
@@ -215,7 +215,7 @@ impl ContextCacheCoordinator {
         }
 
         let lock_arc = self.lock_for_key(&key).await;
-        let waited_for_inflight = !lock_arc.try_lock().is_ok();
+        let waited_for_inflight = lock_arc.try_lock().is_err();
         if waited_for_inflight {
             self.metrics.record_stampede_wait();
         }
@@ -318,10 +318,10 @@ impl ContextCacheCoordinator {
 
     async fn cleanup_inflight_lock(&self, key: &ContextCacheKey, lock_arc: &Arc<Mutex<()>>) {
         let mut map = self.inflight.lock().await;
-        if let Some(existing) = map.get(key) {
-            if Arc::ptr_eq(existing, lock_arc) {
-                map.remove(key);
-            }
+        if let Some(existing) = map.get(key)
+            && Arc::ptr_eq(existing, lock_arc)
+        {
+            map.remove(key);
         }
     }
 }

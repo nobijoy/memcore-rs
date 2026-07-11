@@ -35,8 +35,7 @@ fn content_length_bytes(headers: &HeaderMap) -> Option<u64> {
 
 /// Requires `Content-Type: application/json` for JSON-body methods.
 pub async fn enforce_json_content_type(request: Request, next: Next) -> Response {
-    if should_validate_json_content_type(&request) && !is_allowed_json_request(request.headers())
-    {
+    if should_validate_json_content_type(&request) && !is_allowed_json_request(request.headers()) {
         return error_response(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "UNSUPPORTED_MEDIA_TYPE",
@@ -77,7 +76,10 @@ fn is_allowed_json_request(headers: &HeaderMap) -> bool {
 }
 
 fn is_json_content_type(headers: &HeaderMap) -> bool {
-    let Some(value) = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) else {
+    let Some(value) = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+    else {
         return false;
     };
     let media_type = value.split(';').next().unwrap_or(value).trim();

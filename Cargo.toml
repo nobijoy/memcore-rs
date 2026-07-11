@@ -8,3 +8,9 @@ members = [
     "crates/memcore-common",
 ]
 resolver = "3"
+
+# Temporary exceptions for existing call sites. Prefer fixing new code rather than
+# expanding this list. See docs/CI_SECURITY.md.
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+field_reassign_with_default = "allow"

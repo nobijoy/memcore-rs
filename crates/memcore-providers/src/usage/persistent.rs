@@ -170,7 +170,8 @@ mod tests {
             async fn query_usage_daily(
                 &self,
                 _query: memcore_core::ports::ProviderUsageDailyQuery,
-            ) -> memcore_common::MemcoreResult<Vec<memcore_core::ProviderUsageDailyBucket>> {
+            ) -> memcore_common::MemcoreResult<Vec<memcore_core::ProviderUsageDailyBucket>>
+            {
                 Err(memcore_common::MemcoreError::StorageError(
                     "fail".to_string(),
                 ))

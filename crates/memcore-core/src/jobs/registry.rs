@@ -109,10 +109,10 @@ impl BackgroundJob for MemoryUsageSnapshotJob {
         }
 
         if failures > 0 {
-            if successes == 0 {
-                if let Some(error) = first_retryable_error {
-                    return Err(error);
-                }
+            if successes == 0
+                && let Some(error) = first_retryable_error
+            {
+                return Err(error);
             }
             run.error_code = Some("PARTIAL_FAILURE".to_string());
             run.error_message = Some(format!("{failures} organization(s) failed"));
@@ -214,10 +214,10 @@ impl BackgroundJob for ProviderUsageRetentionJob {
         }
 
         if failures > 0 {
-            if successes == 0 {
-                if let Some(error) = first_retryable_error {
-                    return Err(error);
-                }
+            if successes == 0
+                && let Some(error) = first_retryable_error
+            {
+                return Err(error);
             }
             run.error_code = Some("PARTIAL_FAILURE".to_string());
             run.error_message = Some(format!("{failures} organization(s) failed"));

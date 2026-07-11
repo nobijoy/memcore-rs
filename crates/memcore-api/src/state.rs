@@ -802,7 +802,7 @@ pub async fn create_memory_engine(
     )?;
     let vector_store = create_vector_store(settings, embedding_provider.dimensions()).await?;
 
-    Ok(apply_context_cache_async(
+    apply_context_cache_async(
         MemoryEngine::new(fact_store, vector_store, llm_provider, embedding_provider)
             .with_pii_redaction(settings.enable_pii_redaction)
             .with_event_store(event_store)
@@ -817,7 +817,7 @@ pub async fn create_memory_engine(
             ),
         settings,
     )
-    .await?)
+    .await
 }
 
 async fn create_api_key_store(settings: &Settings) -> MemcoreResult<Arc<dyn ApiKeyStore>> {

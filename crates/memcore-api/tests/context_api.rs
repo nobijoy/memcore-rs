@@ -570,7 +570,7 @@ async fn format_markdown_with_sections_groups_output() {
 
     let context = json["context"].as_str().unwrap();
     assert!(context.contains("## "));
-    assert!(json["memories"].as_array().unwrap().len() >= 1);
+    assert!(!json["memories"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

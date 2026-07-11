@@ -1,0 +1,27 @@
+name: Heavy features
+
+# Optional compile/test checks for slow optional features (LanceDB).
+# Not run on every PR; trigger manually when needed.
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lancedb:
+    name: LanceDB feature checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Compile LanceDB features
+        run: |
+          cargo check -p memcore-storage --features lancedb
+          cargo check -p memcore-api --features lancedb
+      - name: LanceDB unit/integration tests
+        run: |
+          cargo test -p memcore-storage --features lancedb --test lancedb_vector_store
+          cargo test -p memcore-api --features lancedb --test lancedb_vectors_api

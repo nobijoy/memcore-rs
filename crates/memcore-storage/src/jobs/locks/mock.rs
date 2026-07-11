@@ -39,10 +39,11 @@ impl BackgroundJobLockStore for MockBackgroundJobLockStore {
             .write()
             .map_err(|_| storage_error("mock background job lock poisoned", "lock"))?;
 
-        if let Some(existing) = locks.get(&kind) {
-            if existing.locked_until > now && existing.owner_id != owner_id {
-                return Ok(None);
-            }
+        if let Some(existing) = locks.get(&kind)
+            && existing.locked_until > now
+            && existing.owner_id != owner_id
+        {
+            return Ok(None);
         }
 
         let record = JobLockRecord {

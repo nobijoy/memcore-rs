@@ -44,10 +44,7 @@ async fn security_headers_are_present_by_default() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "ok");
-    assert_eq!(
-        headers.get("x-content-type-options").unwrap(),
-        "nosniff"
-    );
+    assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
     assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
     assert_eq!(headers.get("referrer-policy").unwrap(), "no-referrer");
     assert_eq!(
@@ -120,7 +117,8 @@ async fn request_over_body_limit_returns_payload_too_large() {
     };
     let app = app_with(settings);
     let (auth_header, auth_value) = authorization_header();
-    let body = r#"{"user_id":"u1","content":"this body is intentionally larger than thirty two bytes"}"#;
+    let body =
+        r#"{"user_id":"u1","content":"this body is intentionally larger than thirty two bytes"}"#;
     let (status, _, json) = send(
         app,
         Request::builder()
@@ -138,10 +136,12 @@ async fn request_over_body_limit_returns_payload_too_large() {
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(json["error"]["code"], "PAYLOAD_TOO_LARGE");
     assert_eq!(json["error"]["message"], "request body is too large");
-    assert!(!json["error"]["message"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("postgres://"));
+    assert!(
+        !json["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("postgres://")
+    );
 }
 
 #[tokio::test]

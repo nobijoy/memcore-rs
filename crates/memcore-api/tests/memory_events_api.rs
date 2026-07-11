@@ -116,7 +116,7 @@ async fn listing_events_after_adding_memory() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "success");
-    assert!(json["events"].as_array().unwrap().len() >= 1);
+    assert!(!json["events"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -407,7 +407,7 @@ async fn sqlite_backend_returns_persisted_audit_events_via_api() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(json["events"].as_array().unwrap().len() >= 1);
+    assert!(!json["events"].as_array().unwrap().is_empty());
     assert_eq!(json["events"][0]["operation"], "Add");
 }
 

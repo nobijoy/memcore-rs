@@ -127,10 +127,12 @@ pub fn parse_optional_rfc3339_timestamp(
     }
 }
 
+pub type OptionalUtcRange = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
+
 pub fn parse_event_date_filters(
     created_after: Option<&String>,
     created_before: Option<&String>,
-) -> Result<(Option<DateTime<Utc>>, Option<DateTime<Utc>>), MemcoreError> {
+) -> Result<OptionalUtcRange, MemcoreError> {
     let created_after = parse_optional_rfc3339_timestamp(created_after, "created_after")?;
     let created_before = parse_optional_rfc3339_timestamp(created_before, "created_before")?;
     memcore_core::validate_event_date_range(created_after, created_before)?;

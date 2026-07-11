@@ -16,9 +16,7 @@ pub const BACKUP_FILE_SUFFIX: &str = ".backup.sqlite";
 /// Removes path separators and keeps only ASCII alphanumeric characters,
 /// dashes, and underscores. Empty results become `None`.
 pub fn sanitize_backup_label(label: Option<&str>) -> Option<String> {
-    let Some(raw) = label.map(str::trim).filter(|value| !value.is_empty()) else {
-        return None;
-    };
+    let raw = label.map(str::trim).filter(|value| !value.is_empty())?;
 
     let sanitized: String = raw
         .chars()

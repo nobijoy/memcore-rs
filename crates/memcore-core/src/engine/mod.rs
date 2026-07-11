@@ -824,25 +824,24 @@ impl MemoryEngine {
                         .vector_store
                         .delete_by_fact_id(&input.tenant, fact_id)
                         .await
+                        && !matches!(err, memcore_common::MemcoreError::NotFound(_))
                     {
-                        if !matches!(err, memcore_common::MemcoreError::NotFound(_)) {
-                            return Err(err);
-                        }
+                        return Err(err);
                     }
                 }
             }
         }
 
-        if let Some(event_days) = input.policy.event_days_active() {
-            if let Some(event_store) = &self.event_store {
-                let cutoff = Utc::now() - Duration::days(i64::from(event_days));
-                let count = event_store
-                    .delete_events_older_than(&input.tenant, cutoff, input.dry_run)
-                    .await?;
+        if let Some(event_days) = input.policy.event_days_active()
+            && let Some(event_store) = &self.event_store
+        {
+            let cutoff = Utc::now() - Duration::days(i64::from(event_days));
+            let count = event_store
+                .delete_events_older_than(&input.tenant, cutoff, input.dry_run)
+                .await?;
 
-                output.events_matched = count;
-                output.events_deleted = if input.dry_run { 0 } else { count };
-            }
+            output.events_matched = count;
+            output.events_deleted = if input.dry_run { 0 } else { count };
         }
 
         if !input.dry_run && output.facts_deleted > 0 {
@@ -1301,13 +1300,13 @@ impl MemoryEngine {
 
         let mut imported_events = 0usize;
 
-        if input.restore_events {
-            if let Some(event_store) = &self.event_store {
-                for exported_event in &input.export.memory_events {
-                    let event = restored_event_from_export(exported_event);
-                    event_store.record_event(&input.tenant, event).await?;
-                    imported_events += 1;
-                }
+        if input.restore_events
+            && let Some(event_store) = &self.event_store
+        {
+            for exported_event in &input.export.memory_events {
+                let event = restored_event_from_export(exported_event);
+                event_store.record_event(&input.tenant, event).await?;
+                imported_events += 1;
             }
         }
 

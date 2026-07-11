@@ -283,10 +283,10 @@ impl ContextFormatter {
             if options.include_scores {
                 map.insert("score".to_string(), json!(memory.score));
             }
-            if options.include_timestamps {
-                if let Some(timestamp) = memory.valid_at {
-                    map.insert("valid_at".to_string(), json!(timestamp.to_rfc3339()));
-                }
+            if options.include_timestamps
+                && let Some(timestamp) = memory.valid_at
+            {
+                map.insert("valid_at".to_string(), json!(timestamp.to_rfc3339()));
             }
             if options.include_confidence {
                 map.insert("confidence".to_string(), json!(memory.confidence));
@@ -316,10 +316,10 @@ impl ContextFormatter {
         if options.include_scores {
             parts.push(format!("score={:.2}", memory.score));
         }
-        if options.include_timestamps {
-            if let Some(timestamp) = memory.valid_at {
-                parts.push(format!("valid_at={}", timestamp.to_rfc3339()));
-            }
+        if options.include_timestamps
+            && let Some(timestamp) = memory.valid_at
+        {
+            parts.push(format!("valid_at={}", timestamp.to_rfc3339()));
         }
         if options.include_confidence {
             parts.push(format!("confidence={:.2}", memory.confidence));

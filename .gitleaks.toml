@@ -1,0 +1,37 @@
+# Gitleaks configuration for memcore.
+# Allowlist only known fake/example secrets used in tests and sample env files.
+# Never add real credentials here.
+
+title = "memcore gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented fake secrets for local/dev examples and unit tests"
+paths = [
+  '''\.env\.example$''',
+  '''.*_test\.rs$''',
+  '''.*/tests/.*\.rs$''',
+  '''crates/.*/src/.*/tests\.rs$''',
+  '''\.gitleaks\.toml$''',
+  '''deny\.toml$''',
+  '''docs/.*''',
+]
+
+regexes = [
+  '''memcore_dev_key''',
+  '''memcore_password''',
+  '''change_this_dev_key''',
+  '''change_this_pepper''',
+  '''sk-test-key''',
+  '''sk-live-abcdef''',
+  '''sk-abcdefghijklmnopqrstuvwxyz123456''',
+  '''super-pepper-secret''',
+  '''super-secret-token''',
+  '''supersecret''',
+  '''dev-secret-key''',
+  '''leaked-token''',
+  '''\[REDACTED\]''',
+  '''\[REDACTED_SECRET\]''',
+]

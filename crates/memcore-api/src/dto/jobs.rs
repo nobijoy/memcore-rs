@@ -270,12 +270,12 @@ pub fn query_background_job_runs_input(
         parse_optional_rfc3339_timestamp(params.created_after.as_ref(), "created_after")?;
     let created_before =
         parse_optional_rfc3339_timestamp(params.created_before.as_ref(), "created_before")?;
-    if let (Some(after), Some(before)) = (created_after, created_before) {
-        if after >= before {
-            return Err(memcore_common::MemcoreError::ValidationError(
-                "created_after must be earlier than created_before".to_string(),
-            ));
-        }
+    if let (Some(after), Some(before)) = (created_after, created_before)
+        && after >= before
+    {
+        return Err(memcore_common::MemcoreError::ValidationError(
+            "created_after must be earlier than created_before".to_string(),
+        ));
     }
 
     Ok(BackgroundJobRunQuery {

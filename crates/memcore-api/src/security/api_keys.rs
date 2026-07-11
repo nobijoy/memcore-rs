@@ -14,7 +14,7 @@ pub struct AuthContext {
 
 impl AuthContext {
     pub fn has_scope(&self, scope: ApiKeyScope) -> bool {
-        self.scopes.iter().any(|value| *value == scope)
+        self.scopes.contains(&scope)
     }
 }
 

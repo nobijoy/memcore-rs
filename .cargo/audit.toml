@@ -1,0 +1,15 @@
+# cargo-audit configuration for memcore.
+# Keep in sync with deny.toml [advisories].ignore — see docs/CI_SECURITY.md.
+
+[advisories]
+ignore = [
+    # sqlx-postgres → rsa; no fixed upgrade (Marvin). Revisit when sqlx drops rsa or rsa ships a fix.
+    "RUSTSEC-2023-0071",
+    # LanceDB → object_store → quick-xml 0.37.x; bump blocked until lancedb/object_store upgrades.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    # LanceDB → aws-smithy → rustls 0.21 → rustls-webpki 0.101.7; default build uses rustls 0.23.
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+]

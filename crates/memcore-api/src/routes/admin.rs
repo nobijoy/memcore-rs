@@ -433,27 +433,25 @@ pub async fn get_provider_usage(
         }
     };
 
-    if use_persistent {
-        if let Some(store) = &state.provider_usage_store {
-            let result = store
-                .query_usage(ProviderUsageQuery {
-                    org_id: organization.org_id.clone(),
-                    user_id: query.user_id,
-                    provider_name: query.provider_name,
-                    model_name: query.model_name,
-                    capability,
-                    operation_name: query.operation_name,
-                    created_after,
-                    created_before,
-                    limit,
-                    cursor,
-                })
-                .await?;
-            return Ok(Json(provider_usage_persisted_response(
-                "persistent",
-                result,
-            )));
-        }
+    if use_persistent && let Some(store) = &state.provider_usage_store {
+        let result = store
+            .query_usage(ProviderUsageQuery {
+                org_id: organization.org_id.clone(),
+                user_id: query.user_id,
+                provider_name: query.provider_name,
+                model_name: query.model_name,
+                capability,
+                operation_name: query.operation_name,
+                created_after,
+                created_before,
+                limit,
+                cursor,
+            })
+            .await?;
+        return Ok(Json(provider_usage_persisted_response(
+            "persistent",
+            result,
+        )));
     }
 
     let snapshot = state.provider_usage.snapshot();

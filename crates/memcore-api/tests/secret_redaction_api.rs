@@ -15,10 +15,7 @@ use tower::ServiceExt;
 
 use common::authorization_header;
 
-async fn send(
-    app: axum::Router,
-    request: Request<Body>,
-) -> (StatusCode, serde_json::Value) {
+async fn send(app: axum::Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {
     let response = app.oneshot(request).await.expect("router should respond");
     let status = response.status();
     let body = response
@@ -57,9 +54,8 @@ fn provider_and_auth_errors_are_safe() {
     assert!(!message.contains("sk-abc"));
     assert!(!message.contains("OPENAI_API_KEY"));
 
-    let auth_echo = MemcoreError::ValidationError(
-        "Authorization: Bearer leaked-token is invalid".to_string(),
-    );
+    let auth_echo =
+        MemcoreError::ValidationError("Authorization: Bearer leaked-token is invalid".to_string());
     let redacted = safe_error_message(&auth_echo);
     assert!(!redacted.contains("leaked-token"));
 }
@@ -72,9 +68,8 @@ fn migration_and_backup_errors_do_not_expose_urls() {
     );
     assert_eq!(safe_error_message(&migration), "database migration failed");
 
-    let backup = MemcoreError::StorageError(
-        "backup failed for sqlite://./data/memcore.db".to_string(),
-    );
+    let backup =
+        MemcoreError::StorageError("backup failed for sqlite://./data/memcore.db".to_string());
     assert_eq!(safe_error_message(&backup), "database operation failed");
 }
 

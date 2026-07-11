@@ -118,7 +118,7 @@ impl ProviderUsageDailyQuery {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderUsagePersistedSummary {
     pub total_requests: u64,
     pub total_successes: u64,
@@ -131,24 +131,6 @@ pub struct ProviderUsagePersistedSummary {
     pub total_output_tokens: u64,
     pub total_tokens: u64,
     pub total_estimated_cost_usd: Option<f64>,
-}
-
-impl Default for ProviderUsagePersistedSummary {
-    fn default() -> Self {
-        Self {
-            total_requests: 0,
-            total_successes: 0,
-            total_errors: 0,
-            total_retries: 0,
-            total_fallbacks: 0,
-            total_circuit_blocks: 0,
-            total_timeouts: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_tokens: 0,
-            total_estimated_cost_usd: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

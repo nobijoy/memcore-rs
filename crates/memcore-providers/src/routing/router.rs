@@ -201,10 +201,10 @@ impl ProviderFallbackRouter {
                 continue;
             }
 
-            if self.circuit_breaker.snapshot(&key).state == CircuitState::HalfOpen {
-                if let Some(metrics) = &self.metrics {
-                    metrics.record_circuit_half_opened();
-                }
+            if self.circuit_breaker.snapshot(&key).state == CircuitState::HalfOpen
+                && let Some(metrics) = &self.metrics
+            {
+                metrics.record_circuit_half_opened();
             }
 
             let started = Instant::now();
@@ -262,10 +262,11 @@ impl ProviderFallbackRouter {
                         let before = self.circuit_breaker.snapshot(&key);
                         self.circuit_breaker.record_failure(&key);
                         let after = self.circuit_breaker.snapshot(&key);
-                        if before.state != after.state && after.state == CircuitState::Open {
-                            if let Some(metrics) = &self.metrics {
-                                metrics.record_circuit_opened();
-                            }
+                        if before.state != after.state
+                            && after.state == CircuitState::Open
+                            && let Some(metrics) = &self.metrics
+                        {
+                            metrics.record_circuit_opened();
                         }
                     }
 

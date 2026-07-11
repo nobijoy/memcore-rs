@@ -19,7 +19,7 @@ pub fn normalize_content(content: &str) -> String {
 
 fn strip_trailing_punctuation(content: &str) -> String {
     content
-        .trim_end_matches(|c: char| matches!(c, '.' | ',' | '!' | '?' | ';' | ':'))
+        .trim_end_matches(['.', ',', '!', '?', ';', ':'])
         .to_string()
 }
 

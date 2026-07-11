@@ -41,15 +41,14 @@ impl QuotaService {
         &self,
         org_id: &str,
     ) -> MemcoreResult<ResolvedOrgQuotaLimits> {
-        if let Some(store) = &self.org_plan_store {
-            if let Some(plan) = store.get_org_plan(org_id).await? {
-                if plan.is_active {
-                    return Ok(ResolvedOrgQuotaLimits {
-                        source: QuotaLimitSource::OrgPlan,
-                        limits: plan.limits.to_quota_limits(self.global_limits.enabled),
-                    });
-                }
-            }
+        if let Some(store) = &self.org_plan_store
+            && let Some(plan) = store.get_org_plan(org_id).await?
+            && plan.is_active
+        {
+            return Ok(ResolvedOrgQuotaLimits {
+                source: QuotaLimitSource::OrgPlan,
+                limits: plan.limits.to_quota_limits(self.global_limits.enabled),
+            });
         }
 
         Ok(ResolvedOrgQuotaLimits {
@@ -206,28 +205,27 @@ impl QuotaService {
     ) -> Vec<QuotaViolation> {
         let mut violations = Vec::new();
 
-        if let Some(limit) = limits.max_memories_per_org {
-            if usage.total_memories.saturating_add(requested_new_memories) > limit {
-                violations.push(QuotaViolation::new(
-                    QuotaLimitKind::MemoriesPerOrg,
-                    limit,
-                    usage.total_memories,
-                    requested_new_memories,
-                ));
-            }
+        if let Some(limit) = limits.max_memories_per_org
+            && usage.total_memories.saturating_add(requested_new_memories) > limit
+        {
+            violations.push(QuotaViolation::new(
+                QuotaLimitKind::MemoriesPerOrg,
+                limit,
+                usage.total_memories,
+                requested_new_memories,
+            ));
         }
 
         if let (Some(limit), Some(current)) =
             (limits.max_memories_per_user, usage.user_memory_count)
+            && current.saturating_add(requested_new_memories) > limit
         {
-            if current.saturating_add(requested_new_memories) > limit {
-                violations.push(QuotaViolation::new(
-                    QuotaLimitKind::MemoriesPerUser,
-                    limit,
-                    current,
-                    requested_new_memories,
-                ));
-            }
+            violations.push(QuotaViolation::new(
+                QuotaLimitKind::MemoriesPerUser,
+                limit,
+                current,
+                requested_new_memories,
+            ));
         }
 
         if let (Some(limit), Some(user_memory_count)) =
@@ -256,30 +254,29 @@ impl QuotaService {
     ) -> Vec<QuotaViolation> {
         let mut violations = Vec::new();
 
-        if let Some(limit) = limits.daily_provider_request_limit {
-            if usage
+        if let Some(limit) = limits.daily_provider_request_limit
+            && usage
                 .daily_provider_requests
                 .saturating_add(requested_requests)
                 > limit
-            {
-                violations.push(QuotaViolation::new(
-                    QuotaLimitKind::DailyProviderRequests,
-                    limit,
-                    usage.daily_provider_requests,
-                    requested_requests,
-                ));
-            }
+        {
+            violations.push(QuotaViolation::new(
+                QuotaLimitKind::DailyProviderRequests,
+                limit,
+                usage.daily_provider_requests,
+                requested_requests,
+            ));
         }
 
-        if let Some(limit) = limits.daily_provider_token_limit {
-            if usage.daily_provider_tokens.saturating_add(requested_tokens) > limit {
-                violations.push(QuotaViolation::new(
-                    QuotaLimitKind::DailyProviderTokens,
-                    limit,
-                    usage.daily_provider_tokens,
-                    requested_tokens,
-                ));
-            }
+        if let Some(limit) = limits.daily_provider_token_limit
+            && usage.daily_provider_tokens.saturating_add(requested_tokens) > limit
+        {
+            violations.push(QuotaViolation::new(
+                QuotaLimitKind::DailyProviderTokens,
+                limit,
+                usage.daily_provider_tokens,
+                requested_tokens,
+            ));
         }
 
         violations

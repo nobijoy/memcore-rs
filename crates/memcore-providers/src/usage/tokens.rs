@@ -24,7 +24,7 @@ pub fn store_token_usage(slot: &TokenUsageSlot, usage: ProviderTokenUsage) {
 /// Rough token estimate from character length (chars / 4).
 pub fn estimate_tokens_from_text(text: &str) -> u64 {
     let chars = text.chars().count();
-    ((chars + 3) / 4).max(1) as u64
+    chars.div_ceil(4).max(1) as u64
 }
 
 pub fn estimate_llm_extraction_tokens(input: &FactExtractionInput) -> ProviderTokenUsage {
@@ -33,7 +33,7 @@ pub fn estimate_llm_extraction_tokens(input: &FactExtractionInput) -> ProviderTo
         .iter()
         .map(|message| message.content.chars().count())
         .sum();
-    let input_tokens = ((input_chars + 3) / 4).max(1) as u64;
+    let input_tokens = input_chars.div_ceil(4).max(1) as u64;
     ProviderTokenUsage::from_counts(Some(input_tokens), Some(input_tokens / 4))
 }
 
@@ -52,7 +52,7 @@ pub fn estimate_llm_summarization_tokens(input: &SummarizationInput) -> Provider
         .iter()
         .map(|fact| fact.content.chars().count())
         .sum();
-    let input_tokens = ((input_chars + 3) / 4).max(1) as u64;
+    let input_tokens = input_chars.div_ceil(4).max(1) as u64;
     let output_tokens = input.max_tokens.map(|t| t as u64).unwrap_or(128);
     ProviderTokenUsage::from_counts(Some(input_tokens), Some(output_tokens))
 }

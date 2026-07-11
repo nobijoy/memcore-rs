@@ -345,11 +345,10 @@ async fn manual_job_run_is_persisted_and_queryable() {
         response_parts(app, request("GET", "/api/v1/admin/jobs", Some(ORG_A), true)).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
-        json["jobs"]["latest_persisted_runs"]
+        !json["jobs"]["latest_persisted_runs"]
             .as_array()
             .expect("latest persisted runs")
-            .len()
-            >= 1
+            .is_empty()
     );
 }
 

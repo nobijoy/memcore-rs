@@ -28,16 +28,16 @@ fn matches_query(snapshot: &MemoryUsageSnapshot, query: &MemoryUsageSnapshotQuer
         return false;
     }
 
-    if let Some(created_after) = query.created_after {
-        if snapshot.captured_at < created_after {
-            return false;
-        }
+    if let Some(created_after) = query.created_after
+        && snapshot.captured_at < created_after
+    {
+        return false;
     }
 
-    if let Some(created_before) = query.created_before {
-        if snapshot.captured_at >= created_before {
-            return false;
-        }
+    if let Some(created_before) = query.created_before
+        && snapshot.captured_at >= created_before
+    {
+        return false;
     }
 
     if let Some(cursor) = &query.cursor {

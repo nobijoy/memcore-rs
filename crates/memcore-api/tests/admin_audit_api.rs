@@ -188,7 +188,7 @@ async fn admin_audit_works_in_dev_auth_mode() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "success");
-    assert!(json["events"].as_array().unwrap().len() >= 1);
+    assert!(!json["events"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

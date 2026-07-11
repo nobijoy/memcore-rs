@@ -10,6 +10,7 @@ use crate::{
 
 /// Outcome of applying a lifecycle operation to a candidate fact.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum LifecycleApplyResult {
     Added(Fact),
     Updated { previous: Fact, updated: Fact },

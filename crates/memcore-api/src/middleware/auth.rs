@@ -113,7 +113,7 @@ fn extract_bearer_token(
         )
     })?;
 
-    let token = header_str.strip_prefix(BEARER_PREFIX).ok_or_else(|| {
+    let token = header_str.strip_prefix(BEARER_PREFIX).ok_or({
         (
             StatusCode::UNAUTHORIZED,
             "UNAUTHORIZED",

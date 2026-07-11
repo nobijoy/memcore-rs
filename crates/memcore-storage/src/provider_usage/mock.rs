@@ -64,40 +64,40 @@ fn matches_query(event: &ProviderUsageEventRecord, query: &ProviderUsageQuery) -
     if event.org_id != query.org_id {
         return false;
     }
-    if let Some(user_id) = &query.user_id {
-        if event.user_id.as_deref() != Some(user_id.as_str()) {
-            return false;
-        }
+    if let Some(user_id) = &query.user_id
+        && event.user_id.as_deref() != Some(user_id.as_str())
+    {
+        return false;
     }
-    if let Some(provider_name) = &query.provider_name {
-        if &event.provider_name != provider_name {
-            return false;
-        }
+    if let Some(provider_name) = &query.provider_name
+        && &event.provider_name != provider_name
+    {
+        return false;
     }
-    if let Some(model_name) = &query.model_name {
-        if event.model_name.as_deref() != Some(model_name.as_str()) {
-            return false;
-        }
+    if let Some(model_name) = &query.model_name
+        && event.model_name.as_deref() != Some(model_name.as_str())
+    {
+        return false;
     }
-    if let Some(capability) = query.capability {
-        if event.capability != capability {
-            return false;
-        }
+    if let Some(capability) = query.capability
+        && event.capability != capability
+    {
+        return false;
     }
-    if let Some(operation_name) = &query.operation_name {
-        if &event.operation_name != operation_name {
-            return false;
-        }
+    if let Some(operation_name) = &query.operation_name
+        && &event.operation_name != operation_name
+    {
+        return false;
     }
-    if let Some(created_after) = query.created_after {
-        if event.created_at < created_after {
-            return false;
-        }
+    if let Some(created_after) = query.created_after
+        && event.created_at < created_after
+    {
+        return false;
     }
-    if let Some(created_before) = query.created_before {
-        if event.created_at >= created_before {
-            return false;
-        }
+    if let Some(created_before) = query.created_before
+        && event.created_at >= created_before
+    {
+        return false;
     }
     true
 }
@@ -106,20 +106,20 @@ fn matches_daily_query(event: &ProviderUsageEventRecord, query: &ProviderUsageDa
     if event.org_id != query.org_id {
         return false;
     }
-    if let Some(provider_name) = &query.provider_name {
-        if &event.provider_name != provider_name {
-            return false;
-        }
+    if let Some(provider_name) = &query.provider_name
+        && &event.provider_name != provider_name
+    {
+        return false;
     }
-    if let Some(model_name) = &query.model_name {
-        if event.model_name.as_deref() != Some(model_name.as_str()) {
-            return false;
-        }
+    if let Some(model_name) = &query.model_name
+        && event.model_name.as_deref() != Some(model_name.as_str())
+    {
+        return false;
     }
-    if let Some(capability) = query.capability {
-        if event.capability != capability {
-            return false;
-        }
+    if let Some(capability) = query.capability
+        && event.capability != capability
+    {
+        return false;
     }
     event.created_at >= query.created_after && event.created_at < query.created_before
 }

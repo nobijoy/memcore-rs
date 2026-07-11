@@ -14,25 +14,25 @@ fn storage_error(context: impl Into<String>, error: impl std::fmt::Display) -> M
 }
 
 fn matches_query(run: &StoredBackgroundJobRun, query: &BackgroundJobRunQuery) -> bool {
-    if let Some(kind) = query.kind {
-        if run.kind != kind {
-            return false;
-        }
+    if let Some(kind) = query.kind
+        && run.kind != kind
+    {
+        return false;
     }
-    if let Some(status) = query.status {
-        if run.status != status {
-            return false;
-        }
+    if let Some(status) = query.status
+        && run.status != status
+    {
+        return false;
     }
-    if let Some(created_after) = query.created_after {
-        if run.started_at < created_after {
-            return false;
-        }
+    if let Some(created_after) = query.created_after
+        && run.started_at < created_after
+    {
+        return false;
     }
-    if let Some(created_before) = query.created_before {
-        if run.started_at >= created_before {
-            return false;
-        }
+    if let Some(created_before) = query.created_before
+        && run.started_at >= created_before
+    {
+        return false;
     }
     true
 }
