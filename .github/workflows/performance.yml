@@ -1,0 +1,100 @@
+name: Performance
+
+# Manual load-test foundation. Never runs on pull requests or push.
+# Prefer staging/local targets. Do not point at production without approval.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Load test profile (smoke or baseline)"
+        required: true
+        default: "smoke"
+        type: choice
+        options:
+          - smoke
+          - baseline
+      base_url:
+        description: "Target memcore base URL (required; e.g. https://staging.example)"
+        required: true
+        type: string
+      org_id:
+        description: "X-Organization-ID for authenticated flow (optional)"
+        required: false
+        default: "org_perf"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  k6-load:
+    name: k6 ${{ inputs.profile }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate profile
+        run: |
+          case "${{ inputs.profile }}" in
+            smoke|baseline) ;;
+            *)
+              echo "error: only smoke or baseline allowed in CI (stress is local-only)"
+              exit 1
+              ;;
+          esac
+
+      - name: Validate base URL
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          if [ -z "$BASE_URL" ]; then
+            echo "error: base_url input is required"
+            exit 1
+          fi
+          case "$BASE_URL" in
+            http://*|https://*) ;;
+            *)
+              echo "error: base_url must start with http:// or https://"
+              exit 1
+              ;;
+          esac
+          echo "Target base URL accepted (value not re-echoed with secrets)."
+          echo "TARGET_HOST=$(echo "$BASE_URL" | sed -E 's#https?://##' | cut -d/ -f1)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+          k6 version
+
+      - name: Run load test
+        env:
+          MEMCORE_BASE_URL: ${{ inputs.base_url }}
+          MEMCORE_ORG_ID: ${{ inputs.org_id }}
+          # Optional repository secret for authenticated flow; never echoed.
+          MEMCORE_API_KEY: ${{ secrets.MEMCORE_PERF_API_KEY }}
+        run: |
+          chmod +x scripts/perf/run_load_test.sh
+          if [ -n "${MEMCORE_API_KEY}" ]; then
+            AUTH_STATE=enabled
+          else
+            AUTH_STATE=disabled
+          fi
+          echo "Running profile=${{ inputs.profile }} against host=${TARGET_HOST} auth=${AUTH_STATE}"
+          ./scripts/perf/run_load_test.sh "${{ inputs.profile }}"
+
+      - name: Upload performance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memcore-perf-${{ inputs.profile }}
+          path: reports/perf/
+          if-no-files-found: warn
+          retention-days: 14

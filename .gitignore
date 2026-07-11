@@ -22,3 +22,11 @@ trivy-results.*
 
 # Local release packaging
 /dist/
+
+# Performance load-test reports (keep directory via .gitkeep)
+reports/perf/*.json
+reports/perf/*.txt
+reports/perf/*.html
+reports/perf/*.csv
+!reports/perf/.gitkeep
+
