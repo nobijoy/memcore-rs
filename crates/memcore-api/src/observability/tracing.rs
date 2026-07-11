@@ -9,6 +9,7 @@ use http_body_util::BodyExt;
 use memcore_common::MemcoreError;
 use serde_json::Value;
 
+use crate::metrics::{normalize_route, record_http_request};
 use crate::middleware::OrganizationContext;
 use crate::response::ErrorBody;
 use crate::state::AppState;
@@ -40,6 +41,15 @@ pub async fn observe_request_lifecycle(
     insert_response_request_id_header(&mut response, &header_name, &request_id);
 
     if state.settings.metrics_enabled {
+        // Outer `.layer` runs before route matching, so MatchedPath is usually
+        // unavailable here; normalize dynamic path segments instead.
+        let route = normalize_route(None, &path);
+        record_http_request(
+            method.as_str(),
+            &route,
+            status,
+            started_at.elapsed().as_secs_f64(),
+        );
         state.metrics.record_request(&path, status, latency_ms);
     }
 

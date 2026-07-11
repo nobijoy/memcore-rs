@@ -31,7 +31,9 @@ pub async fn forget_user(
     let output = state
         .memory_engine
         .forget_user(ForgetUserInput { tenant })
-        .await?;
+        .await
+        .inspect_err(|_| crate::metrics::ops::record_memory_forget_user("error"))?;
+    crate::metrics::ops::record_memory_forget_user("success");
 
     Ok(Json(ForgetUserResponse::from(output)))
 }
@@ -65,7 +67,9 @@ pub async fn export_user_data(
             include_events: query.include_events,
             include_deleted: query.include_deleted,
         })
-        .await?;
+        .await
+        .inspect_err(|_| crate::metrics::ops::record_export_request("error"))?;
+    crate::metrics::ops::record_export_request("success");
 
     Ok(Json(ExportUserResponse::from(export)))
 }
@@ -91,7 +95,9 @@ pub async fn import_user_data(
     let output = state
         .memory_engine
         .import_user_data(body.into_input(tenant))
-        .await?;
+        .await
+        .inspect_err(|_| crate::metrics::ops::record_import_request("error"))?;
+    crate::metrics::ops::record_import_request("success");
 
     Ok(Json(ImportUserDataResponse::from(output)))
 }

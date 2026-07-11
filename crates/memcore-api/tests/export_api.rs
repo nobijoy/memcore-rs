@@ -315,10 +315,10 @@ async fn include_deleted_true_includes_deleted_fact() {
 }
 
 #[tokio::test]
-async fn health_ready_metrics_remain_public() {
+async fn health_ready_version_remain_public_metrics_disabled_by_default() {
     let app = test_app();
 
-    for path in ["/health", "/ready", "/metrics", "/api/v1/version"] {
+    for path in ["/health", "/ready", "/api/v1/version"] {
         let (status, _) = response_parts(
             app.clone(),
             Request::builder()
@@ -329,8 +329,19 @@ async fn health_ready_metrics_remain_public() {
         )
         .await;
         assert!(
-            status.is_success() || (path == "/metrics" && status == StatusCode::OK),
+            status.is_success(),
             "unexpected status for {path}: {status}"
         );
     }
+
+    let (metrics_status, _) = response_parts(
+        app,
+        Request::builder()
+            .method("GET")
+            .uri("/metrics")
+            .body(Body::empty())
+            .expect("request should build"),
+    )
+    .await;
+    assert_eq!(metrics_status, StatusCode::NOT_FOUND);
 }

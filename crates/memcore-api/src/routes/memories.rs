@@ -41,6 +41,7 @@ pub async fn add_memory(
         })
         .await?;
     if let Some(violation) = quota.violations.into_iter().next() {
+        crate::metrics::ops::record_quota_rejection("memory_write");
         return Err(violation.into_error().into());
     }
 
@@ -51,7 +52,9 @@ pub async fn add_memory(
             messages,
             metadata: request.metadata,
         })
-        .await?;
+        .await
+        .inspect_err(|_| crate::metrics::ops::record_memory_create("error"))?;
+    crate::metrics::ops::record_memory_create("success");
 
     Ok(Json(AddMemoryResponse::from(output)))
 }
@@ -80,7 +83,9 @@ pub async fn search_memory(
             memory_types,
             metadata_filter: None,
         })
-        .await?;
+        .await
+        .inspect_err(|_| crate::metrics::ops::record_memory_search("error"))?;
+    crate::metrics::ops::record_memory_search("success");
 
     Ok(Json(SearchMemoryResponse::from(output)))
 }
@@ -157,7 +162,9 @@ pub async fn delete_user_memory(
     let output = state
         .memory_engine
         .delete_memory(DeleteMemoryInput { tenant, memory_id })
-        .await?;
+        .await
+        .inspect_err(|_| crate::metrics::ops::record_memory_delete("error"))?;
+    crate::metrics::ops::record_memory_delete("success");
 
     Ok(Json(DeleteMemoryResponse::from(output)))
 }

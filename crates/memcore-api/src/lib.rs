@@ -1,5 +1,6 @@
 pub mod app;
 pub mod dto;
+pub mod metrics;
 pub mod middleware;
 pub mod observability;
 pub mod openapi;

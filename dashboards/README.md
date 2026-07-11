@@ -8,16 +8,17 @@ Vendor-neutral **templates** for memcore. They are not deployed by CI and do not
 |------|---------|
 | `grafana-memcore-overview.json` | Service health, RPS, errors, latency, core ops |
 | `grafana-memcore-api.json` | Routes, 4xx/5xx, auth, rate limits |
-| `grafana-memcore-background-jobs.json` | Job runs, failures, duration, skips |
-| `grafana-memcore-providers.json` | Provider traffic, latency, failures, retries |
+| `grafana-memcore-background-jobs.json` | Job runs, failures, duration, lock skips |
+| `grafana-memcore-providers.json` | Provider traffic, failures, retries, cache |
 
 ## Import
 
-1. Run Prometheus (or compatible) scraping `GET /metrics` on each memcore replica when `MEMCORE_METRICS_ENABLED=true`.
-2. In Grafana: **Dashboards → Import → Upload JSON**.
-3. Select your Prometheus datasource when prompted (`DS_PROMETHEUS` variable).
+1. Enable scrape: `MEMCORE_METRICS_ENABLED=true` (keep `MEMCORE_METRICS_REQUIRE_AUTH=true` unless private-network-only).
+2. Point Prometheus at each replica’s metrics path (default `/metrics`).
+3. In Grafana: **Dashboards → Import → Upload JSON**.
+4. Select your Prometheus datasource when prompted (`DS_PROMETHEUS` variable).
 
-Many panels reference **intended** metric names from `docs/METRICS.md`. Until the Prometheus metrics foundation expands emission, expect empty series for labeled/histogram panels. Overview panels using implemented counters should work sooner.
+Panels use **implemented** metric names from `docs/METRICS.md` (e.g. `memcore_http_request_duration_seconds`, `memcore_memory_create_total`). Some provider duration series may be empty until latency is wired into usage events.
 
 ## Safety
 
@@ -29,6 +30,8 @@ Many panels reference **intended** metric names from `docs/METRICS.md`. Until th
 
 ```bash
 ./scripts/ops/validate_dashboards.sh
+# or:
+python -m json.tool dashboards/grafana-memcore-overview.json >/dev/null
 ```
 
 ## Related

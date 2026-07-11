@@ -48,7 +48,11 @@ const MEMCORE_LOG_FORMAT: &str = "MEMCORE_LOG_FORMAT";
 const MEMCORE_LOG_LEVEL: &str = "MEMCORE_LOG_LEVEL";
 const MEMCORE_REQUEST_ID_HEADER: &str = "MEMCORE_REQUEST_ID_HEADER";
 const MEMCORE_METRICS_ENABLED: &str = "MEMCORE_METRICS_ENABLED";
+const MEMCORE_METRICS_PATH: &str = "MEMCORE_METRICS_PATH";
+const MEMCORE_METRICS_REQUIRE_AUTH: &str = "MEMCORE_METRICS_REQUIRE_AUTH";
+const MEMCORE_METRICS_INCLUDE_PROCESS: &str = "MEMCORE_METRICS_INCLUDE_PROCESS";
 const MEMCORE_RETENTION_ENABLED: &str = "MEMCORE_RETENTION_ENABLED";
+const DEFAULT_METRICS_PATH: &str = "/metrics";
 const MEMCORE_FACT_RETENTION_DAYS: &str = "MEMCORE_FACT_RETENTION_DAYS";
 const MEMCORE_EVENT_RETENTION_DAYS: &str = "MEMCORE_EVENT_RETENTION_DAYS";
 const MEMCORE_CONTEXT_CACHE_ENABLED: &str = "MEMCORE_CONTEXT_CACHE_ENABLED";
@@ -317,6 +321,12 @@ pub struct Settings {
     pub request_id_header: String,
     /// Expose in-process metrics at `GET /metrics`.
     pub metrics_enabled: bool,
+    /// Prometheus scrape path (must start with `/`).
+    pub metrics_path: String,
+    /// When true, scrape requires a valid API key (AdminRead in database auth).
+    pub metrics_require_auth: bool,
+    /// When true, expose basic build info gauge (no env dump).
+    pub metrics_include_process: bool,
     /// Global retention toggle for user-scoped retention apply endpoint.
     pub retention_enabled: bool,
     /// Default fact retention window in days (`0` disables fact retention).
@@ -517,6 +527,9 @@ impl fmt::Debug for Settings {
             .field("log_level", &self.log_level)
             .field("request_id_header", &self.request_id_header)
             .field("metrics_enabled", &self.metrics_enabled)
+            .field("metrics_path", &self.metrics_path)
+            .field("metrics_require_auth", &self.metrics_require_auth)
+            .field("metrics_include_process", &self.metrics_include_process)
             .field("context_cache_backend", &self.context_cache_backend)
             .field(
                 "redis_url",
@@ -598,7 +611,10 @@ impl Default for Settings {
             log_format: LogFormat::Json,
             log_level: LogLevel::Info,
             request_id_header: DEFAULT_REQUEST_ID_HEADER.to_string(),
-            metrics_enabled: true,
+            metrics_enabled: false,
+            metrics_path: DEFAULT_METRICS_PATH.to_string(),
+            metrics_require_auth: true,
+            metrics_include_process: false,
             retention_enabled: false,
             fact_retention_days: 0,
             event_retention_days: 0,
@@ -746,6 +762,13 @@ impl Settings {
         let log_level = LogLevel::from_str(&read_env_or(MEMCORE_LOG_LEVEL, "info"))?;
         let request_id_header = read_env_or(MEMCORE_REQUEST_ID_HEADER, &defaults.request_id_header);
         let metrics_enabled = parse_bool(MEMCORE_METRICS_ENABLED, defaults.metrics_enabled)?;
+        let metrics_path = read_env_or(MEMCORE_METRICS_PATH, &defaults.metrics_path);
+        let metrics_require_auth =
+            parse_bool(MEMCORE_METRICS_REQUIRE_AUTH, defaults.metrics_require_auth)?;
+        let metrics_include_process = parse_bool(
+            MEMCORE_METRICS_INCLUDE_PROCESS,
+            defaults.metrics_include_process,
+        )?;
         let retention_enabled = parse_bool(MEMCORE_RETENTION_ENABLED, defaults.retention_enabled)?;
         let fact_retention_days =
             parse_u32(MEMCORE_FACT_RETENTION_DAYS, defaults.fact_retention_days)?;
@@ -1029,6 +1052,9 @@ impl Settings {
             log_level,
             request_id_header,
             metrics_enabled,
+            metrics_path,
+            metrics_require_auth,
+            metrics_include_process,
             retention_enabled,
             fact_retention_days,
             event_retention_days,
@@ -1221,6 +1247,8 @@ impl Settings {
                 "MEMCORE_REQUEST_ID_HEADER cannot be empty".to_string(),
             ));
         }
+
+        validate_metrics_settings(self)?;
 
         let needs_openai_key = self.llm_provider == LlmProviderKind::OpenAi
             || self.embedding_provider == EmbeddingProviderKind::OpenAi;
@@ -1523,6 +1551,27 @@ fn parse_string_list(key: &str, default: &[String]) -> Vec<String> {
             .collect(),
         Err(_) => default.to_vec(),
     }
+}
+
+fn validate_metrics_settings(settings: &Settings) -> MemcoreResult<()> {
+    let path = settings.metrics_path.trim();
+    if path.is_empty() {
+        return Err(MemcoreError::ValidationError(
+            "MEMCORE_METRICS_PATH cannot be empty".to_string(),
+        ));
+    }
+    if !path.starts_with('/') {
+        return Err(MemcoreError::ValidationError(
+            "MEMCORE_METRICS_PATH must start with '/'".to_string(),
+        ));
+    }
+    const RESERVED: &[&str] = &["/health", "/ready", "/api/v1/version"];
+    if RESERVED.contains(&path) {
+        return Err(MemcoreError::ValidationError(format!(
+            "MEMCORE_METRICS_PATH cannot collide with reserved path {path}"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_cors_settings(settings: &Settings) -> MemcoreResult<()> {
@@ -1904,6 +1953,9 @@ mod tests {
         "MEMCORE_LOG_LEVEL",
         "MEMCORE_REQUEST_ID_HEADER",
         "MEMCORE_METRICS_ENABLED",
+        "MEMCORE_METRICS_PATH",
+        "MEMCORE_METRICS_REQUIRE_AUTH",
+        "MEMCORE_METRICS_INCLUDE_PROCESS",
         "MEMCORE_RETENTION_ENABLED",
         "MEMCORE_FACT_RETENTION_DAYS",
         "MEMCORE_EVENT_RETENTION_DAYS",
@@ -2033,7 +2085,10 @@ mod tests {
         assert_eq!(settings.log_format, super::LogFormat::Json);
         assert_eq!(settings.log_level, super::LogLevel::Info);
         assert_eq!(settings.request_id_header, super::DEFAULT_REQUEST_ID_HEADER);
-        assert!(settings.metrics_enabled);
+        assert!(!settings.metrics_enabled);
+        assert_eq!(settings.metrics_path, "/metrics");
+        assert!(settings.metrics_require_auth);
+        assert!(!settings.metrics_include_process);
         assert!(!settings.retention_enabled);
         assert_eq!(settings.fact_retention_days, 0);
         assert_eq!(settings.event_retention_days, 0);
@@ -3514,14 +3569,65 @@ mod tests {
             std::env::set_var("MEMCORE_LOG_FORMAT", "pretty");
             std::env::set_var("MEMCORE_LOG_LEVEL", "debug");
             std::env::set_var("MEMCORE_REQUEST_ID_HEADER", "X-Correlation-ID");
-            std::env::set_var("MEMCORE_METRICS_ENABLED", "false");
+            std::env::set_var("MEMCORE_METRICS_ENABLED", "true");
+            std::env::set_var("MEMCORE_METRICS_PATH", "/internal/metrics");
+            std::env::set_var("MEMCORE_METRICS_REQUIRE_AUTH", "false");
+            std::env::set_var("MEMCORE_METRICS_INCLUDE_PROCESS", "true");
         }
 
         let settings = Settings::from_env().expect("observability settings should load");
         assert_eq!(settings.log_format, super::LogFormat::Pretty);
         assert_eq!(settings.log_level, super::LogLevel::Debug);
         assert_eq!(settings.request_id_header, "X-Correlation-ID");
+        assert!(settings.metrics_enabled);
+        assert_eq!(settings.metrics_path, "/internal/metrics");
+        assert!(!settings.metrics_require_auth);
+        assert!(settings.metrics_include_process);
+    }
+
+    #[test]
+    fn metrics_path_must_start_with_slash() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_METRICS_PATH", "metrics");
+        }
+
+        let error = Settings::from_env().expect_err("invalid metrics path should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(error.to_string().contains("MEMCORE_METRICS_PATH"));
+    }
+
+    #[test]
+    fn metrics_path_cannot_collide_with_health() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+
+        // SAFETY: tests mutate env only while holding the process-wide mutex.
+        unsafe {
+            std::env::set_var("MEMCORE_METRICS_PATH", "/health");
+        }
+
+        let error = Settings::from_env().expect_err("reserved metrics path should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(error.to_string().contains("cannot collide"));
+    }
+
+    #[test]
+    fn metrics_disabled_by_default_struct() {
+        let settings = Settings::default();
         assert!(!settings.metrics_enabled);
+        assert_eq!(settings.metrics_path, "/metrics");
+        assert!(settings.metrics_require_auth);
+        assert!(!settings.metrics_include_process);
     }
 
     #[test]

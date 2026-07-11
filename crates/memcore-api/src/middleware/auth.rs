@@ -38,6 +38,18 @@ pub async fn require_api_key(
     match result {
         Ok(()) => next.run(request).await,
         Err((status, code, message)) => {
+            let reason = match (status, code) {
+                (StatusCode::UNAUTHORIZED, "UNAUTHORIZED") if message.contains("missing") => {
+                    "missing_key"
+                }
+                (StatusCode::UNAUTHORIZED, _) => "invalid_key",
+                (StatusCode::FORBIDDEN, _) => "forbidden",
+                _ => "invalid_key",
+            };
+            if state.settings.metrics_enabled {
+                let route = crate::metrics::normalize_route(None, request.uri().path());
+                crate::metrics::record_auth_failure(reason, request.method().as_str(), &route);
+            }
             let mut response = error_response(status, code, message, &request);
             attach_error_code(&mut response, code);
             response

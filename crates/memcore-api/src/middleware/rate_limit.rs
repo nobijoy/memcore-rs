@@ -92,6 +92,10 @@ pub async fn enforce_rate_limit(
     match state.rate_limiter.check(&organization.org_id) {
         RateLimitDecision::Allowed => next.run(request).await,
         RateLimitDecision::Limited { retry_after_secs } => {
+            if state.settings.metrics_enabled {
+                let route = crate::metrics::normalize_route(None, request.uri().path());
+                crate::metrics::record_rate_limited(request.method().as_str(), &route);
+            }
             let mut response = error_response(
                 StatusCode::TOO_MANY_REQUESTS,
                 "RATE_LIMITED",

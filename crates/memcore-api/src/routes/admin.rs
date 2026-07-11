@@ -126,7 +126,21 @@ pub async fn run_background_job(
 
     let kind = parse_background_job_kind(&job_kind)?;
     tracing::info!(job_kind = %kind, "manual background job trigger requested");
+    let started = std::time::Instant::now();
     let run = state.background_jobs.run_manual(kind).await?;
+    let status = format!("{:?}", run.status);
+    let kind_label = format!("{kind:?}");
+    crate::metrics::ops::record_background_job_run(
+        &kind_label,
+        &status,
+        started.elapsed().as_secs_f64(),
+    );
+    if run.attempt_count > 1 {
+        crate::metrics::ops::record_background_job_retries(
+            &kind_label,
+            (run.attempt_count - 1) as u64,
+        );
+    }
 
     Ok(Json(run_background_job_response(run)))
 }

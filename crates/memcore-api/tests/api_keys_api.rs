@@ -525,9 +525,9 @@ async fn database_auth_allows_admin_read_for_list() {
 }
 
 #[tokio::test]
-async fn health_ready_metrics_remain_public() {
+async fn health_ready_version_remain_public_metrics_disabled_by_default() {
     let app = dev_app();
-    for path in ["/health", "/ready", "/metrics", "/api/v1/version"] {
+    for path in ["/health", "/ready", "/api/v1/version"] {
         let response = app
             .clone()
             .oneshot(
@@ -540,6 +540,17 @@ async fn health_ready_metrics_remain_public() {
             .expect("router should respond");
         assert_eq!(response.status(), StatusCode::OK, "path {path}");
     }
+
+    let metrics = app
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+    assert_eq!(metrics.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

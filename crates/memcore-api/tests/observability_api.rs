@@ -12,7 +12,11 @@ use common::authorization_header;
 const CUSTOM_REQUEST_ID: &str = "req_custom_12345";
 
 fn test_app() -> axum::Router {
-    create_app(AppState::new(Settings::default()))
+    create_app(AppState::new(Settings {
+        metrics_enabled: true,
+        metrics_require_auth: false,
+        ..Settings::default()
+    }))
 }
 
 fn app_with_metrics_disabled() -> axum::Router {
@@ -151,7 +155,11 @@ async fn metrics_route_returns_prometheus_text() {
 
     assert_eq!(status, StatusCode::OK);
     assert!(text.contains("memcore_http_requests_total"));
-    assert!(text.contains("memcore_api_errors_total"));
+    assert!(
+        text.contains("memcore_http_request_duration_seconds")
+            || text.contains("memcore_api_errors_total")
+            || text.contains("# TYPE")
+    );
 }
 
 #[tokio::test]

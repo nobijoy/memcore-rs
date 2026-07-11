@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::metrics::MetricsExporter;
 use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
 use chrono::{DateTime, Utc};
@@ -82,6 +83,7 @@ impl ProviderWiring {
             } else {
                 inner
             };
+        let usage_recorder = crate::metrics::PrometheusProviderUsageRecorder::wrap(usage_recorder);
 
         Ok(Self {
             usage_recorder,
@@ -103,13 +105,16 @@ impl ProviderWiring {
         let inner = provider_usage_recorder(settings.provider_usage_metrics_enabled);
         if settings.provider_usage_persistence_enabled {
             let store = Arc::new(MockProviderUsageStore::new());
+            let usage_recorder = PersistentProviderUsageRecorder::new(inner, Some(store.clone()));
             Self {
-                usage_recorder: PersistentProviderUsageRecorder::new(inner, Some(store.clone())),
+                usage_recorder: crate::metrics::PrometheusProviderUsageRecorder::wrap(
+                    usage_recorder,
+                ),
                 usage_store: Some(store),
                 attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
             }
         } else {
-            Self::for_tests(inner)
+            Self::for_tests(crate::metrics::PrometheusProviderUsageRecorder::wrap(inner))
         }
     }
 }
@@ -379,6 +384,7 @@ pub struct AppState {
     pub api_key_store: Arc<dyn ApiKeyStore>,
     pub rate_limiter: Arc<RateLimiter>,
     pub metrics: Arc<Metrics>,
+    pub metrics_exporter: MetricsExporter,
     pub provider_usage: Arc<dyn ProviderUsageRecorder>,
     pub provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
     pub org_plan_store: Arc<dyn OrgPlanStore>,
@@ -441,6 +447,7 @@ impl AppState {
             api_key_store,
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
+            metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage: wiring.usage_recorder,
             provider_usage_store: wiring.usage_store,
             org_plan_store,
@@ -501,6 +508,7 @@ impl AppState {
                 settings: settings.clone(),
                 rate_limiter: create_rate_limiter(&settings),
                 metrics: Arc::new(Metrics::default()),
+                metrics_exporter: MetricsExporter::from_settings(&settings),
                 provider_usage: wiring.usage_recorder,
                 provider_usage_store: wiring.usage_store,
                 org_plan_store,
@@ -527,6 +535,7 @@ impl AppState {
             api_key_store: Arc::new(MockApiKeyStore::new()),
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
+            metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage: provider_usage_recorder(settings.provider_usage_metrics_enabled),
             provider_usage_store: None,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
@@ -558,6 +567,7 @@ impl AppState {
             api_key_store: Arc::new(MockApiKeyStore::new()),
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
+            metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage,
             provider_usage_store: None,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
@@ -590,6 +600,7 @@ impl AppState {
             api_key_store: Arc::new(MockApiKeyStore::new()),
             rate_limiter: create_rate_limiter(&settings),
             metrics: Arc::new(Metrics::default()),
+            metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage,
             provider_usage_store,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),

@@ -42,13 +42,14 @@ pub fn health() {}
 )]
 pub fn ready() {}
 
-/// Minimal in-process Prometheus-compatible metrics (text/plain).
+/// Prometheus scrape endpoint (path configurable; auth optional).
 #[utoipa::path(
     get,
     path = "/metrics",
     tag = "Metrics",
     responses(
         (status = 200, description = "Prometheus text metrics when MEMCORE_METRICS_ENABLED=true", content_type = "text/plain", body = String),
+        (status = 401, description = "Unauthorized when metrics auth is required"),
         (status = 404, description = "Metrics endpoint disabled"),
     )
 )]

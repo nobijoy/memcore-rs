@@ -1,8 +1,5 @@
 use axum::Json;
-use axum::body::Body;
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use memcore_config::{Environment, FactBackend, StorageMode, VectorBackend};
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -107,19 +104,6 @@ pub async fn ready(State(state): State<AppState>) -> Json<ReadyResponse> {
             providers: ProvidersReadyCheck { configured: true },
         },
     })
-}
-
-/// Minimal Prometheus-compatible metrics (in-process counters only).
-pub async fn metrics(State(state): State<AppState>) -> Response {
-    if !state.settings.metrics_enabled {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "text/plain; version=0.0.4; charset=utf-8")
-        .body(Body::from(state.metrics.render_prometheus()))
-        .expect("metrics response should build")
 }
 
 fn environment_label(environment: &Environment) -> &'static str {

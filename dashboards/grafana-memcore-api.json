@@ -8,13 +8,13 @@
       "pluginName": "Prometheus"
     }
   ],
-  "description": "TEMPLATE: Memcore HTTP API dashboard. Mix of implemented counters and intended labeled metrics.",
+  "description": "TEMPLATE: Memcore HTTP API dashboard aligned with Prometheus metrics foundation.",
   "editable": true,
   "id": null,
   "panels": [
     {
       "type": "timeseries",
-      "title": "Requests by route (intended)",
+      "title": "Requests by route",
       "id": 1,
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -28,7 +28,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Latency by route p95 (intended)",
+      "title": "Latency by route p95",
       "id": 2,
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -42,7 +42,7 @@
     },
     {
       "type": "timeseries",
-      "title": "4xx rate (intended)",
+      "title": "4xx rate",
       "id": 3,
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -56,7 +56,7 @@
     },
     {
       "type": "timeseries",
-      "title": "5xx rate (intended)",
+      "title": "5xx rate",
       "id": 4,
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -70,7 +70,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Auth failures (intended)",
+      "title": "Auth failures",
       "id": 5,
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -84,7 +84,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Rate limited requests (intended)",
+      "title": "Rate limited requests",
       "id": 6,
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -98,32 +98,32 @@
     },
     {
       "type": "timeseries",
-      "title": "Coarse errors (implemented counter)",
+      "title": "HTTP errors by status class",
       "id": 7,
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
         {
-          "expr": "sum(rate(memcore_api_errors_total[5m]))",
-          "legendFormat": "api_errors/s",
+          "expr": "sum(rate(memcore_http_request_errors_total[5m])) by (status_class)",
+          "legendFormat": "{{status_class}}",
           "refId": "A"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Memory create / search / context (implemented)",
+      "title": "Memory create / search / context",
       "id": 8,
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
         {
-          "expr": "sum(rate(memcore_memory_add_requests_total[5m]))",
+          "expr": "sum(rate(memcore_memory_create_total[5m]))",
           "legendFormat": "create",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(memcore_memory_search_requests_total[5m]))",
+          "expr": "sum(rate(memcore_memory_search_total[5m]))",
           "legendFormat": "search",
           "refId": "B"
         },
@@ -156,5 +156,5 @@
   "timezone": "browser",
   "title": "Memcore API (template)",
   "uid": "memcore-api-template",
-  "version": 1
+  "version": 2
 }

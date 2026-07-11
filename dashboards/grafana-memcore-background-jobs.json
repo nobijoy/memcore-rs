@@ -8,13 +8,13 @@
       "pluginName": "Prometheus"
     }
   ],
-  "description": "TEMPLATE: Memcore background jobs. Metrics mostly intended; use admin job APIs until emitted.",
+  "description": "TEMPLATE: Memcore background jobs. Prefer admin job APIs for rich history; scrape metrics for rates.",
   "editable": true,
   "id": null,
   "panels": [
     {
       "type": "timeseries",
-      "title": "Job runs by kind/status (intended)",
+      "title": "Job runs by kind/status",
       "id": 1,
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -28,7 +28,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Job failures by kind (intended)",
+      "title": "Job failures by kind",
       "id": 2,
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -42,7 +42,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Job duration p95 (intended)",
+      "title": "Job duration p95",
       "id": 3,
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -56,21 +56,21 @@
     },
     {
       "type": "timeseries",
-      "title": "Skipped runs / lock contention (intended)",
+      "title": "Lock skips",
       "id": 4,
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
         {
-          "expr": "sum(rate(memcore_background_job_skipped_total[5m])) by (job_kind, reason)",
-          "legendFormat": "{{job_kind}} {{reason}}",
+          "expr": "sum(rate(memcore_background_job_lock_skips_total[5m])) by (job_kind)",
+          "legendFormat": "{{job_kind}}",
           "refId": "A"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Retries (use job run history until metric exists)",
+      "title": "Runs and retries",
       "id": 5,
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -86,9 +86,14 @@
           "refId": "B"
         },
         {
-          "expr": "sum(rate(memcore_background_job_runs_total{status=\"Skipped\"}[5m])) by (job_kind)",
-          "legendFormat": "skipped {{job_kind}}",
+          "expr": "sum(rate(memcore_background_job_retries_total[5m])) by (job_kind)",
+          "legendFormat": "retries {{job_kind}}",
           "refId": "C"
+        },
+        {
+          "expr": "sum(rate(memcore_background_job_cancelled_total[5m])) by (job_kind)",
+          "legendFormat": "cancelled {{job_kind}}",
+          "refId": "D"
         }
       ]
     }
@@ -114,5 +119,5 @@
   "timezone": "browser",
   "title": "Memcore Background Jobs (template)",
   "uid": "memcore-jobs-template",
-  "version": 1
+  "version": 2
 }

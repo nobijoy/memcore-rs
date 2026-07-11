@@ -5,6 +5,7 @@ use axum::routing::{delete, get, post};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::metrics::{metrics_handler, require_metrics_auth};
 use crate::middleware::{
     apply_security_headers, build_cors_layer, enforce_json_content_type, enforce_rate_limit,
     enforce_request_body_limit, require_api_key, require_organization,
@@ -122,11 +123,24 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route_layer(from_fn(require_organization))
         .route_layer(from_fn_with_state(state.clone(), require_api_key));
 
+    let metrics_path = state.settings.metrics_path.clone();
+    let metrics_router = if state.settings.metrics_enabled {
+        let router = Router::new().route(&metrics_path, get(metrics_handler));
+        if state.settings.metrics_require_auth {
+            router.route_layer(from_fn_with_state(state.clone(), require_metrics_auth))
+        } else {
+            router
+        }
+    } else {
+        // Keep path registered so disabled scrapes get a stable 404 from the handler.
+        Router::new().route(&metrics_path, get(metrics_handler))
+    };
+
     let router = Router::new()
         .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
-        .route("/metrics", get(health::metrics))
+        .merge(metrics_router)
         .route("/api/v1/version", get(health::version))
         .merge(protected)
         .layer(from_fn(enforce_json_content_type))
