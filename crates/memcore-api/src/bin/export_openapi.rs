@@ -15,13 +15,12 @@ fn main() -> ExitCode {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("openapi/memcore.openapi.json"));
 
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            if let Err(error) = fs::create_dir_all(parent) {
-                eprintln!("failed to create {}: {error}", parent.display());
-                return ExitCode::FAILURE;
-            }
-        }
+    if let Some(parent) = out.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(error) = fs::create_dir_all(parent)
+    {
+        eprintln!("failed to create {}: {error}", parent.display());
+        return ExitCode::FAILURE;
     }
 
     let spec = match ApiDoc::openapi().to_pretty_json() {

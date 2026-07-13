@@ -467,8 +467,8 @@ async fn e2e_admin_endpoints_are_reachable_and_safe() {
     );
     assert_no_secret_leak(&keys.raw);
     assert!(
-        keys.raw.to_lowercase().contains("key_hash") == false
-            || keys.body.to_string().contains("key_hash") == false
+        !keys.raw.to_lowercase().contains("key_hash")
+            || !keys.body.to_string().contains("key_hash")
             || keys.body.pointer("/api_keys/0/key_hash").is_none(),
         "key hashes must not be exposed"
     );

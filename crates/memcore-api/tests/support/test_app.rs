@@ -180,7 +180,7 @@ impl TestApp {
             .expect("body should collect")
             .to_bytes();
         let raw = String::from_utf8_lossy(&bytes).to_string();
-        let body = serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::Null);
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
 
         TestResponse {
             status,
@@ -233,7 +233,7 @@ impl TestApp {
             .expect("body should collect")
             .to_bytes();
         let raw = String::from_utf8_lossy(&bytes).to_string();
-        let body = serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::Null);
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
 
         TestResponse {
             status,
@@ -285,7 +285,7 @@ impl TestApp {
             .expect("body should collect")
             .to_bytes();
         let raw = String::from_utf8_lossy(&bytes).to_string();
-        let body = serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::Null);
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
 
         TestResponse {
             status,

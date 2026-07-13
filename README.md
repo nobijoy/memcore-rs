@@ -16,6 +16,9 @@ Production-oriented long-term memory engine for AI agents (Rust).
 | Node example | [examples/node/](examples/node/) |
 | Smoke tests | [docs/SMOKE_TESTS.md](docs/SMOKE_TESTS.md) |
 | Deployment | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| Production readiness | [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) |
+| Readiness audit | [docs/PRODUCTION_READINESS_AUDIT.md](docs/PRODUCTION_READINESS_AUDIT.md) |
+| Go-live checklist | [docs/GO_LIVE_CHECKLIST.md](docs/GO_LIVE_CHECKLIST.md) |
 | Security | [docs/SECURITY.md](docs/SECURITY.md) |
 
 ## Develop
