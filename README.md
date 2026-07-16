@@ -45,7 +45,11 @@ For controlled staging preparation and validation:
 
 - [docs/runbooks/STAGING_DEPLOYMENT.md](docs/runbooks/STAGING_DEPLOYMENT.md)
 - [docs/runbooks/STAGING_CHECKLIST.md](docs/runbooks/STAGING_CHECKLIST.md)
+- [docs/runbooks/STAGING_SECRETS_INVENTORY.md](docs/runbooks/STAGING_SECRETS_INVENTORY.md)
+- [docs/runbooks/STAGING_ACCESS_REQUEST.md](docs/runbooks/STAGING_ACCESS_REQUEST.md)
+- [docs/runbooks/STAGING_SECRET_READINESS_CHECKLIST.md](docs/runbooks/STAGING_SECRET_READINESS_CHECKLIST.md)
 - [docs/runbooks/STAGING_VALIDATION_REPORT_TEMPLATE.md](docs/runbooks/STAGING_VALIDATION_REPORT_TEMPLATE.md)
 - [docs/runbooks/STAGING_DEPENDENCY_VALIDATION.md](docs/runbooks/STAGING_DEPENDENCY_VALIDATION.md)
 
-Env template: `.env.staging.example` · Compose example: `docker/docker-compose.staging.example.yml`
+Env template: `.env.staging.example` (tracked) · Compose example: `docker/docker-compose.staging.example.yml`  
+Real `.env.staging` is **local/ops only** (gitignored) — absence from the repo is expected, not a defect. Generate only from operator-provided secrets (`scripts/ops/create_staging_env.sh`). Do not start Compose until secrets validate.

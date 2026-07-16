@@ -15,14 +15,20 @@ project_plan.md
 .DS_Store
 Thumbs.db
 
-# Local env / secrets (never commit real staging or production values)
+# ---------------------------------------------------------------------------
+# Env files: repo tracks *examples* only. Real env files stay local/untracked.
+# Expected in git:  .env.example .env.local.example .env.staging.example
+#                   .env.production.example
+# Never commit:     .env .env.local .env.staging .env.production (or other .env.*)
+# Missing .env.staging in the clone is normal — create it only from operator secrets.
+# ---------------------------------------------------------------------------
 .env
-.env.*
-!.env.*.example
-!.env.example
+.env.local
 .env.staging
 .env.production
-.env.local
+.env.*
+!.env.example
+!.env.*.example
 *.template.local
 
 # Local container security / SBOM artifacts
@@ -39,4 +45,3 @@ reports/perf/*.txt
 reports/perf/*.html
 reports/perf/*.csv
 !reports/perf/.gitkeep
-
