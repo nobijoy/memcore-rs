@@ -15,6 +15,16 @@ project_plan.md
 .DS_Store
 Thumbs.db
 
+# Local env / secrets (never commit real staging or production values)
+.env
+.env.*
+!.env.*.example
+!.env.example
+.env.staging
+.env.production
+.env.local
+*.template.local
+
 # Local container security / SBOM artifacts
 sbom.spdx.json
 sbom.cdx.json

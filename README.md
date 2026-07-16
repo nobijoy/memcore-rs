@@ -38,3 +38,14 @@ Do not enable LanceDB for normal day-to-day tests (`docs/CURSOR_RULES.md`).
 ## Client examples
 
 Examples use env vars (`MEMCORE_BASE_URL`, `MEMCORE_API_KEY`, `MEMCORE_ORG_ID`) and never print API keys. They are examples only — no npm/PyPI/crates.io SDK packages are published yet (`docs/SDK_ROADMAP.md`).
+
+## Staging Deployment
+
+For controlled staging preparation and validation:
+
+- [docs/runbooks/STAGING_DEPLOYMENT.md](docs/runbooks/STAGING_DEPLOYMENT.md)
+- [docs/runbooks/STAGING_CHECKLIST.md](docs/runbooks/STAGING_CHECKLIST.md)
+- [docs/runbooks/STAGING_VALIDATION_REPORT_TEMPLATE.md](docs/runbooks/STAGING_VALIDATION_REPORT_TEMPLATE.md)
+- [docs/runbooks/STAGING_DEPENDENCY_VALIDATION.md](docs/runbooks/STAGING_DEPENDENCY_VALIDATION.md)
+
+Env template: `.env.staging.example` · Compose example: `docker/docker-compose.staging.example.yml`

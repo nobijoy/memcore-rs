@@ -1,0 +1,124 @@
+# EXAMPLE staging-like Compose stack (Postgres + Qdrant + memcore).
+# Not production-grade orchestration. No Kubernetes. No real secrets.
+#
+#   cp .env.staging.example .env.staging
+#   # replace CHANGE_ME values
+#   ./scripts/ops/validate_env.sh .env.staging staging
+#   docker compose --env-file .env.staging -f docker/docker-compose.staging.example.yml up --build -d
+#
+# Required build features: postgres,qdrant
+# Optional Redis service is commented out (needs redis-cache feature if enabled).
+# See docs/runbooks/STAGING_DEPLOYMENT.md
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-memcore_staging}
+      POSTGRES_USER: ${POSTGRES_USER:-memcore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.staging}
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-memcore} -d $${POSTGRES_DB:-memcore_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - staging_qdrant_data:/qdrant/storage
+    # Official image has no curl; from host: curl http://localhost:6333/healthz
+
+  # Optional Redis (uncomment + set MEMCORE_CONTEXT_CACHE_BACKEND=redis and rebuild with redis-cache):
+  # redis:
+  #   image: redis:7-alpine
+  #   command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+  #   volumes:
+  #     - staging_redis_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 5
+
+  memcore:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        CARGO_FEATURES: postgres,qdrant
+        APP_VERSION: ${APP_VERSION:-0.1.0-staging}
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:-unknown}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    environment:
+      MEMCORE_ENV: ${MEMCORE_ENV:-staging}
+      MEMCORE_HOST: 0.0.0.0
+      MEMCORE_PORT: 8080
+
+      MEMCORE_STORAGE_MODE: production
+      MEMCORE_FACT_BACKEND: postgres
+      MEMCORE_EVENT_BACKEND: postgres
+      MEMCORE_POSTGRES_URL: ${MEMCORE_POSTGRES_URL:?set MEMCORE_POSTGRES_URL}
+      MEMCORE_DATABASE_MIGRATIONS_ENABLED: ${MEMCORE_DATABASE_MIGRATIONS_ENABLED:-true}
+      MEMCORE_DATABASE_MIGRATION_MODE: ${MEMCORE_DATABASE_MIGRATION_MODE:-auto}
+      MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS: ${MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS:-true}
+
+      MEMCORE_VECTOR_BACKEND: qdrant
+      MEMCORE_QDRANT_URL: ${MEMCORE_QDRANT_URL:-http://qdrant:6333}
+      MEMCORE_QDRANT_COLLECTION: ${MEMCORE_QDRANT_COLLECTION:-memcore_staging}
+
+      MEMCORE_LLM_PROVIDER: ${MEMCORE_LLM_PROVIDER:-mock}
+      MEMCORE_LLM_MODEL: ${MEMCORE_LLM_MODEL:-mock-llm}
+      MEMCORE_EMBEDDING_PROVIDER: ${MEMCORE_EMBEDDING_PROVIDER:-mock}
+      MEMCORE_EMBEDDING_MODEL: ${MEMCORE_EMBEDDING_MODEL:-mock-embedding}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+
+      MEMCORE_AUTH_ENABLED: ${MEMCORE_AUTH_ENABLED:-true}
+      MEMCORE_AUTH_MODE: ${MEMCORE_AUTH_MODE:-database}
+      MEMCORE_DEV_API_KEY: ${MEMCORE_DEV_API_KEY:-}
+      MEMCORE_API_KEY_PEPPER: ${MEMCORE_API_KEY_PEPPER:-}
+
+      MEMCORE_CONTEXT_CACHE_BACKEND: ${MEMCORE_CONTEXT_CACHE_BACKEND:-disabled}
+      MEMCORE_REDIS_URL: ${MEMCORE_REDIS_URL:-}
+
+      MEMCORE_BACKGROUND_JOBS_ENABLED: ${MEMCORE_BACKGROUND_JOBS_ENABLED:-true}
+      MEMCORE_BACKGROUND_JOB_ORG_IDS: ${MEMCORE_BACKGROUND_JOB_ORG_IDS:-org_staging}
+      MEMCORE_BACKGROUND_JOB_LOCK_ENABLED: ${MEMCORE_BACKGROUND_JOB_LOCK_ENABLED:-true}
+      MEMCORE_BACKGROUND_JOB_LOCK_BACKEND: ${MEMCORE_BACKGROUND_JOB_LOCK_BACKEND:-database}
+      MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED: ${MEMCORE_BACKGROUND_JOB_HISTORY_ENABLED:-true}
+
+      MEMCORE_RATE_LIMIT_ENABLED: ${MEMCORE_RATE_LIMIT_ENABLED:-true}
+      MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE: ${MEMCORE_RATE_LIMIT_REQUESTS_PER_MINUTE:-120}
+
+      MEMCORE_LOG_FORMAT: ${MEMCORE_LOG_FORMAT:-json}
+      MEMCORE_LOG_LEVEL: ${MEMCORE_LOG_LEVEL:-info}
+      MEMCORE_METRICS_ENABLED: ${MEMCORE_METRICS_ENABLED:-true}
+      MEMCORE_METRICS_PATH: ${MEMCORE_METRICS_PATH:-/metrics}
+      MEMCORE_METRICS_REQUIRE_AUTH: ${MEMCORE_METRICS_REQUIRE_AUTH:-true}
+      MEMCORE_CORS_ENABLED: ${MEMCORE_CORS_ENABLED:-false}
+      MEMCORE_SECURITY_HEADERS_ENABLED: ${MEMCORE_SECURITY_HEADERS_ENABLED:-true}
+      MEMCORE_RESTORE_ENABLED: ${MEMCORE_RESTORE_ENABLED:-false}
+      MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS: ${MEMCORE_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:-30}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+volumes:
+  staging_postgres_data:
+  staging_qdrant_data:
+  # staging_redis_data:

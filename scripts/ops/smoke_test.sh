@@ -169,6 +169,9 @@ EOF
   auth_curl POST /api/v1/context "$CONTEXT_BODY"
   rm -f "$AUTH_CURL_BODY"
 
+  auth_curl GET "/api/v1/users/${USER_ID}/memories?limit=20"
+  rm -f "$AUTH_CURL_BODY"
+
   if [[ -n "$MEMORY_ID" && "$MEMORY_ID" != "null" ]]; then
     auth_curl DELETE "/api/v1/users/${USER_ID}/memories/${MEMORY_ID}"
     rm -f "$AUTH_CURL_BODY"
