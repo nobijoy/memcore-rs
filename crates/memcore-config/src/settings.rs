@@ -590,7 +590,7 @@ impl Default for Settings {
                 .collect(),
             cors_exposed_headers: Vec::new(),
             cors_allow_credentials: false,
-            qdrant_url: "http://localhost:6333".to_string(),
+            qdrant_url: "http://localhost:6334".to_string(),
             qdrant_collection: "memcore_vectors".to_string(),
             lancedb_path: "./data/lancedb".to_string(),
             lancedb_table: "memcore_vectors".to_string(),
@@ -3729,7 +3729,7 @@ mod tests {
 
         let settings = Settings::from_env().expect("qdrant settings should load");
         assert_eq!(settings.vector_backend, VectorBackend::Qdrant);
-        assert_eq!(settings.qdrant_url, "http://localhost:6333");
+        assert_eq!(settings.qdrant_url, "http://localhost:6334");
         assert_eq!(settings.qdrant_collection, "memcore_vectors");
     }
 

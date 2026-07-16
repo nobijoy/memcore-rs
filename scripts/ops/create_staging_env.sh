@@ -65,14 +65,14 @@ if ! is_set OPENAI_API_KEY && is_set MEMCORE_OPENAI_API_KEY; then
 fi
 
 # Defaults for non-sensitive controlled staging shape
-: "${MEMCORE_ENV:=staging}"
+: "${MEMCORE_ENV:=production}"
 : "${MEMCORE_HOST:=0.0.0.0}"
 : "${MEMCORE_PORT:=8080}"
 : "${MEMCORE_STORAGE_MODE:=production}"
 : "${MEMCORE_FACT_BACKEND:=postgres}"
 : "${MEMCORE_EVENT_BACKEND:=postgres}"
 : "${MEMCORE_VECTOR_BACKEND:=qdrant}"
-: "${MEMCORE_QDRANT_URL:=http://qdrant:6333}"
+: "${MEMCORE_QDRANT_URL:=http://qdrant:6334}"
 : "${MEMCORE_QDRANT_COLLECTION:=memcore_staging}"
 : "${MEMCORE_DATABASE_MIGRATIONS_ENABLED:=true}"
 : "${MEMCORE_DATABASE_MIGRATION_MODE:=auto}"

@@ -28,13 +28,13 @@ services:
       retries: 5
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.18.0
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    # Official image has no curl/wget; check from host: curl http://localhost:6333/healthz
+    # REST: :6333 · gRPC for Rust client: :6334 (MEMCORE_QDRANT_URL=http://qdrant:6334)
 
   # Optional Redis for shared context cache (disabled by default):
   # redis:
@@ -76,7 +76,7 @@ services:
       MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS: ${MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS:-true}
 
       MEMCORE_VECTOR_BACKEND: qdrant
-      MEMCORE_QDRANT_URL: ${MEMCORE_QDRANT_URL:-http://qdrant:6333}
+      MEMCORE_QDRANT_URL: ${MEMCORE_QDRANT_URL:-http://qdrant:6334}
       MEMCORE_QDRANT_COLLECTION: ${MEMCORE_QDRANT_COLLECTION:-memcore_vectors}
 
       MEMCORE_LLM_PROVIDER: ${MEMCORE_LLM_PROVIDER:-mock}

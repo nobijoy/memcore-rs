@@ -177,6 +177,7 @@ impl QdrantVectorStore {
         }
 
         let client = Qdrant::from_url(url)
+            .skip_compatibility_check()
             .build()
             .map_err(|error| storage_error("failed to connect qdrant", error))?;
 

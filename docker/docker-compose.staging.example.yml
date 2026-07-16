@@ -26,12 +26,15 @@ services:
       retries: 5
 
   qdrant:
-    image: qdrant/qdrant:latest
+    # Pin to match qdrant-client ~1.18 (avoid :latest HTTP/2 compatibility breaks).
+    image: qdrant/qdrant:v1.18.0
     ports:
       - "6333:6333"
+      - "6334:6334"
     volumes:
       - staging_qdrant_data:/qdrant/storage
-    # Official image has no curl; from host: curl http://localhost:6333/healthz
+    # REST health from host: curl http://localhost:6333/healthz
+    # Rust qdrant-client uses gRPC on 6334 (set MEMCORE_QDRANT_URL=http://qdrant:6334).
 
   # Optional Redis (uncomment + set MEMCORE_CONTEXT_CACHE_BACKEND=redis and rebuild with redis-cache):
   # redis:
@@ -75,7 +78,7 @@ services:
       MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS: ${MEMCORE_DATABASE_REQUIRE_CLEAN_MIGRATIONS:-true}
 
       MEMCORE_VECTOR_BACKEND: qdrant
-      MEMCORE_QDRANT_URL: ${MEMCORE_QDRANT_URL:-http://qdrant:6333}
+      MEMCORE_QDRANT_URL: ${MEMCORE_QDRANT_URL:-http://qdrant:6334}
       MEMCORE_QDRANT_COLLECTION: ${MEMCORE_QDRANT_COLLECTION:-memcore_staging}
 
       MEMCORE_LLM_PROVIDER: ${MEMCORE_LLM_PROVIDER:-mock}
