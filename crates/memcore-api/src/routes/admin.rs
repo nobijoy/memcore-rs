@@ -15,11 +15,12 @@ use crate::dto::{
     CreateMemoryUsageSnapshotResponse, DeleteOrgPlanResponse, GetOrgPlanResponse,
     ListOrgUsersQuery, ListOrgUsersResponse, OrgQuotaStatusResponse, OrgQuotasQuery,
     OrgSummaryResponse, OrgUsageDashboardResponse, OrgUsageDateRangeQuery,
-    ProviderUsageDailyQueryParams, ProviderUsageDailyResponse, ProviderUsageQueryParams,
-    ProviderUsageResponse, QueryBackgroundJobRunsParams, QueryBackgroundJobRunsResponse,
-    QueryMemoryUsageSnapshotsParams, QueryMemoryUsageSnapshotsResponse, RunBackgroundJobResponse,
-    SearchOrgMemoryEventsQuery, SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest,
-    UpsertOrgPlanResponse, background_job_run_retention_response, background_jobs_response,
+    ProviderGuardrailsResponse, ProviderUsageDailyQueryParams, ProviderUsageDailyResponse,
+    ProviderUsageQueryParams, ProviderUsageResponse, QueryBackgroundJobRunsParams,
+    QueryBackgroundJobRunsResponse, QueryMemoryUsageSnapshotsParams,
+    QueryMemoryUsageSnapshotsResponse, RunBackgroundJobResponse, SearchOrgMemoryEventsQuery,
+    SearchOrgMemoryEventsResponse, UpsertOrgPlanRequest, UpsertOrgPlanResponse,
+    background_job_run_retention_response, background_jobs_response,
     background_jobs_response_with_persisted_runs_and_locks, context_cache_metrics_response,
     get_org_plan_response, org_quota_status_response, org_summary_input, org_usage_dashboard_input,
     parse_background_job_kind, parse_event_date_filters, parse_keyword_query,
@@ -414,6 +415,35 @@ pub async fn delete_org_plan(
     Ok(Json(DeleteOrgPlanResponse {
         status: "success",
         deleted,
+    }))
+}
+
+pub async fn get_provider_guardrails(
+    State(state): State<AppState>,
+    Extension(_organization): Extension<OrganizationContext>,
+    auth: Option<Extension<AuthContext>>,
+) -> Result<Json<ProviderGuardrailsResponse>, ApiError> {
+    check_any_scope(
+        auth.as_ref().map(|extension| &extension.0),
+        &[ApiKeyScope::AdminRead, ApiKeyScope::AdminWrite],
+    )?;
+
+    let snapshot = state.provider_guardrails.status_snapshot();
+    Ok(Json(ProviderGuardrailsResponse {
+        status: "success",
+        enabled: snapshot.enabled,
+        real_provider_calls_enabled: snapshot.real_provider_calls_enabled,
+        test_mode: snapshot.test_mode,
+        max_calls_per_run: snapshot.max_calls_per_run,
+        used_calls: snapshot.used_calls,
+        remaining_calls: snapshot.remaining_calls,
+        max_input_chars: snapshot.max_input_chars,
+        max_output_tokens: snapshot.max_output_tokens,
+        max_retries_per_call: snapshot.max_retries_per_call,
+        timeout_seconds: snapshot.timeout_seconds,
+        allow_real_providers_during_load_tests: snapshot.allow_real_providers_during_load_tests,
+        background_jobs_allow_real_providers: snapshot.background_jobs_allow_real_providers,
+        multi_provider_validation_enabled: snapshot.multi_provider_validation_enabled,
     }))
 }
 

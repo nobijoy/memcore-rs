@@ -516,6 +516,25 @@ pub struct ProviderUsageResponse {
     pub next_cursor: Option<String>,
 }
 
+/// Safe provider guardrail status (no keys, prompts, or secrets).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProviderGuardrailsResponse {
+    pub status: &'static str,
+    pub enabled: bool,
+    pub real_provider_calls_enabled: bool,
+    pub test_mode: String,
+    pub max_calls_per_run: usize,
+    pub used_calls: usize,
+    pub remaining_calls: usize,
+    pub max_input_chars: usize,
+    pub max_output_tokens: usize,
+    pub max_retries_per_call: usize,
+    pub timeout_seconds: u64,
+    pub allow_real_providers_during_load_tests: bool,
+    pub background_jobs_allow_real_providers: bool,
+    pub multi_provider_validation_enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProviderUsageSummaryResponse {
     pub total_requests: u64,

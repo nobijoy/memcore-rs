@@ -57,6 +57,7 @@ fi
 API_KEY="${MEMCORE_SMOKE_TEST_API_KEY:-}"
 ORG_ID="${MEMCORE_SMOKE_TEST_ORG_ID:-org_smoke}"
 USER_ID="${MEMCORE_SMOKE_TEST_USER_ID:-smoke-test-user}"
+EXPECT_REAL_PROVIDER="${MEMCORE_SMOKE_TEST_EXPECT_REAL_PROVIDER:-false}"
 
 fail() {
   echo "error: $*" >&2
@@ -101,6 +102,7 @@ auth_curl() {
       -X "$method" \
       -H "Authorization: Bearer ${API_KEY}" \
       -H "X-Organization-ID: ${ORG_ID}" \
+      -H "X-Memcore-Test-Source: smoke-test" \
       -H "Content-Type: application/json" \
       -d "$json_body" \
       "$url" || true)"
@@ -109,6 +111,7 @@ auth_curl() {
       -X "$method" \
       -H "Authorization: Bearer ${API_KEY}" \
       -H "X-Organization-ID: ${ORG_ID}" \
+      -H "X-Memcore-Test-Source: smoke-test" \
       "$url" || true)"
   fi
 
@@ -179,6 +182,12 @@ EOF
   else
     echo "warning: could not parse memory id for cleanup (jq missing or unexpected response); leaving smoke-test user data" >&2
   fi
+
+  case "$(echo "$EXPECT_REAL_PROVIDER" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes)
+      echo "note: MEMCORE_SMOKE_TEST_EXPECT_REAL_PROVIDER=true — ensure API was started with real providers enabled and check admin guardrails/usage separately (keys not printed)"
+      ;;
+  esac
 elif [[ -n "$API_KEY" ]]; then
   # Backward-compatible optional read-only admin probe when key is set without --authenticated.
   url="${BASE_URL}/api/v1/admin/org/summary"
@@ -186,6 +195,7 @@ elif [[ -n "$API_KEY" ]]; then
   code="$(curl -sS -o "$body" -w '%{http_code}' \
     -H "Authorization: Bearer ${API_KEY}" \
     -H "X-Organization-ID: ${ORG_ID}" \
+    -H "X-Memcore-Test-Source: smoke-test" \
     "$url" || true)"
   if [[ "$code" != 2* ]]; then
     echo "error: authenticated GET /api/v1/admin/org/summary returned HTTP $code" >&2

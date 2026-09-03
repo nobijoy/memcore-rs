@@ -96,6 +96,20 @@ const MEMCORE_MAX_MEMORIES_PER_USER: &str = "MEMCORE_MAX_MEMORIES_PER_USER";
 const MEMCORE_MAX_MEMORIES_PER_ORG: &str = "MEMCORE_MAX_MEMORIES_PER_ORG";
 const MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT: &str = "MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT";
 const MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT: &str = "MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT";
+const MEMCORE_PROVIDER_GUARDRAILS_ENABLED: &str = "MEMCORE_PROVIDER_GUARDRAILS_ENABLED";
+const MEMCORE_REAL_PROVIDER_CALLS_ENABLED: &str = "MEMCORE_REAL_PROVIDER_CALLS_ENABLED";
+const MEMCORE_PROVIDER_TEST_MODE: &str = "MEMCORE_PROVIDER_TEST_MODE";
+const MEMCORE_PROVIDER_MAX_CALLS_PER_RUN: &str = "MEMCORE_PROVIDER_MAX_CALLS_PER_RUN";
+const MEMCORE_PROVIDER_MAX_INPUT_CHARS: &str = "MEMCORE_PROVIDER_MAX_INPUT_CHARS";
+const MEMCORE_PROVIDER_MAX_OUTPUT_TOKENS: &str = "MEMCORE_PROVIDER_MAX_OUTPUT_TOKENS";
+const MEMCORE_PROVIDER_MAX_RETRIES_PER_CALL: &str = "MEMCORE_PROVIDER_MAX_RETRIES_PER_CALL";
+const MEMCORE_ALLOW_REAL_PROVIDERS_DURING_LOAD_TESTS: &str =
+    "MEMCORE_ALLOW_REAL_PROVIDERS_DURING_LOAD_TESTS";
+const MEMCORE_BACKGROUND_JOBS_ALLOW_REAL_PROVIDERS: &str =
+    "MEMCORE_BACKGROUND_JOBS_ALLOW_REAL_PROVIDERS";
+const MEMCORE_MULTI_PROVIDER_VALIDATION_ENABLED: &str = "MEMCORE_MULTI_PROVIDER_VALIDATION_ENABLED";
+const MEMCORE_MULTI_PROVIDER_VALIDATION_CONFIRMATION: &str =
+    "MEMCORE_MULTI_PROVIDER_VALIDATION_CONFIRMATION";
 const MEMCORE_BACKGROUND_JOBS_ENABLED: &str = "MEMCORE_BACKGROUND_JOBS_ENABLED";
 const MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS: &str =
     "MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS";
@@ -136,8 +150,38 @@ pub const DEFAULT_REQUEST_ID_HEADER: &str = "X-Request-ID";
 pub const DEFAULT_CONTEXT_CACHE_KEY_PREFIX: &str = "memcore";
 pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 1_048_576;
 pub const DEFAULT_CORS_ALLOWED_METHODS: &[&str] = &["GET", "POST", "PUT", "DELETE", "OPTIONS"];
-pub const DEFAULT_CORS_ALLOWED_HEADERS: &[&str] =
-    &["Authorization", "Content-Type", "X-Organization-ID"];
+pub const DEFAULT_CORS_ALLOWED_HEADERS: &[&str] = &[
+    "Authorization",
+    "Content-Type",
+    "X-Organization-ID",
+    "X-Memcore-Test-Source",
+];
+
+/// Exact confirmation required for `multi_real` provider test mode.
+pub const MULTI_PROVIDER_VALIDATION_CONFIRMATION: &str =
+    "I_UNDERSTAND_THIS_WILL_USE_PROVIDER_CREDITS";
+
+/// Safe upper bound for `MEMCORE_PROVIDER_MAX_RETRIES_PER_CALL`.
+pub const MAX_SAFE_PROVIDER_GUARDRAIL_RETRIES: usize = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderTestMode {
+    MockOnly,
+    SingleReal,
+    MultiReal,
+    Production,
+}
+
+impl ProviderTestMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MockOnly => "mock_only",
+            Self::SingleReal => "single_real",
+            Self::MultiReal => "multi_real",
+            Self::Production => "production",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextCacheBackend {
@@ -403,6 +447,28 @@ pub struct Settings {
     pub daily_provider_request_limit: u64,
     /// Maximum persisted provider tokens per UTC day (`0` means unlimited).
     pub daily_provider_token_limit: u64,
+    /// Enforce provider test-mode / cost guardrails.
+    pub provider_guardrails_enabled: bool,
+    /// Allow real (non-mock) provider network calls when other mode rules pass.
+    pub real_provider_calls_enabled: bool,
+    /// Provider test mode (`mock_only` by default).
+    pub provider_test_mode: ProviderTestMode,
+    /// Max real provider calls per process run (in-memory budget).
+    pub provider_max_calls_per_run: usize,
+    /// Max input characters per guarded provider call.
+    pub provider_max_input_chars: usize,
+    /// Max completion/output tokens for guarded LLM calls.
+    pub provider_max_output_tokens: usize,
+    /// Cap on provider retries when guardrails are enabled.
+    pub provider_max_retries_per_call: usize,
+    /// Allow real providers when request source is load-test.
+    pub allow_real_providers_during_load_tests: bool,
+    /// Allow real providers from background jobs.
+    pub background_jobs_allow_real_providers: bool,
+    /// Enable multi-provider validation (requires confirmation for multi_real).
+    pub multi_provider_validation_enabled: bool,
+    /// Confirmation string for multi-provider credit-using validation.
+    pub multi_provider_validation_confirmation: Option<String>,
     /// Global in-process background job runner toggle.
     pub background_jobs_enabled: bool,
     /// Runner polling interval in seconds.
@@ -653,6 +719,17 @@ impl Default for Settings {
             max_memories_per_org: 0,
             daily_provider_request_limit: 0,
             daily_provider_token_limit: 0,
+            provider_guardrails_enabled: true,
+            real_provider_calls_enabled: false,
+            provider_test_mode: ProviderTestMode::MockOnly,
+            provider_max_calls_per_run: 10,
+            provider_max_input_chars: 4000,
+            provider_max_output_tokens: 300,
+            provider_max_retries_per_call: 1,
+            allow_real_providers_during_load_tests: false,
+            background_jobs_allow_real_providers: false,
+            multi_provider_validation_enabled: false,
+            multi_provider_validation_confirmation: None,
             background_jobs_enabled: false,
             background_job_runner_interval_seconds: 60,
             background_job_org_ids: Vec::new(),
@@ -907,6 +984,48 @@ impl Settings {
             MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT,
             defaults.daily_provider_token_limit,
         )?;
+        let provider_guardrails_enabled = parse_bool(
+            MEMCORE_PROVIDER_GUARDRAILS_ENABLED,
+            defaults.provider_guardrails_enabled,
+        )?;
+        let real_provider_calls_enabled = parse_bool(
+            MEMCORE_REAL_PROVIDER_CALLS_ENABLED,
+            defaults.real_provider_calls_enabled,
+        )?;
+        let provider_test_mode = ProviderTestMode::from_str(&read_env_or(
+            MEMCORE_PROVIDER_TEST_MODE,
+            defaults.provider_test_mode.as_str(),
+        ))?;
+        let provider_max_calls_per_run = parse_usize(
+            MEMCORE_PROVIDER_MAX_CALLS_PER_RUN,
+            defaults.provider_max_calls_per_run,
+        )?;
+        let provider_max_input_chars = parse_usize(
+            MEMCORE_PROVIDER_MAX_INPUT_CHARS,
+            defaults.provider_max_input_chars,
+        )?;
+        let provider_max_output_tokens = parse_usize(
+            MEMCORE_PROVIDER_MAX_OUTPUT_TOKENS,
+            defaults.provider_max_output_tokens,
+        )?;
+        let provider_max_retries_per_call = parse_usize(
+            MEMCORE_PROVIDER_MAX_RETRIES_PER_CALL,
+            defaults.provider_max_retries_per_call,
+        )?;
+        let allow_real_providers_during_load_tests = parse_bool(
+            MEMCORE_ALLOW_REAL_PROVIDERS_DURING_LOAD_TESTS,
+            defaults.allow_real_providers_during_load_tests,
+        )?;
+        let background_jobs_allow_real_providers = parse_bool(
+            MEMCORE_BACKGROUND_JOBS_ALLOW_REAL_PROVIDERS,
+            defaults.background_jobs_allow_real_providers,
+        )?;
+        let multi_provider_validation_enabled = parse_bool(
+            MEMCORE_MULTI_PROVIDER_VALIDATION_ENABLED,
+            defaults.multi_provider_validation_enabled,
+        )?;
+        let multi_provider_validation_confirmation =
+            read_env_optional(MEMCORE_MULTI_PROVIDER_VALIDATION_CONFIRMATION);
         let background_jobs_enabled = parse_bool(
             MEMCORE_BACKGROUND_JOBS_ENABLED,
             defaults.background_jobs_enabled,
@@ -1093,6 +1212,17 @@ impl Settings {
             max_memories_per_org,
             daily_provider_request_limit,
             daily_provider_token_limit,
+            provider_guardrails_enabled,
+            real_provider_calls_enabled,
+            provider_test_mode,
+            provider_max_calls_per_run,
+            provider_max_input_chars,
+            provider_max_output_tokens,
+            provider_max_retries_per_call,
+            allow_real_providers_during_load_tests,
+            background_jobs_allow_real_providers,
+            multi_provider_validation_enabled,
+            multi_provider_validation_confirmation,
             background_jobs_enabled,
             background_job_runner_interval_seconds,
             background_job_org_ids,
@@ -1491,6 +1621,46 @@ impl Settings {
             ));
         }
 
+        if self.provider_max_calls_per_run == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_MAX_CALLS_PER_RUN must be greater than 0".to_string(),
+            ));
+        }
+        if self.provider_max_input_chars == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_MAX_INPUT_CHARS must be greater than 0".to_string(),
+            ));
+        }
+        if self.provider_max_output_tokens == 0 {
+            return Err(MemcoreError::ValidationError(
+                "MEMCORE_PROVIDER_MAX_OUTPUT_TOKENS must be greater than 0".to_string(),
+            ));
+        }
+        if self.provider_max_retries_per_call > MAX_SAFE_PROVIDER_GUARDRAIL_RETRIES {
+            return Err(MemcoreError::ValidationError(format!(
+                "MEMCORE_PROVIDER_MAX_RETRIES_PER_CALL cannot exceed {MAX_SAFE_PROVIDER_GUARDRAIL_RETRIES}"
+            )));
+        }
+        if self.provider_test_mode == ProviderTestMode::MultiReal {
+            if !self.multi_provider_validation_enabled {
+                return Err(MemcoreError::ValidationError(
+                    "MEMCORE_MULTI_PROVIDER_VALIDATION_ENABLED must be true when MEMCORE_PROVIDER_TEST_MODE=multi_real"
+                        .to_string(),
+                ));
+            }
+            let confirmed = self
+                .multi_provider_validation_confirmation
+                .as_deref()
+                .map(str::trim)
+                == Some(MULTI_PROVIDER_VALIDATION_CONFIRMATION);
+            if !confirmed {
+                return Err(MemcoreError::ValidationError(
+                    "MEMCORE_MULTI_PROVIDER_VALIDATION_CONFIRMATION must be exactly I_UNDERSTAND_THIS_WILL_USE_PROVIDER_CREDITS for multi_real mode"
+                        .to_string(),
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -1870,6 +2040,22 @@ impl FromStr for AuthMode {
     }
 }
 
+impl FromStr for ProviderTestMode {
+    type Err = MemcoreError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "mock_only" => Ok(Self::MockOnly),
+            "single_real" => Ok(Self::SingleReal),
+            "multi_real" => Ok(Self::MultiReal),
+            "production" => Ok(Self::Production),
+            _ => Err(MemcoreError::ValidationError(format!(
+                "Invalid MEMCORE_PROVIDER_TEST_MODE value: {value} (expected mock_only|single_real|multi_real|production)"
+            ))),
+        }
+    }
+}
+
 impl FromStr for LogFormat {
     type Err = MemcoreError;
 
@@ -1906,7 +2092,10 @@ mod tests {
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
 
-    use super::{Environment, Settings, StorageMode, VectorBackend};
+    use super::{
+        Environment, MAX_SAFE_PROVIDER_GUARDRAIL_RETRIES, MULTI_PROVIDER_VALIDATION_CONFIRMATION,
+        ProviderTestMode, Settings, StorageMode, VectorBackend,
+    };
 
     const ENV_KEYS: &[&str] = &[
         "MEMCORE_ENV",
@@ -1993,6 +2182,17 @@ mod tests {
         "MEMCORE_MAX_MEMORIES_PER_ORG",
         "MEMCORE_DAILY_PROVIDER_REQUEST_LIMIT",
         "MEMCORE_DAILY_PROVIDER_TOKEN_LIMIT",
+        "MEMCORE_PROVIDER_GUARDRAILS_ENABLED",
+        "MEMCORE_REAL_PROVIDER_CALLS_ENABLED",
+        "MEMCORE_PROVIDER_TEST_MODE",
+        "MEMCORE_PROVIDER_MAX_CALLS_PER_RUN",
+        "MEMCORE_PROVIDER_MAX_INPUT_CHARS",
+        "MEMCORE_PROVIDER_MAX_OUTPUT_TOKENS",
+        "MEMCORE_PROVIDER_MAX_RETRIES_PER_CALL",
+        "MEMCORE_ALLOW_REAL_PROVIDERS_DURING_LOAD_TESTS",
+        "MEMCORE_BACKGROUND_JOBS_ALLOW_REAL_PROVIDERS",
+        "MEMCORE_MULTI_PROVIDER_VALIDATION_ENABLED",
+        "MEMCORE_MULTI_PROVIDER_VALIDATION_CONFIRMATION",
         "MEMCORE_BACKGROUND_JOBS_ENABLED",
         "MEMCORE_BACKGROUND_JOB_RUNNER_INTERVAL_SECONDS",
         "MEMCORE_BACKGROUND_JOB_ORG_IDS",
@@ -2144,7 +2344,12 @@ mod tests {
         );
         assert_eq!(
             settings.cors_allowed_headers,
-            vec!["Authorization", "Content-Type", "X-Organization-ID"]
+            vec![
+                "Authorization",
+                "Content-Type",
+                "X-Organization-ID",
+                "X-Memcore-Test-Source",
+            ]
         );
         assert!(settings.cors_exposed_headers.is_empty());
         assert!(!settings.cors_allow_credentials);
@@ -3769,5 +3974,87 @@ mod tests {
                 .to_string()
                 .contains("Invalid MEMCORE_VECTOR_BACKEND value")
         );
+    }
+
+    #[test]
+    fn provider_guardrails_defaults() {
+        let settings = Settings::default();
+        assert!(settings.provider_guardrails_enabled);
+        assert!(!settings.real_provider_calls_enabled);
+        assert_eq!(settings.provider_test_mode, ProviderTestMode::MockOnly);
+        assert_eq!(settings.provider_max_calls_per_run, 10);
+        assert_eq!(settings.provider_max_input_chars, 4000);
+        assert_eq!(settings.provider_max_output_tokens, 300);
+        assert_eq!(settings.provider_max_retries_per_call, 1);
+        assert!(!settings.allow_real_providers_during_load_tests);
+        assert!(!settings.background_jobs_allow_real_providers);
+        assert!(!settings.multi_provider_validation_enabled);
+        assert!(settings.multi_provider_validation_confirmation.is_none());
+    }
+
+    #[test]
+    fn invalid_provider_test_mode_fails() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_TEST_MODE", "unsafe_all");
+        }
+        let error = Settings::from_env().expect_err("invalid test mode should fail");
+        assert_eq!(error.code(), "validation_error");
+        assert!(error.to_string().contains("MEMCORE_PROVIDER_TEST_MODE"));
+    }
+
+    #[test]
+    fn provider_guardrail_limits_must_be_positive() {
+        let mut settings = Settings::default();
+        settings.provider_max_calls_per_run = 0;
+        assert!(settings.validate().is_err());
+        settings = Settings::default();
+        settings.provider_max_input_chars = 0;
+        assert!(settings.validate().is_err());
+        settings = Settings::default();
+        settings.provider_max_output_tokens = 0;
+        assert!(settings.validate().is_err());
+        settings = Settings::default();
+        settings.provider_max_retries_per_call = MAX_SAFE_PROVIDER_GUARDRAIL_RETRIES + 1;
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn multi_real_requires_confirmation() {
+        let mut settings = Settings::default();
+        settings.provider_test_mode = ProviderTestMode::MultiReal;
+        settings.multi_provider_validation_enabled = true;
+        assert!(settings.validate().is_err());
+        settings.multi_provider_validation_confirmation =
+            Some(MULTI_PROVIDER_VALIDATION_CONFIRMATION.to_string());
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn loads_provider_guardrail_env() {
+        let _lock = env_test_lock()
+            .lock()
+            .expect("env test lock should not be poisoned");
+        let _guard = EnvGuard::new();
+        clear_env();
+        unsafe {
+            std::env::set_var("MEMCORE_PROVIDER_TEST_MODE", "single_real");
+            std::env::set_var("MEMCORE_REAL_PROVIDER_CALLS_ENABLED", "true");
+            std::env::set_var("MEMCORE_PROVIDER_MAX_CALLS_PER_RUN", "6");
+            std::env::set_var("MEMCORE_PROVIDER_MAX_INPUT_CHARS", "500");
+            std::env::set_var("MEMCORE_PROVIDER_MAX_OUTPUT_TOKENS", "256");
+            std::env::set_var("MEMCORE_PROVIDER_MAX_RETRIES_PER_CALL", "0");
+        }
+        let settings = Settings::from_env().expect("guardrail env should load");
+        assert_eq!(settings.provider_test_mode, ProviderTestMode::SingleReal);
+        assert!(settings.real_provider_calls_enabled);
+        assert_eq!(settings.provider_max_calls_per_run, 6);
+        assert_eq!(settings.provider_max_input_chars, 500);
+        assert_eq!(settings.provider_max_output_tokens, 256);
+        assert_eq!(settings.provider_max_retries_per_call, 0);
     }
 }

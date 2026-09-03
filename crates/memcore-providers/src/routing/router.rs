@@ -5,6 +5,10 @@ use std::time::Instant;
 use memcore_common::{MemcoreError, MemcoreResult};
 
 use crate::circuit_breaker::{CircuitState, ProviderCircuitBreaker};
+use crate::guardrails::{
+    ProviderCallGuardInput, ProviderCallSource, ProviderCallSourceSlot, ProviderGuardrailEnforcer,
+    is_real_provider_name,
+};
 use crate::policy::{ProviderExecutionPolicy, execute_provider_call, is_provider_health_failure};
 use crate::usage::{
     ProviderCallStatus, ProviderUsageAttributionSlot, ProviderUsageCapability, ProviderUsageEvent,
@@ -45,6 +49,8 @@ pub struct ProviderFallbackRouter {
     usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
     attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
+    guardrails: Option<Arc<ProviderGuardrailEnforcer>>,
+    call_source_slot: Option<Arc<ProviderCallSourceSlot>>,
 }
 
 impl ProviderFallbackRouter {
@@ -56,6 +62,28 @@ impl ProviderFallbackRouter {
         attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
         cost_tracking_enabled: bool,
     ) -> Self {
+        Self::with_guardrails(
+            circuit_breaker,
+            policy,
+            metrics,
+            usage_recorder,
+            attribution_slot,
+            cost_tracking_enabled,
+            None,
+            None,
+        )
+    }
+
+    pub fn with_guardrails(
+        circuit_breaker: Arc<ProviderCircuitBreaker>,
+        policy: ProviderExecutionPolicy,
+        metrics: Option<Arc<ProviderRoutingMetrics>>,
+        usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
+        cost_tracking_enabled: bool,
+        guardrails: Option<Arc<ProviderGuardrailEnforcer>>,
+        call_source_slot: Option<Arc<ProviderCallSourceSlot>>,
+    ) -> Self {
         Self {
             circuit_breaker,
             policy,
@@ -63,6 +91,8 @@ impl ProviderFallbackRouter {
             usage_recorder,
             attribution_slot,
             cost_tracking_enabled,
+            guardrails,
+            call_source_slot,
         }
     }
 
@@ -132,6 +162,8 @@ impl ProviderFallbackRouter {
         operation_name: &'static str,
         fallback_enabled: bool,
         candidates: &[ProviderCandidate<P>],
+        input_char_count: usize,
+        requested_output_tokens: Option<usize>,
         mut call: F,
     ) -> MemcoreResult<T>
     where
@@ -154,12 +186,44 @@ impl ProviderFallbackRouter {
         let usage_capability = Self::usage_capability(capability);
         let mut last_error: Option<MemcoreError> = None;
         let mut attempted_fallback = false;
+        let call_source = self
+            .call_source_slot
+            .as_ref()
+            .map(|slot| slot.snapshot())
+            .unwrap_or(ProviderCallSource::ApiRequest);
 
         for (index, candidate) in providers_to_try.iter().enumerate() {
             let provider_id = ProviderId::new(candidate.provider_id.name.clone(), capability);
             let key = circuit_key(&provider_id, operation_name);
             let fallback_used = index > 0;
             let model_name = candidate.model_name.as_deref();
+
+            if let Some(enforcer) = &self.guardrails {
+                let is_real = is_real_provider_name(&provider_id.name);
+                if let Err(error) = enforcer.decide_or_error(ProviderCallGuardInput {
+                    provider_name: provider_id.name.clone(),
+                    model_name: model_name.unwrap_or("").to_string(),
+                    operation: operation_name.to_string(),
+                    source: call_source,
+                    input_char_count,
+                    requested_output_tokens,
+                    is_real_provider: is_real,
+                }) {
+                    self.record_usage(
+                        usage_capability,
+                        operation_name,
+                        &provider_id.name,
+                        model_name,
+                        ProviderCallStatus::Error,
+                        candidate.token_usage_slot.as_ref(),
+                        0,
+                        fallback_used,
+                        false,
+                        false,
+                    );
+                    return Err(error);
+                }
+            }
 
             if let Err(error) = self.circuit_breaker.check_allow(&key) {
                 if let Some(metrics) = &self.metrics {
@@ -379,6 +443,8 @@ mod tests {
                 "test_op",
                 true,
                 &[primary, fallback],
+                0,
+                None,
                 |provider, _slot| async move {
                     provider.fetch_add(1, Ordering::SeqCst);
                     Ok(7)
@@ -405,6 +471,8 @@ mod tests {
                 "test_op",
                 true,
                 &[primary, fallback],
+                0,
+                None,
                 |provider, _slot| async move {
                     if Arc::as_ptr(&provider) == primary_ptr {
                         Err(MemcoreError::ProviderError(
@@ -436,6 +504,8 @@ mod tests {
                 "test_op",
                 true,
                 &[primary, fallback],
+                0,
+                None,
                 |_provider, _slot| async move {
                     Err::<i32, _>(MemcoreError::ValidationError("bad".to_string()))
                 },
@@ -495,6 +565,8 @@ mod tests {
                 "test_op",
                 true,
                 &[primary, fallback],
+                0,
+                None,
                 |provider, _slot| async move {
                     provider.fetch_add(1, Ordering::SeqCst);
                     if Arc::as_ptr(&provider) == primary_ptr {
@@ -526,6 +598,8 @@ mod tests {
                 "test_op",
                 false,
                 &[primary, fallback],
+                0,
+                None,
                 |_provider, _slot| async move {
                     Err::<(), _>(MemcoreError::ProviderError(
                         "OpenAI API error (500): internal".to_string(),
@@ -552,6 +626,8 @@ mod tests {
                 "test_op",
                 true,
                 &[primary, fallback],
+                0,
+                None,
                 |provider, _slot| async move {
                     if Arc::as_ptr(&provider) == primary_ptr {
                         Err(MemcoreError::ProviderError(
@@ -585,6 +661,8 @@ mod tests {
                 "test_op",
                 true,
                 &[primary, fallback],
+                0,
+                None,
                 |_provider, _slot| async move {
                     Err::<(), _>(MemcoreError::ValidationError("bad".to_string()))
                 },

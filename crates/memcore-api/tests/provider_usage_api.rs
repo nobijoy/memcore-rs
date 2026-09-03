@@ -202,3 +202,54 @@ async fn provider_usage_invalid_capability_returns_validation_error() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn provider_guardrails_status_requires_auth_and_is_safe() {
+    let settings = Settings::default();
+    let usage = InMemoryProviderUsageRecorder::new();
+    let wiring = ProviderWiring::for_tests(usage.clone());
+    let engine =
+        Arc::new(create_mock_memory_engine_with_wiring(&settings, &wiring).expect("engine"));
+    let app = create_app(AppState::with_memory_engine_and_provider_usage(
+        settings, engine, usage,
+    ));
+
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/admin/providers/guardrails")
+                .header("X-Organization-ID", ORG_ID)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(get_request(
+            "/api/v1/admin/providers/guardrails",
+            Some(ORG_ID),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["enabled"], true);
+    assert_eq!(json["real_provider_calls_enabled"], false);
+    assert_eq!(json["test_mode"], "mock_only");
+    assert!(json["remaining_calls"].as_u64().unwrap_or(0) >= 1);
+    let text = String::from_utf8_lossy(&body);
+    assert!(!text.to_ascii_lowercase().contains("sk-"));
+    assert!(!text.contains("OPENAI_API_KEY"));
+    assert!(!text.contains("prompt"));
+}

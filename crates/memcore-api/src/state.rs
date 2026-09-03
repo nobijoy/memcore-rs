@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::metrics::MetricsExporter;
 use crate::middleware::RateLimiter;
 use crate::observability::Metrics;
+use crate::provider_guardrails::create_provider_guardrails;
 use chrono::{DateTime, Utc};
 use memcore_common::{MemcoreError, MemcoreResult};
 use memcore_config::{
@@ -20,10 +21,12 @@ use memcore_core::{
 };
 use memcore_providers::{
     CircuitBreakerConfig, MockEmbeddingProvider, MockLlmProvider, OpenAiClient,
-    OpenAiEmbeddingProvider, OpenAiLlmProvider, PersistentProviderUsageRecorder, ProviderCandidate,
-    ProviderCapability, ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderId,
-    ProviderRoutingMetrics, ProviderUsageRecorder, build_resilient_embedding_from_candidates,
-    build_resilient_llm_from_candidates, default_embedding_dimensions_for_model,
+    OpenAiEmbeddingProvider, OpenAiLlmProvider, PersistentProviderUsageRecorder,
+    ProviderCallSource, ProviderCallSourceSlot, ProviderCandidate, ProviderCapability,
+    ProviderCircuitBreaker, ProviderExecutionPolicy, ProviderGuardrailEnforcer, ProviderId,
+    ProviderRoutingMetrics, ProviderUsageRecorder,
+    build_resilient_embedding_from_candidates_with_guardrails,
+    build_resilient_llm_from_candidates_with_guardrails, default_embedding_dimensions_for_model,
     new_token_usage_slot, provider_usage_recorder, validate_embedding_provider_name,
     validate_llm_provider_name, validate_provider_fallback_order,
     validate_summarizer_provider_name,
@@ -67,6 +70,8 @@ pub struct ProviderWiring {
     pub usage_recorder: Arc<dyn ProviderUsageRecorder>,
     pub usage_store: Option<Arc<dyn ProviderUsageStore>>,
     pub attribution_slot: Arc<ProviderUsageAttributionSlot>,
+    pub guardrails: Arc<ProviderGuardrailEnforcer>,
+    pub call_source_slot: Arc<ProviderCallSourceSlot>,
 }
 
 impl ProviderWiring {
@@ -84,25 +89,35 @@ impl ProviderWiring {
                 inner
             };
         let usage_recorder = crate::metrics::PrometheusProviderUsageRecorder::wrap(usage_recorder);
+        let (guardrails, call_source_slot) = create_provider_guardrails(settings)?;
 
         Ok(Self {
             usage_recorder,
             usage_store,
             attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
+            guardrails,
+            call_source_slot,
         })
     }
 
     pub fn for_tests(usage_recorder: Arc<dyn ProviderUsageRecorder>) -> Self {
+        let settings = Settings::default();
+        let (guardrails, call_source_slot) =
+            create_provider_guardrails(&settings).expect("default provider guardrails");
         Self {
             usage_recorder,
             usage_store: None,
             attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
+            guardrails,
+            call_source_slot,
         }
     }
 
     /// Synchronous wiring for mock-backend tests (no database I/O).
     pub fn for_mock_tests(settings: &Settings) -> Self {
         let inner = provider_usage_recorder(settings.provider_usage_metrics_enabled);
+        let (guardrails, call_source_slot) =
+            create_provider_guardrails(settings).expect("provider guardrails for mock tests");
         if settings.provider_usage_persistence_enabled {
             let store = Arc::new(MockProviderUsageStore::new());
             let usage_recorder = PersistentProviderUsageRecorder::new(inner, Some(store.clone()));
@@ -112,9 +127,17 @@ impl ProviderWiring {
                 ),
                 usage_store: Some(store),
                 attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
+                guardrails,
+                call_source_slot,
             }
         } else {
-            Self::for_tests(crate::metrics::PrometheusProviderUsageRecorder::wrap(inner))
+            Self {
+                usage_recorder: crate::metrics::PrometheusProviderUsageRecorder::wrap(inner),
+                usage_store: None,
+                attribution_slot: Arc::new(ProviderUsageAttributionSlot::new()),
+                guardrails,
+                call_source_slot,
+            }
         }
     }
 }
@@ -387,6 +410,8 @@ pub struct AppState {
     pub metrics_exporter: MetricsExporter,
     pub provider_usage: Arc<dyn ProviderUsageRecorder>,
     pub provider_usage_store: Option<Arc<dyn ProviderUsageStore>>,
+    pub provider_guardrails: Arc<ProviderGuardrailEnforcer>,
+    pub call_source_slot: Arc<ProviderCallSourceSlot>,
     pub org_plan_store: Arc<dyn OrgPlanStore>,
     pub background_jobs: Arc<BackgroundJobRunner>,
     pub background_job_run_store: Option<Arc<dyn BackgroundJobRunStore>>,
@@ -432,6 +457,7 @@ impl AppState {
             background_job_lock_store.clone(),
             background_job_lock_owner_id.clone(),
             shutdown_token.child_token(),
+            wiring.call_source_slot.clone(),
         ));
         if settings.background_jobs_enabled {
             let runner = background_jobs.clone();
@@ -450,6 +476,8 @@ impl AppState {
             metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage: wiring.usage_recorder,
             provider_usage_store: wiring.usage_store,
+            provider_guardrails: wiring.guardrails,
+            call_source_slot: wiring.call_source_slot,
             org_plan_store,
             background_jobs,
             background_job_run_store,
@@ -500,6 +528,7 @@ impl AppState {
                 background_job_lock_store.clone(),
                 background_job_lock_owner_id.clone(),
                 ShutdownToken::new(),
+                wiring.call_source_slot.clone(),
             ));
             Self {
                 started_at: Utc::now(),
@@ -511,6 +540,8 @@ impl AppState {
                 metrics_exporter: MetricsExporter::from_settings(&settings),
                 provider_usage: wiring.usage_recorder,
                 provider_usage_store: wiring.usage_store,
+                provider_guardrails: wiring.guardrails,
+                call_source_slot: wiring.call_source_slot,
                 org_plan_store,
                 background_jobs,
                 background_job_run_store,
@@ -538,6 +569,12 @@ impl AppState {
             metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage: provider_usage_recorder(settings.provider_usage_metrics_enabled),
             provider_usage_store: None,
+            provider_guardrails: create_provider_guardrails(&settings)
+                .expect("provider guardrails")
+                .0,
+            call_source_slot: create_provider_guardrails(&settings)
+                .expect("provider guardrails")
+                .1,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
             background_jobs: Arc::new(create_background_job_runner(
                 &settings,
@@ -546,6 +583,9 @@ impl AppState {
                 None,
                 None,
                 ShutdownToken::new(),
+                create_provider_guardrails(&settings)
+                    .expect("provider guardrails")
+                    .1,
             )),
             background_job_run_store: None,
             background_job_lock_store: None,
@@ -570,6 +610,12 @@ impl AppState {
             metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage,
             provider_usage_store: None,
+            provider_guardrails: create_provider_guardrails(&settings)
+                .expect("provider guardrails")
+                .0,
+            call_source_slot: create_provider_guardrails(&settings)
+                .expect("provider guardrails")
+                .1,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
             background_jobs: Arc::new(create_background_job_runner(
                 &settings,
@@ -578,6 +624,9 @@ impl AppState {
                 None,
                 None,
                 ShutdownToken::new(),
+                create_provider_guardrails(&settings)
+                    .expect("provider guardrails")
+                    .1,
             )),
             background_job_run_store: None,
             background_job_lock_store: None,
@@ -603,6 +652,12 @@ impl AppState {
             metrics_exporter: MetricsExporter::from_settings(&settings),
             provider_usage,
             provider_usage_store,
+            provider_guardrails: create_provider_guardrails(&settings)
+                .expect("provider guardrails")
+                .0,
+            call_source_slot: create_provider_guardrails(&settings)
+                .expect("provider guardrails")
+                .1,
             org_plan_store: Arc::new(MockOrgPlanStore::new()),
             background_jobs: Arc::new(create_background_job_runner(
                 &settings,
@@ -611,6 +666,9 @@ impl AppState {
                 None,
                 None,
                 ShutdownToken::new(),
+                create_provider_guardrails(&settings)
+                    .expect("provider guardrails")
+                    .1,
             )),
             background_job_run_store: None,
             background_job_lock_store: None,
@@ -731,25 +789,35 @@ fn create_background_job_runner(
     background_job_lock_store: Option<Arc<dyn BackgroundJobLockStore>>,
     background_job_lock_owner_id: Option<String>,
     shutdown_token: ShutdownToken,
+    call_source_slot: Arc<ProviderCallSourceSlot>,
 ) -> BackgroundJobRunner {
     let org_ids = settings.background_job_org_ids.clone();
     let jobs: Vec<Arc<dyn BackgroundJob>> = vec![
-        Arc::new(MemoryUsageSnapshotJob::new(
-            memory_engine.clone(),
-            settings.memory_usage_snapshot_job_enabled,
-            Duration::from_secs(settings.memory_usage_snapshot_job_interval_seconds),
-            org_ids.clone(),
+        Arc::new(CallSourceTaggedJob::new(
+            Arc::new(MemoryUsageSnapshotJob::new(
+                memory_engine.clone(),
+                settings.memory_usage_snapshot_job_enabled,
+                Duration::from_secs(settings.memory_usage_snapshot_job_interval_seconds),
+                org_ids.clone(),
+            )),
+            call_source_slot.clone(),
         )),
-        Arc::new(ProviderUsageRetentionJob::new(
-            memory_engine,
-            settings.provider_usage_retention_job_enabled,
-            Duration::from_secs(settings.provider_usage_retention_job_interval_seconds),
-            org_ids,
-            settings.provider_usage_retention_days,
+        Arc::new(CallSourceTaggedJob::new(
+            Arc::new(ProviderUsageRetentionJob::new(
+                memory_engine,
+                settings.provider_usage_retention_job_enabled,
+                Duration::from_secs(settings.provider_usage_retention_job_interval_seconds),
+                org_ids,
+                settings.provider_usage_retention_days,
+            )),
+            call_source_slot.clone(),
         )),
-        Arc::new(MemoryRetentionJob::new(
-            settings.memory_retention_job_enabled,
-            Duration::from_secs(settings.memory_retention_job_interval_seconds),
+        Arc::new(CallSourceTaggedJob::new(
+            Arc::new(MemoryRetentionJob::new(
+                settings.memory_retention_job_enabled,
+                Duration::from_secs(settings.memory_retention_job_interval_seconds),
+            )),
+            call_source_slot,
         )),
     ];
 
@@ -773,6 +841,39 @@ fn create_background_job_runner(
         shutdown_token,
         Duration::from_secs(settings.background_job_shutdown_timeout_seconds),
     )
+}
+
+struct CallSourceTaggedJob {
+    inner: Arc<dyn BackgroundJob>,
+    slot: Arc<ProviderCallSourceSlot>,
+}
+
+impl CallSourceTaggedJob {
+    fn new(inner: Arc<dyn BackgroundJob>, slot: Arc<ProviderCallSourceSlot>) -> Self {
+        Self { inner, slot }
+    }
+}
+
+#[async_trait::async_trait]
+impl BackgroundJob for CallSourceTaggedJob {
+    fn kind(&self) -> memcore_core::BackgroundJobKind {
+        self.inner.kind()
+    }
+
+    fn interval(&self) -> Duration {
+        self.inner.interval()
+    }
+
+    fn enabled(&self) -> bool {
+        self.inner.enabled()
+    }
+
+    async fn run_once(&self) -> MemcoreResult<memcore_core::BackgroundJobRun> {
+        self.slot.set(ProviderCallSource::BackgroundJob);
+        let result = self.inner.run_once().await;
+        self.slot.clear();
+        result
+    }
 }
 
 fn create_rate_limiter(settings: &Settings) -> Arc<RateLimiter> {
@@ -805,11 +906,15 @@ pub async fn create_memory_engine(
         settings,
         wiring.usage_recorder.clone(),
         wiring.attribution_slot.clone(),
+        wiring.guardrails.clone(),
+        wiring.call_source_slot.clone(),
     )?;
     let embedding_provider = create_embedding_provider(
         settings,
         wiring.usage_recorder.clone(),
         wiring.attribution_slot.clone(),
+        wiring.guardrails.clone(),
+        wiring.call_source_slot.clone(),
     )?;
     let vector_store = create_vector_store(settings, embedding_provider.dimensions()).await?;
 
@@ -1056,9 +1161,16 @@ fn require_postgres_url(settings: &Settings) -> MemcoreResult<String> {
 }
 
 fn provider_execution_policy(settings: &Settings) -> MemcoreResult<ProviderExecutionPolicy> {
+    let mut timeout_seconds = settings.provider_timeout_seconds;
+    let mut max_retries = settings.provider_max_retries;
+    if settings.provider_guardrails_enabled {
+        // Precedence: when guardrails are enabled, use the stricter (min) caps.
+        timeout_seconds = timeout_seconds.min(settings.provider_timeout_seconds);
+        max_retries = max_retries.min(settings.provider_max_retries_per_call);
+    }
     ProviderExecutionPolicy::from_config(
-        settings.provider_timeout_seconds,
-        settings.provider_max_retries,
+        timeout_seconds,
+        max_retries,
         settings.provider_initial_backoff_ms,
         settings.provider_max_backoff_ms,
         settings.provider_backoff_multiplier,
@@ -1081,6 +1193,8 @@ fn create_llm_provider(
     settings: &Settings,
     usage_recorder: Arc<dyn ProviderUsageRecorder>,
     attribution_slot: Arc<ProviderUsageAttributionSlot>,
+    guardrails: Arc<ProviderGuardrailEnforcer>,
+    call_source_slot: Arc<ProviderCallSourceSlot>,
 ) -> MemcoreResult<Arc<dyn LlmProvider>> {
     let runtime = provider_runtime(settings)?;
     let llm_names = if settings.provider_fallback_enabled {
@@ -1114,7 +1228,7 @@ fn create_llm_provider(
         settings,
     )?;
 
-    Ok(build_resilient_llm_from_candidates(
+    Ok(build_resilient_llm_from_candidates_with_guardrails(
         providers,
         summarizer_providers,
         runtime.circuit_breaker,
@@ -1124,6 +1238,8 @@ fn create_llm_provider(
         Some(usage_recorder),
         Some(attribution_slot),
         settings.provider_cost_tracking_enabled,
+        Some(guardrails),
+        Some(call_source_slot),
     ))
 }
 
@@ -1131,6 +1247,8 @@ fn create_embedding_provider(
     settings: &Settings,
     usage_recorder: Arc<dyn ProviderUsageRecorder>,
     attribution_slot: Arc<ProviderUsageAttributionSlot>,
+    guardrails: Arc<ProviderGuardrailEnforcer>,
+    call_source_slot: Arc<ProviderCallSourceSlot>,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
     let runtime = provider_runtime(settings)?;
     let names = if settings.provider_fallback_enabled {
@@ -1145,7 +1263,7 @@ fn create_embedding_provider(
 
     let providers = embedding_candidates_from_names(&names, settings)?;
 
-    build_resilient_embedding_from_candidates(
+    build_resilient_embedding_from_candidates_with_guardrails(
         providers,
         runtime.circuit_breaker,
         runtime.policy,
@@ -1154,6 +1272,8 @@ fn create_embedding_provider(
         Some(usage_recorder),
         Some(attribution_slot),
         settings.provider_cost_tracking_enabled,
+        Some(guardrails),
+        Some(call_source_slot),
     )
 }
 
@@ -1264,11 +1384,15 @@ pub fn create_mock_memory_engine_with_wiring_and_org_plan_store(
                 settings,
                 wiring.usage_recorder.clone(),
                 wiring.attribution_slot.clone(),
+                wiring.guardrails.clone(),
+                wiring.call_source_slot.clone(),
             )?,
             create_embedding_provider(
                 settings,
                 wiring.usage_recorder.clone(),
                 wiring.attribution_slot.clone(),
+                wiring.guardrails.clone(),
+                wiring.call_source_slot.clone(),
             )?,
         )
         .with_pii_redaction(settings.enable_pii_redaction)

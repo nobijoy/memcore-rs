@@ -45,3 +45,9 @@ reports/perf/*.txt
 reports/perf/*.html
 reports/perf/*.csv
 !reports/perf/.gitkeep
+
+# Local Docker staging backup dry-run artifacts (never commit dumps)
+reports/staging-backups/*
+!reports/staging-backups/.gitkeep
+reports/provider-smoke/*
+!reports/provider-smoke/.gitkeep

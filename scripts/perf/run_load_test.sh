@@ -12,6 +12,8 @@
 #   MEMCORE_ORG_ID     (default org_perf)
 #   MEMCORE_ALLOW_STRESS_TEST=true  (required for stress)
 #
+# IMPORTANT: Load tests must use mock providers. Real providers are forbidden by
+# default (API blocks X-Memcore-Test-Source: load-test unless explicitly allowed).
 # Never prints the API key. Does not call forget-user / restore / import-export.
 
 set -euo pipefail

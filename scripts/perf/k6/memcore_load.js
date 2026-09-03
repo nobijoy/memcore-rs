@@ -1,5 +1,9 @@
 // memcore API load test foundation (k6).
 //
+// IMPORTANT: Use mock providers only. Real providers are blocked by default when
+// X-Memcore-Test-Source: load-test is set (unless MEMCORE_ALLOW_REAL_PROVIDERS_DURING_LOAD_TESTS=true).
+// Do not enable real providers for stress/baseline load tests.
+//
 // Usage:
 //   MEMCORE_BASE_URL=http://localhost:8080 \
 //   MEMCORE_API_KEY=... \
@@ -83,6 +87,7 @@ function authHeaders() {
   return {
     Authorization: `Bearer ${API_KEY}`,
     "X-Organization-ID": ORG_ID,
+    "X-Memcore-Test-Source": "load-test",
     "Content-Type": "application/json",
   };
 }

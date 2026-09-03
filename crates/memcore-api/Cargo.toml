@@ -61,6 +61,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 utoipa = { version = "5", features = ["chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+async-trait = "0.1"
 
 [dev-dependencies]
 http-body-util = "0.1"

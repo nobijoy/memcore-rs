@@ -8,7 +8,10 @@ use crate::routing::{ProviderCandidate, ProviderCapability, ProviderId, Provider
 use crate::traits::{EmbeddingProvider, LlmProvider};
 use crate::usage::{NoopProviderUsageRecorder, ProviderUsageRecorder, new_token_usage_slot};
 
-use super::{build_resilient_embedding_provider, build_resilient_llm_provider};
+use super::{
+    build_resilient_embedding_provider, build_resilient_embedding_provider_with_guardrails,
+    build_resilient_llm_provider, build_resilient_llm_provider_with_guardrails,
+};
 
 pub use super::{
     ResilientEmbeddingProvider as PolicyEmbeddingProvider,
@@ -91,7 +94,7 @@ pub fn build_resilient_llm_from_candidates(
     attribution_slot: Option<Arc<crate::usage::ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> Arc<dyn LlmProvider> {
-    build_resilient_llm_provider(
+    build_resilient_llm_from_candidates_with_guardrails(
         providers,
         summarizer_providers,
         circuit_breaker,
@@ -101,6 +104,36 @@ pub fn build_resilient_llm_from_candidates(
         usage_recorder,
         attribution_slot,
         cost_tracking_enabled,
+        None,
+        None,
+    )
+}
+
+pub fn build_resilient_llm_from_candidates_with_guardrails(
+    providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
+    summarizer_providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
+    circuit_breaker: Arc<ProviderCircuitBreaker>,
+    policy: ProviderExecutionPolicy,
+    fallback_enabled: bool,
+    metrics: Option<Arc<ProviderRoutingMetrics>>,
+    usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<crate::usage::ProviderUsageAttributionSlot>>,
+    cost_tracking_enabled: bool,
+    guardrails: Option<Arc<crate::guardrails::ProviderGuardrailEnforcer>>,
+    call_source_slot: Option<Arc<crate::guardrails::ProviderCallSourceSlot>>,
+) -> Arc<dyn LlmProvider> {
+    build_resilient_llm_provider_with_guardrails(
+        providers,
+        summarizer_providers,
+        circuit_breaker,
+        policy,
+        fallback_enabled,
+        metrics,
+        usage_recorder,
+        attribution_slot,
+        cost_tracking_enabled,
+        guardrails,
+        call_source_slot,
     )
 }
 
@@ -114,7 +147,7 @@ pub fn build_resilient_embedding_from_candidates(
     attribution_slot: Option<Arc<crate::usage::ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
-    build_resilient_embedding_provider(
+    build_resilient_embedding_from_candidates_with_guardrails(
         providers,
         circuit_breaker,
         policy,
@@ -123,5 +156,33 @@ pub fn build_resilient_embedding_from_candidates(
         usage_recorder,
         attribution_slot,
         cost_tracking_enabled,
+        None,
+        None,
+    )
+}
+
+pub fn build_resilient_embedding_from_candidates_with_guardrails(
+    providers: Vec<ProviderCandidate<Arc<dyn EmbeddingProvider>>>,
+    circuit_breaker: Arc<ProviderCircuitBreaker>,
+    policy: ProviderExecutionPolicy,
+    fallback_enabled: bool,
+    metrics: Option<Arc<ProviderRoutingMetrics>>,
+    usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<crate::usage::ProviderUsageAttributionSlot>>,
+    cost_tracking_enabled: bool,
+    guardrails: Option<Arc<crate::guardrails::ProviderGuardrailEnforcer>>,
+    call_source_slot: Option<Arc<crate::guardrails::ProviderCallSourceSlot>>,
+) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
+    build_resilient_embedding_provider_with_guardrails(
+        providers,
+        circuit_breaker,
+        policy,
+        fallback_enabled,
+        metrics,
+        usage_recorder,
+        attribution_slot,
+        cost_tracking_enabled,
+        guardrails,
+        call_source_slot,
     )
 }

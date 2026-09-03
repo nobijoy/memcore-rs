@@ -7,6 +7,7 @@ use memcore_common::MemcoreResult;
 use memcore_core::{CandidateFact, FactOperationDecision};
 
 use crate::circuit_breaker::ProviderCircuitBreaker;
+use crate::guardrails::{ProviderCallSourceSlot, ProviderGuardrailEnforcer};
 use crate::inputs::{FactClassificationInput, FactExtractionInput, SummarizationInput};
 use crate::policy::ProviderExecutionPolicy;
 use crate::routing::{
@@ -39,16 +40,46 @@ impl ResilientLlmProvider {
         attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
         cost_tracking_enabled: bool,
     ) -> Self {
+        Self::with_guardrails(
+            providers,
+            summarizer_providers,
+            circuit_breaker,
+            policy,
+            fallback_enabled,
+            metrics,
+            usage_recorder,
+            attribution_slot,
+            cost_tracking_enabled,
+            None,
+            None,
+        )
+    }
+
+    pub fn with_guardrails(
+        providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
+        summarizer_providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
+        circuit_breaker: Arc<ProviderCircuitBreaker>,
+        policy: ProviderExecutionPolicy,
+        fallback_enabled: bool,
+        metrics: Option<Arc<ProviderRoutingMetrics>>,
+        usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
+        cost_tracking_enabled: bool,
+        guardrails: Option<Arc<ProviderGuardrailEnforcer>>,
+        call_source_slot: Option<Arc<ProviderCallSourceSlot>>,
+    ) -> Self {
         Self {
             providers,
             summarizer_providers,
-            router: ProviderFallbackRouter::new(
+            router: ProviderFallbackRouter::with_guardrails(
                 circuit_breaker,
                 policy,
                 metrics,
                 usage_recorder,
                 attribution_slot,
                 cost_tracking_enabled,
+                guardrails,
+                call_source_slot,
             ),
             fallback_enabled,
         }
@@ -66,7 +97,7 @@ pub fn build_resilient_llm_provider(
     attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> Arc<dyn LlmProvider> {
-    Arc::new(ResilientLlmProvider::new(
+    build_resilient_llm_provider_with_guardrails(
         providers,
         summarizer_providers,
         circuit_breaker,
@@ -76,6 +107,36 @@ pub fn build_resilient_llm_provider(
         usage_recorder,
         attribution_slot,
         cost_tracking_enabled,
+        None,
+        None,
+    )
+}
+
+pub fn build_resilient_llm_provider_with_guardrails(
+    providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
+    summarizer_providers: Vec<ProviderCandidate<Arc<dyn LlmProvider>>>,
+    circuit_breaker: Arc<ProviderCircuitBreaker>,
+    policy: ProviderExecutionPolicy,
+    fallback_enabled: bool,
+    metrics: Option<Arc<ProviderRoutingMetrics>>,
+    usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
+    cost_tracking_enabled: bool,
+    guardrails: Option<Arc<ProviderGuardrailEnforcer>>,
+    call_source_slot: Option<Arc<ProviderCallSourceSlot>>,
+) -> Arc<dyn LlmProvider> {
+    Arc::new(ResilientLlmProvider::with_guardrails(
+        providers,
+        summarizer_providers,
+        circuit_breaker,
+        policy,
+        fallback_enabled,
+        metrics,
+        usage_recorder,
+        attribution_slot,
+        cost_tracking_enabled,
+        guardrails,
+        call_source_slot,
     ))
 }
 
@@ -85,15 +146,22 @@ fn store_estimated_usage(slot: Option<TokenUsageSlot>, usage: crate::usage::Prov
     }
 }
 
+fn messages_char_count(messages: &[memcore_core::MemoryMessage]) -> usize {
+    messages.iter().map(|message| message.content.len()).sum()
+}
+
 #[async_trait]
 impl LlmProvider for ResilientLlmProvider {
     async fn extract_facts(&self, input: FactExtractionInput) -> MemcoreResult<Vec<CandidateFact>> {
+        let input_chars = messages_char_count(&input.messages);
         self.router
             .execute_with_fallback(
                 ProviderCapability::Llm,
                 "llm_extract_facts",
                 self.fallback_enabled,
                 &self.providers,
+                input_chars,
+                None,
                 |provider, slot| {
                     let input = input.clone();
                     async move {
@@ -110,12 +178,20 @@ impl LlmProvider for ResilientLlmProvider {
         &self,
         input: FactClassificationInput,
     ) -> MemcoreResult<FactOperationDecision> {
+        let input_chars = input.candidate_fact.content.len()
+            + input
+                .existing_facts
+                .iter()
+                .map(|fact| fact.content.len())
+                .sum::<usize>();
         self.router
             .execute_with_fallback(
                 ProviderCapability::Llm,
                 "llm_classify_fact_operation",
                 self.fallback_enabled,
                 &self.providers,
+                input_chars,
+                None,
                 |provider, slot| {
                     let input = input.clone();
                     async move {
@@ -140,12 +216,16 @@ impl LlmProvider for ResilientLlmProvider {
         } else {
             &self.summarizer_providers
         };
+        let input_chars = input.facts.iter().map(|fact| fact.content.len()).sum();
+        let requested_tokens = input.max_tokens;
         self.router
             .execute_with_fallback(
                 ProviderCapability::Summarization,
                 "llm_summarize_memory",
                 self.fallback_enabled,
                 providers,
+                input_chars,
+                requested_tokens,
                 |provider, slot| {
                     let input = input.clone();
                     async move {
@@ -178,6 +258,32 @@ impl ResilientEmbeddingProvider {
         attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
         cost_tracking_enabled: bool,
     ) -> MemcoreResult<Self> {
+        Self::with_guardrails(
+            providers,
+            circuit_breaker,
+            policy,
+            fallback_enabled,
+            metrics,
+            usage_recorder,
+            attribution_slot,
+            cost_tracking_enabled,
+            None,
+            None,
+        )
+    }
+
+    pub fn with_guardrails(
+        providers: Vec<ProviderCandidate<Arc<dyn EmbeddingProvider>>>,
+        circuit_breaker: Arc<ProviderCircuitBreaker>,
+        policy: ProviderExecutionPolicy,
+        fallback_enabled: bool,
+        metrics: Option<Arc<ProviderRoutingMetrics>>,
+        usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+        attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
+        cost_tracking_enabled: bool,
+        guardrails: Option<Arc<ProviderGuardrailEnforcer>>,
+        call_source_slot: Option<Arc<ProviderCallSourceSlot>>,
+    ) -> MemcoreResult<Self> {
         let dimensions = providers
             .first()
             .map(|candidate| candidate.provider.dimensions())
@@ -198,13 +304,15 @@ impl ResilientEmbeddingProvider {
 
         Ok(Self {
             providers,
-            router: ProviderFallbackRouter::new(
+            router: ProviderFallbackRouter::with_guardrails(
                 circuit_breaker,
                 policy,
                 metrics,
                 usage_recorder,
                 attribution_slot,
                 cost_tracking_enabled,
+                guardrails,
+                call_source_slot,
             ),
             fallback_enabled,
             dimensions,
@@ -222,7 +330,7 @@ pub fn build_resilient_embedding_provider(
     attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
     cost_tracking_enabled: bool,
 ) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
-    Ok(Arc::new(ResilientEmbeddingProvider::new(
+    build_resilient_embedding_provider_with_guardrails(
         providers,
         circuit_breaker,
         policy,
@@ -231,6 +339,34 @@ pub fn build_resilient_embedding_provider(
         usage_recorder,
         attribution_slot,
         cost_tracking_enabled,
+        None,
+        None,
+    )
+}
+
+pub fn build_resilient_embedding_provider_with_guardrails(
+    providers: Vec<ProviderCandidate<Arc<dyn EmbeddingProvider>>>,
+    circuit_breaker: Arc<ProviderCircuitBreaker>,
+    policy: ProviderExecutionPolicy,
+    fallback_enabled: bool,
+    metrics: Option<Arc<ProviderRoutingMetrics>>,
+    usage_recorder: Option<Arc<dyn ProviderUsageRecorder>>,
+    attribution_slot: Option<Arc<ProviderUsageAttributionSlot>>,
+    cost_tracking_enabled: bool,
+    guardrails: Option<Arc<ProviderGuardrailEnforcer>>,
+    call_source_slot: Option<Arc<ProviderCallSourceSlot>>,
+) -> MemcoreResult<Arc<dyn EmbeddingProvider>> {
+    Ok(Arc::new(ResilientEmbeddingProvider::with_guardrails(
+        providers,
+        circuit_breaker,
+        policy,
+        fallback_enabled,
+        metrics,
+        usage_recorder,
+        attribution_slot,
+        cost_tracking_enabled,
+        guardrails,
+        call_source_slot,
     )?))
 }
 
@@ -238,12 +374,15 @@ pub fn build_resilient_embedding_provider(
 impl EmbeddingProvider for ResilientEmbeddingProvider {
     async fn embed_text(&self, text: &str) -> MemcoreResult<Vec<f32>> {
         let text = text.to_string();
+        let input_chars = text.len();
         self.router
             .execute_with_fallback(
                 ProviderCapability::Embedding,
                 "embedding_embed_text",
                 self.fallback_enabled,
                 &self.providers,
+                input_chars,
+                None,
                 |provider, slot| {
                     let text = text.clone();
                     async move {
@@ -257,12 +396,15 @@ impl EmbeddingProvider for ResilientEmbeddingProvider {
     }
 
     async fn embed_batch(&self, texts: Vec<String>) -> MemcoreResult<Vec<Vec<f32>>> {
+        let input_chars = texts.iter().map(|text| text.len()).sum();
         self.router
             .execute_with_fallback(
                 ProviderCapability::Embedding,
                 "embedding_embed_batch",
                 self.fallback_enabled,
                 &self.providers,
+                input_chars,
+                None,
                 |provider, slot| {
                     let texts = texts.clone();
                     async move {
@@ -282,5 +424,7 @@ impl EmbeddingProvider for ResilientEmbeddingProvider {
 
 pub use compat::{
     PolicyEmbeddingProvider, PolicyLlmProvider, build_resilient_embedding_from_candidates,
-    build_resilient_llm_from_candidates, wrap_embedding_provider, wrap_llm_provider,
+    build_resilient_embedding_from_candidates_with_guardrails, build_resilient_llm_from_candidates,
+    build_resilient_llm_from_candidates_with_guardrails, wrap_embedding_provider,
+    wrap_llm_provider,
 };

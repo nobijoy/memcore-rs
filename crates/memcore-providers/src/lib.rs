@@ -1,5 +1,6 @@
 pub mod circuit_breaker;
 pub mod factory;
+pub mod guardrails;
 pub mod inputs;
 pub mod mocks;
 pub mod openai;
@@ -17,6 +18,12 @@ pub use factory::{
     parse_provider_fallback_order, validate_embedding_provider_name, validate_llm_provider_name,
     validate_provider_fallback_order, validate_summarizer_provider_name,
 };
+pub use guardrails::{
+    MULTI_PROVIDER_VALIDATION_CONFIRMATION, ProviderCallBudget, ProviderCallGuardInput,
+    ProviderCallSource, ProviderCallSourceSlot, ProviderGuardDecision, ProviderGuardrailConfig,
+    ProviderGuardrailEnforcer, ProviderGuardrailStatus, ProviderTestMode, is_real_provider_name,
+    parse_provider_test_mode,
+};
 pub use inputs::{
     FactClassificationInput, FactExtractionInput, MemoryMessage, MessageRole, SummarizationInput,
 };
@@ -32,8 +39,10 @@ pub use policy::{
 };
 pub use resilient::{
     PolicyEmbeddingProvider, PolicyLlmProvider, ResilientEmbeddingProvider, ResilientLlmProvider,
-    build_resilient_embedding_from_candidates, build_resilient_llm_from_candidates,
-    wrap_embedding_provider, wrap_llm_provider,
+    build_resilient_embedding_from_candidates,
+    build_resilient_embedding_from_candidates_with_guardrails, build_resilient_llm_from_candidates,
+    build_resilient_llm_from_candidates_with_guardrails, wrap_embedding_provider,
+    wrap_llm_provider,
 };
 pub use routing::{
     ProviderCallContext, ProviderCandidate, ProviderCapability, ProviderFallbackRouter, ProviderId,

@@ -107,6 +107,7 @@ pub fn safe_error_message(error: &MemcoreError) -> String {
         | MemcoreError::NotFound(message)
         | MemcoreError::Conflict(message) => Redactor::redact_str(message),
         MemcoreError::QuotaExceeded { message, .. } => Redactor::redact_str(message),
+        MemcoreError::ProviderGuardrailViolation { message, .. } => Redactor::redact_str(message),
     }
 }
 

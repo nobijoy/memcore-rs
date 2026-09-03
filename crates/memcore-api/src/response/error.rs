@@ -56,6 +56,7 @@ impl ErrorBody {
             MemcoreError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             MemcoreError::Timeout(_) => StatusCode::GATEWAY_TIMEOUT,
             MemcoreError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
+            MemcoreError::ProviderGuardrailViolation { .. } => StatusCode::FORBIDDEN,
         };
 
         let code = match &error {
@@ -72,6 +73,7 @@ impl ErrorBody {
             MemcoreError::Internal(_) => "INTERNAL_ERROR",
             MemcoreError::Timeout(_) => "TIMEOUT",
             MemcoreError::QuotaExceeded { .. } => "QUOTA_EXCEEDED",
+            MemcoreError::ProviderGuardrailViolation { .. } => "PROVIDER_GUARDRAIL_VIOLATION",
         };
 
         let body = Self::new(code, safe_error_message(&error));
@@ -88,6 +90,9 @@ impl ErrorBody {
                 "current": current,
                 "requested": requested,
             })),
+            MemcoreError::ProviderGuardrailViolation {
+                code: guard_code, ..
+            } => body.with_details(json!({ "guardrail_code": guard_code })),
             _ => body,
         };
 

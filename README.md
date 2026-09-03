@@ -41,6 +41,8 @@ Examples use env vars (`MEMCORE_BASE_URL`, `MEMCORE_API_KEY`, `MEMCORE_ORG_ID`) 
 
 ## Staging Deployment
 
+Low-budget production MVP testing (planning): [docs/LOW_BUDGET_PRODUCTION_TEST_PLAN.md](docs/LOW_BUDGET_PRODUCTION_TEST_PLAN.md) · AWS single EC2: [docs/runbooks/AWS_SINGLE_EC2_STAGING.md](docs/runbooks/AWS_SINGLE_EC2_STAGING.md) · Release gate: [docs/runbooks/PRODUCTION_MVP_RELEASE_GATE.md](docs/runbooks/PRODUCTION_MVP_RELEASE_GATE.md)
+
 For controlled staging preparation and validation:
 
 - [docs/runbooks/STAGING_DEPLOYMENT.md](docs/runbooks/STAGING_DEPLOYMENT.md)
@@ -50,6 +52,8 @@ For controlled staging preparation and validation:
 - [docs/runbooks/STAGING_SECRET_READINESS_CHECKLIST.md](docs/runbooks/STAGING_SECRET_READINESS_CHECKLIST.md)
 - [docs/runbooks/STAGING_VALIDATION_REPORT_TEMPLATE.md](docs/runbooks/STAGING_VALIDATION_REPORT_TEMPLATE.md)
 - [docs/runbooks/STAGING_DEPENDENCY_VALIDATION.md](docs/runbooks/STAGING_DEPENDENCY_VALIDATION.md)
+- [docs/runbooks/PROVIDER_VALIDATION_MATRIX.md](docs/runbooks/PROVIDER_VALIDATION_MATRIX.md)
+- [docs/runbooks/PROVIDER_COST_GUARDRAILS.md](docs/runbooks/PROVIDER_COST_GUARDRAILS.md)
 
 Env template: `.env.staging.example` (tracked) · Compose example: `docker/docker-compose.staging.example.yml`  
 Real `.env.staging` is **local/ops only** (gitignored) — absence from the repo is expected, not a defect. Generate only from operator-provided secrets (`scripts/ops/create_staging_env.sh`). Do not start Compose until secrets validate.

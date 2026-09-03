@@ -34,6 +34,9 @@ pub enum MemcoreError {
         current: u64,
         requested: u64,
     },
+    /// Provider call blocked by test-mode / cost guardrails (safe message only).
+    #[error("provider guardrail violation: {message}")]
+    ProviderGuardrailViolation { code: String, message: String },
 }
 
 pub const PROVIDER_TIMEOUT_MESSAGE: &str = "provider operation timed out";
@@ -77,6 +80,7 @@ impl MemcoreError {
             Self::Timeout(msg) if msg == PROVIDER_TIMEOUT_MESSAGE => "provider_timeout",
             Self::Timeout(_) => "timeout",
             Self::QuotaExceeded { .. } => "quota_exceeded",
+            Self::ProviderGuardrailViolation { .. } => "provider_guardrail_violation",
         }
     }
 
@@ -98,6 +102,20 @@ impl MemcoreError {
             current,
             requested,
         }
+    }
+
+    pub fn provider_guardrail_violation(
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::ProviderGuardrailViolation {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn is_provider_guardrail_violation(&self) -> bool {
+        matches!(self, Self::ProviderGuardrailViolation { .. })
     }
 }
 

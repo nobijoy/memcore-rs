@@ -4,6 +4,7 @@ pub mod metrics;
 pub mod middleware;
 pub mod observability;
 pub mod openapi;
+pub mod provider_guardrails;
 pub mod response;
 pub mod routes;
 pub mod security;

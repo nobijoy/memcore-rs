@@ -12,6 +12,7 @@ use crate::middleware::{
 };
 use crate::observability::{log_protected_request, observe_request_lifecycle};
 use crate::openapi::ApiDoc;
+use crate::provider_guardrails::apply_provider_test_source;
 use crate::state::AppState;
 
 pub mod admin;
@@ -118,10 +119,18 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/v1/admin/org/provider-usage/retention/apply",
             post(admin::apply_provider_usage_retention),
         )
+        .route(
+            "/api/v1/admin/providers/guardrails",
+            get(admin::get_provider_guardrails),
+        )
         .route_layer(from_fn(log_protected_request))
         .route_layer(from_fn_with_state(state.clone(), enforce_rate_limit))
         .route_layer(from_fn(require_organization))
-        .route_layer(from_fn_with_state(state.clone(), require_api_key));
+        .route_layer(from_fn_with_state(state.clone(), require_api_key))
+        .route_layer(from_fn_with_state(
+            state.call_source_slot.clone(),
+            apply_provider_test_source,
+        ));
 
     let metrics_path = state.settings.metrics_path.clone();
     let metrics_router = if state.settings.metrics_enabled {

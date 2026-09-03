@@ -31,7 +31,8 @@ pub fn is_retryable_provider_error(error: &MemcoreError) -> bool {
         MemcoreError::StorageError(_)
         | MemcoreError::MigrationError(_)
         | MemcoreError::Internal(_)
-        | MemcoreError::QuotaExceeded { .. } => false,
+        | MemcoreError::QuotaExceeded { .. }
+        | MemcoreError::ProviderGuardrailViolation { .. } => false,
     }
 }
 
