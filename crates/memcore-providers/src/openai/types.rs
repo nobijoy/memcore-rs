@@ -133,6 +133,52 @@ pub struct ResponseOutputContent {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ChatCompletionsRequest {
+    pub model: String,
+    pub messages: Vec<ChatCompletionMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatCompletionMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChatCompletionsResponse {
+    #[serde(default)]
+    pub choices: Vec<ChatCompletionChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChatCompletionChoice {
+    pub message: ChatCompletionResponseMessage,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChatCompletionResponseMessage {
+    #[serde(default)]
+    pub content: Option<String>,
+}
+
+pub fn extract_chat_completion_text(response: &ChatCompletionsResponse) -> MemcoreResult<String> {
+    let content = response
+        .choices
+        .first()
+        .and_then(|choice| choice.message.content.as_ref())
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty());
+
+    content.ok_or_else(|| {
+        MemcoreError::ProviderError("OpenAI chat completion returned empty content".to_string())
+    })
+}
+
+#[derive(Debug, Serialize)]
 pub struct EmbeddingsCreateRequest {
     pub model: String,
     pub input: Vec<String>,
@@ -148,6 +194,8 @@ pub struct EmbeddingsCreateResponse {
 #[derive(Debug, Deserialize)]
 pub struct EmbeddingData {
     pub embedding: Vec<f32>,
+    /// Some OpenAI-compatible hosts (e.g. Gemini) omit `index` for single inputs.
+    #[serde(default)]
     pub index: usize,
 }
 

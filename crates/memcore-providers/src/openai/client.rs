@@ -6,9 +6,12 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use super::types::{ApiErrorResponse, ResponsesCreateRequest, ResponsesCreateResponse};
+use super::types::{
+    ApiErrorResponse, ChatCompletionsRequest, ChatCompletionsResponse, ResponsesCreateRequest,
+    ResponsesCreateResponse,
+};
 
-const DEFAULT_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_TIMEOUT_SECS: u64 = 90;
 
 #[derive(Debug, Clone)]
 pub struct OpenAiClient {
@@ -52,11 +55,25 @@ impl OpenAiClient {
         self.post_json("/responses", request).await
     }
 
+    pub async fn create_chat_completion(
+        &self,
+        request: &ChatCompletionsRequest,
+    ) -> MemcoreResult<ChatCompletionsResponse> {
+        self.post_json("/chat/completions", request).await
+    }
+
     pub async fn create_embeddings<T: Serialize, R: DeserializeOwned>(
         &self,
         request: &T,
     ) -> MemcoreResult<R> {
         self.post_json("/embeddings", request).await
+    }
+
+    /// OpenAI-compatible hosts (Gemini, Groq, etc.) typically expose chat completions,
+    /// not the OpenAI `/responses` API used by direct `api.openai.com`.
+    pub fn prefers_chat_completions(base_url: &str) -> bool {
+        let normalized = base_url.trim().to_ascii_lowercase();
+        !normalized.contains("api.openai.com")
     }
 
     pub(crate) fn responses_request_body(

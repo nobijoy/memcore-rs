@@ -10,7 +10,8 @@ use crate::traits::LlmProvider;
 
 use super::client::OpenAiClient;
 use super::types::{
-    classification_json_schema, extract_output_text, fact_extraction_json_schema,
+    ChatCompletionMessage, ChatCompletionsRequest, classification_json_schema,
+    extract_chat_completion_text, extract_output_text, fact_extraction_json_schema,
     parse_classification_response, parse_fact_extraction_response,
 };
 
@@ -31,17 +32,81 @@ const SUMMARIZATION_INSTRUCTIONS: &str = r#"You summarize memory facts into conc
 Keep the summary short and factual.
 Do not use markdown unless it materially improves clarity."#;
 
+/// HTTP shape used for OpenAI-compatible LLM calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAiLlmTransport {
+    /// Native OpenAI `/responses` API (default for `api.openai.com`).
+    Responses,
+    /// OpenAI-compatible `/chat/completions` (Gemini, Groq, and most vendor proxies).
+    ChatCompletions,
+}
+
 #[derive(Debug, Clone)]
 pub struct OpenAiLlmProvider {
     client: OpenAiClient,
     model: String,
+    transport: OpenAiLlmTransport,
 }
 
 impl OpenAiLlmProvider {
+    /// Defaults to the OpenAI `/responses` transport (used by unit tests and direct OpenAI).
     pub fn new(client: OpenAiClient, model: impl Into<String>) -> Self {
         Self {
             client,
             model: model.into(),
+            transport: OpenAiLlmTransport::Responses,
+        }
+    }
+
+    /// Select transport from base URL (chat completions for Gemini/Groq-style OpenAI-compat hosts).
+    pub fn for_base_url(client: OpenAiClient, model: impl Into<String>) -> Self {
+        let transport = if OpenAiClient::prefers_chat_completions(client.base_url()) {
+            OpenAiLlmTransport::ChatCompletions
+        } else {
+            OpenAiLlmTransport::Responses
+        };
+        Self {
+            client,
+            model: model.into(),
+            transport,
+        }
+    }
+
+    pub fn with_transport(mut self, transport: OpenAiLlmTransport) -> Self {
+        self.transport = transport;
+        self
+    }
+
+    pub fn transport(&self) -> OpenAiLlmTransport {
+        self.transport
+    }
+
+    async fn request_json(
+        &self,
+        instructions: &str,
+        input: serde_json::Value,
+        schema_name: &str,
+        schema: serde_json::Value,
+    ) -> MemcoreResult<String> {
+        match self.transport {
+            OpenAiLlmTransport::Responses => {
+                self.responses_json(instructions, input, schema_name, schema)
+                    .await
+            }
+            OpenAiLlmTransport::ChatCompletions => {
+                self.chat_json(instructions, input, schema).await
+            }
+        }
+    }
+
+    async fn request_plain_text(
+        &self,
+        instructions: &str,
+        input: serde_json::Value,
+    ) -> MemcoreResult<String> {
+        match self.transport {
+            OpenAiLlmTransport::Responses => self.responses_plain_text(instructions, input).await,
+            OpenAiLlmTransport::ChatCompletions => self.chat_plain_text(instructions, input).await,
         }
     }
 
@@ -74,6 +139,58 @@ impl OpenAiLlmProvider {
             .responses_text_request_body(&self.model, instructions, input);
         let response = self.client.create_response(&request).await?;
         extract_output_text(&response)
+    }
+
+    async fn chat_json(
+        &self,
+        instructions: &str,
+        input: serde_json::Value,
+        schema: serde_json::Value,
+    ) -> MemcoreResult<String> {
+        let system = format!(
+            "{instructions}\nReturn a single JSON object only that matches this JSON Schema:\n{schema}"
+        );
+        let request = ChatCompletionsRequest {
+            model: self.model.clone(),
+            messages: vec![
+                ChatCompletionMessage {
+                    role: "system".to_string(),
+                    content: system,
+                },
+                ChatCompletionMessage {
+                    role: "user".to_string(),
+                    content: input.to_string(),
+                },
+            ],
+            response_format: Some(json!({ "type": "json_object" })),
+            max_tokens: Some(300),
+        };
+        let response = self.client.create_chat_completion(&request).await?;
+        extract_chat_completion_text(&response)
+    }
+
+    async fn chat_plain_text(
+        &self,
+        instructions: &str,
+        input: serde_json::Value,
+    ) -> MemcoreResult<String> {
+        let request = ChatCompletionsRequest {
+            model: self.model.clone(),
+            messages: vec![
+                ChatCompletionMessage {
+                    role: "system".to_string(),
+                    content: instructions.to_string(),
+                },
+                ChatCompletionMessage {
+                    role: "user".to_string(),
+                    content: input.to_string(),
+                },
+            ],
+            response_format: None,
+            max_tokens: Some(300),
+        };
+        let response = self.client.create_chat_completion(&request).await?;
+        extract_chat_completion_text(&response)
     }
 }
 
@@ -109,7 +226,7 @@ impl LlmProvider for OpenAiLlmProvider {
         });
 
         let text = self
-            .responses_json(
+            .request_json(
                 FACT_EXTRACTION_INSTRUCTIONS,
                 payload,
                 "memcore_fact_extraction",
@@ -153,7 +270,7 @@ impl LlmProvider for OpenAiLlmProvider {
         });
 
         let text = self
-            .responses_json(
+            .request_json(
                 CLASSIFICATION_INSTRUCTIONS,
                 payload,
                 "memcore_fact_classification",
@@ -187,7 +304,7 @@ impl LlmProvider for OpenAiLlmProvider {
         });
 
         let summary = self
-            .responses_plain_text(SUMMARIZATION_INSTRUCTIONS, payload)
+            .request_plain_text(SUMMARIZATION_INSTRUCTIONS, payload)
             .await?;
 
         if let Some(max_tokens) = input.max_tokens {

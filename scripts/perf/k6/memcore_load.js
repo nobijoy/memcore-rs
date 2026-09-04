@@ -30,8 +30,8 @@ const AUTH_ENABLED = API_KEY.length > 0;
 
 const SAFE_CONTENTS = [
   "User prefers concise technical summaries.",
-  "User is testing memcore API latency.",
-  "User likes green tea during focused work.",
+  "User is testing memcore local staging performance.",
+  "User likes simple technical notes.",
 ];
 
 const errorRate = new Rate("memcore_errors");

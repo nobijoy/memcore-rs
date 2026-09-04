@@ -29,7 +29,7 @@ pub use inputs::{
 };
 pub use mocks::{MockEmbeddingProvider, MockLlmProvider, deterministic_embedding};
 pub use openai::{
-    OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider,
+    OpenAiClient, OpenAiEmbeddingProvider, OpenAiLlmProvider, OpenAiLlmTransport,
     default_embedding_dimensions_for_model,
 };
 pub use policy::{

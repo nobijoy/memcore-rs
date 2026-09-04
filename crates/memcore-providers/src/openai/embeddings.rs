@@ -18,6 +18,8 @@ pub fn default_embedding_dimensions_for_model(model: &str) -> usize {
     match model.trim().to_ascii_lowercase().as_str() {
         "text-embedding-3-large" => 3072,
         "text-embedding-3-small" | "text-embedding-ada-002" => 1536,
+        // Google AI Studio / Gemini OpenAI-compat default output size.
+        "gemini-embedding-001" | "gemini-embedding-2" | "gemini-embedding-2-preview" => 3072,
         _ => 1536,
     }
 }
@@ -137,6 +139,10 @@ mod tests {
             default_embedding_dimensions_for_model("unknown-model"),
             1536
         );
+        assert_eq!(
+            default_embedding_dimensions_for_model("gemini-embedding-001"),
+            3072
+        );
     }
 
     #[test]
@@ -176,5 +182,18 @@ mod tests {
         validate_embedding_dimensions(&response.data[0].embedding, 4).expect("valid");
         let error = validate_embedding_dimensions(&response.data[0].embedding, 8).expect_err("bad");
         assert!(matches!(error, MemcoreError::ProviderError(_)));
+    }
+
+    #[test]
+    fn parses_embedding_response_when_index_omitted() {
+        let payload = serde_json::json!({
+            "data": [
+                { "embedding": [0.1, 0.2, 0.3, 0.4] }
+            ]
+        });
+        let response: EmbeddingsCreateResponse =
+            serde_json::from_value(payload).expect("deserialize without index");
+        assert_eq!(response.data[0].index, 0);
+        assert_eq!(response.data[0].embedding.len(), 4);
     }
 }

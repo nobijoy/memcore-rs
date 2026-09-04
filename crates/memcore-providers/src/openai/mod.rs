@@ -5,7 +5,7 @@ mod types;
 
 pub use client::OpenAiClient;
 pub use embeddings::{OpenAiEmbeddingProvider, default_embedding_dimensions_for_model};
-pub use llm::OpenAiLlmProvider;
+pub use llm::{OpenAiLlmProvider, OpenAiLlmTransport};
 
 #[cfg(test)]
 mod integration_tests {
@@ -191,6 +191,57 @@ mod integration_tests {
 
         assert_eq!(embeddings.len(), 2);
         assert_eq!(embeddings[0].len(), 4);
+    }
+
+    #[tokio::test]
+    async fn extract_facts_calls_chat_completions_for_compat_transport() {
+        let server = MockServer::start().await;
+        let response_body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "{\"facts\":[{\"content\":\"User likes Rust.\",\"memory_type\":\"Preference\",\"confidence\":0.9,\"importance\":0.8,\"valid_at\":null,\"metadata\":{}}]}"
+                }
+            }]
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
+            .mount(&server)
+            .await;
+
+        let client = OpenAiClient::new("test-key", server.uri()).expect("client");
+        let provider = OpenAiLlmProvider::new(client, "gemini-3.6-flash")
+            .with_transport(crate::openai::OpenAiLlmTransport::ChatCompletions);
+
+        let facts = provider
+            .extract_facts(FactExtractionInput {
+                tenant: tenant(),
+                messages: vec![MemoryMessage {
+                    role: MessageRole::User,
+                    content: "I like Rust.".to_string(),
+                }],
+                metadata: json!({}),
+            })
+            .await
+            .expect("extraction");
+
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].content, "User likes Rust.");
+    }
+
+    #[test]
+    fn prefers_chat_completions_outside_openai_host() {
+        assert!(OpenAiClient::prefers_chat_completions(
+            "https://generativelanguage.googleapis.com/v1beta/openai/"
+        ));
+        assert!(OpenAiClient::prefers_chat_completions(
+            "https://api.groq.com/openai/v1"
+        ));
+        assert!(!OpenAiClient::prefers_chat_completions(
+            "https://api.openai.com/v1"
+        ));
     }
 
     #[tokio::test]

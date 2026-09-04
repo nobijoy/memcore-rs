@@ -315,7 +315,7 @@ fn build_llm_provider_by_name(
             )?;
             let client = OpenAiClient::new(&api_key, &settings.openai_base_url)
                 .map_err(|err| provider_init_error("OpenAI LLM", err))?;
-            Ok(Arc::new(OpenAiLlmProvider::new(
+            Ok(Arc::new(OpenAiLlmProvider::for_base_url(
                 client,
                 settings.llm_model.clone(),
             )))
