@@ -239,7 +239,23 @@ mod integration_tests {
         assert!(OpenAiClient::prefers_chat_completions(
             "https://api.groq.com/openai/v1"
         ));
+        assert!(OpenAiClient::prefers_chat_completions(
+            "https://api.z.ai/api/paas/v4/"
+        ));
         assert!(!OpenAiClient::prefers_chat_completions(
+            "https://api.openai.com/v1"
+        ));
+    }
+
+    #[test]
+    fn prefers_disabled_thinking_for_zai_host() {
+        assert!(OpenAiClient::prefers_disabled_thinking(
+            "https://api.z.ai/api/paas/v4/"
+        ));
+        assert!(!OpenAiClient::prefers_disabled_thinking(
+            "https://api.groq.com/openai/v1"
+        ));
+        assert!(!OpenAiClient::prefers_disabled_thinking(
             "https://api.openai.com/v1"
         ));
     }

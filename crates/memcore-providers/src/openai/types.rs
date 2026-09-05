@@ -140,6 +140,10 @@ pub struct ChatCompletionsRequest {
     pub response_format: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Z.ai GLM thinking control (`{"type":"disabled"}` / `{"type":"enabled"}`).
+    /// Omitted for non-Z.ai OpenAI-compatible hosts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -281,8 +285,8 @@ pub fn parse_fact_extraction_response(text: &str) -> MemcoreResult<Vec<Candidate
         match CandidateFact::new(
             fact.content,
             memory_type,
-            fact.confidence,
-            fact.importance,
+            clamp_unit_interval(fact.confidence),
+            clamp_unit_interval(fact.importance),
             fact.valid_at,
             fact.metadata,
         ) {
@@ -292,6 +296,13 @@ pub fn parse_fact_extraction_response(text: &str) -> MemcoreResult<Vec<Candidate
     }
 
     Ok(candidates)
+}
+
+fn clamp_unit_interval(value: f32) -> f32 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    value.clamp(0.0, 1.0)
 }
 
 pub fn parse_classification_response(text: &str) -> MemcoreResult<FactOperationDecision> {
@@ -375,6 +386,27 @@ mod tests {
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].content, "User is learning Rust.");
         assert_eq!(facts[0].memory_type, MemoryType::Skill);
+    }
+
+    #[test]
+    fn clamps_out_of_range_confidence_and_importance() {
+        let json = r#"{
+            "facts": [
+                {
+                    "content": "User likes green tea.",
+                    "memory_type": "Preference",
+                    "confidence": 0.9,
+                    "importance": 5,
+                    "valid_at": null,
+                    "metadata": {}
+                }
+            ]
+        }"#;
+
+        let facts = parse_fact_extraction_response(json).expect("parse should succeed");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].importance, 1.0);
+        assert!((facts[0].confidence - 0.9).abs() < f32::EPSILON);
     }
 
     #[test]

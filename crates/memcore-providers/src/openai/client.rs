@@ -22,8 +22,8 @@ pub struct OpenAiClient {
 
 impl OpenAiClient {
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> MemcoreResult<Self> {
-        let api_key = api_key.into();
-        if api_key.trim().is_empty() {
+        let api_key = api_key.into().trim().to_string();
+        if api_key.is_empty() {
             return Err(MemcoreError::ValidationError(
                 "OPENAI_API_KEY cannot be empty".to_string(),
             ));
@@ -74,6 +74,14 @@ impl OpenAiClient {
     pub fn prefers_chat_completions(base_url: &str) -> bool {
         let normalized = base_url.trim().to_ascii_lowercase();
         !normalized.contains("api.openai.com")
+    }
+
+    /// Z.ai GLM defaults to thinking mode which fills `reasoning_content` and can leave
+    /// `message.content` empty under small `max_tokens` budgets. Disable thinking for
+    /// structured fact extraction / chat JSON paths.
+    pub fn prefers_disabled_thinking(base_url: &str) -> bool {
+        let normalized = base_url.trim().to_ascii_lowercase();
+        normalized.contains("api.z.ai")
     }
 
     pub(crate) fn responses_request_body(

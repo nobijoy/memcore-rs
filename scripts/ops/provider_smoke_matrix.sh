@@ -8,7 +8,7 @@
 #   MEMCORE_PROVIDER_SMOKE_CONFIRM=I_UNDERSTAND_THIS_WILL_USE_PROVIDER_CREDITS \
 #     ./scripts/ops/provider_smoke_matrix.sh gemini
 #
-# Supported names: gemini | groq | bedrock | openai
+# Supported names: gemini | groq | bedrock | zai | openai
 #
 # Manual env updates are required before starting the API (do not put secrets here):
 #   MEMCORE_PROVIDER_TEST_MODE=single_real
@@ -34,14 +34,14 @@ BASE_URL="${MEMCORE_BASE_URL:-http://localhost:8080}"
 BASE_URL="${BASE_URL%/}"
 
 usage() {
-  echo "usage: $0 <gemini|groq|bedrock|openai>" >&2
+  echo "usage: $0 <gemini|groq|bedrock|zai|openai>" >&2
   echo "  Requires MEMCORE_PROVIDER_SMOKE_CONFIRM=${CONFIRM_EXPECTED}" >&2
   echo "  Configure the API env for one OpenAI-compatible provider before running." >&2
   exit 1
 }
 
 case "$PROVIDER" in
-  gemini|groq|bedrock|openai) ;;
+  gemini|groq|bedrock|zai|openai) ;;
   -h|--help|"") usage ;;
   *)
     echo "error: unknown provider '$PROVIDER'" >&2
@@ -57,6 +57,15 @@ fi
 if [[ -z "${MEMCORE_SMOKE_TEST_API_KEY:-}" ]]; then
   echo "error: MEMCORE_SMOKE_TEST_API_KEY is required (value not printed)" >&2
   exit 1
+fi
+
+# Authenticated cleanup parses created memory ids via jq or python3 (smoke_test.sh).
+if ! command -v jq >/dev/null 2>&1; then
+  if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+    echo "error: jq or python3 is required for provider smoke delete cleanup" >&2
+    exit 1
+  fi
+  echo "provider_smoke_matrix: jq not found; smoke_test will use python JSON fallback for cleanup"
 fi
 
 REPORT_DIR="${ROOT_DIR}/reports/provider-smoke"

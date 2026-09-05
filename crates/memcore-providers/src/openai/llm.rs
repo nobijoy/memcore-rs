@@ -21,6 +21,8 @@ Rules:
 - Do not store random short-lived details.
 - Do not store sensitive data unless the user clearly asks for it.
 - Prefer concise fact statements.
+- confidence and importance must be floating-point numbers between 0.0 and 1.0 inclusive.
+- memory_type must be one of: Preference, Profile, Goal, Relationship, Event, Knowledge, Instruction, Other.
 - Return valid JSON only matching the schema.
 - Do not include markdown or commentary."#;
 
@@ -141,6 +143,14 @@ impl OpenAiLlmProvider {
         extract_output_text(&response)
     }
 
+    fn chat_thinking_option(&self) -> Option<serde_json::Value> {
+        if OpenAiClient::prefers_disabled_thinking(self.client.base_url()) {
+            Some(json!({ "type": "disabled" }))
+        } else {
+            None
+        }
+    }
+
     async fn chat_json(
         &self,
         instructions: &str,
@@ -164,6 +174,7 @@ impl OpenAiLlmProvider {
             ],
             response_format: Some(json!({ "type": "json_object" })),
             max_tokens: Some(300),
+            thinking: self.chat_thinking_option(),
         };
         let response = self.client.create_chat_completion(&request).await?;
         extract_chat_completion_text(&response)
@@ -188,6 +199,7 @@ impl OpenAiLlmProvider {
             ],
             response_format: None,
             max_tokens: Some(300),
+            thinking: self.chat_thinking_option(),
         };
         let response = self.client.create_chat_completion(&request).await?;
         extract_chat_completion_text(&response)
