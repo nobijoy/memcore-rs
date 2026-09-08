@@ -12,6 +12,8 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/nobijoy/memcore-rs"
 
 # Temporary exceptions for existing call sites. Prefer fixing new code rather than
 # expanding this list. See docs/CI_SECURITY.md.

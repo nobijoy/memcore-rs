@@ -51,3 +51,14 @@ reports/staging-backups/*
 !reports/staging-backups/.gitkeep
 reports/provider-smoke/*
 !reports/provider-smoke/.gitkeep
+
+# AWS preflight JSON reports (keep directory via .gitkeep)
+reports/aws-preflight/*
+!reports/aws-preflight/.gitkeep
+
+# AWS staging deployment reports (keep directory via .gitkeep)
+reports/aws-staging/*
+!reports/aws-staging/.gitkeep
+
+# Local AWS/operator secrets (keys, staging env) — never commit
+.secrets/
