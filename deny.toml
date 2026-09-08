@@ -23,6 +23,11 @@ ignore = [
     { id = "RUSTSEC-2026-0098", reason = "Transitive via optional lancedb/aws rustls 0.21 path only (revisit by 2026-10-11)" },
     { id = "RUSTSEC-2026-0099", reason = "Transitive via optional lancedb/aws rustls 0.21 path only (revisit by 2026-10-11)" },
     { id = "RUSTSEC-2026-0104", reason = "Transitive via optional lancedb/aws rustls 0.21 path only (revisit by 2026-10-11)" },
+    # Expiry target: 2026-10-11 — h2 0.4.14 (default axum/hyper build) fixed via `cargo update -p h2`.
+    # Remaining instance is h2 0.3.27, hard-pinned by aws-smithy-http-client "^0.3.24" deep in
+    # optional lancedb → lance-io → aws-config; not reachable from the default build. Revisit
+    # when lancedb/aws-smithy-http-client upgrade past their h2 0.3 pin.
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.3.27 transitive via optional lancedb/aws-smithy-http-client pin only; default build uses patched h2 0.4.16 (revisit by 2026-10-11)" },
 ]
 
 [licenses]

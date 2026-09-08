@@ -12,4 +12,8 @@ ignore = [
     "RUSTSEC-2026-0098",
     "RUSTSEC-2026-0099",
     "RUSTSEC-2026-0104",
+    # h2 unbounded empty DATA frames. Default axum/hyper build fixed via `cargo update -p h2`
+    # (now h2 0.4.16). Remaining h2 0.3.27 instance is hard-pinned by aws-smithy-http-client
+    # "^0.3.24" deep in optional lancedb → lance-io → aws-config; not in the default build.
+    "RUSTSEC-2026-0258",
 ]

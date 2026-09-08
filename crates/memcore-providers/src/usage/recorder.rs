@@ -155,12 +155,18 @@ impl ProviderUsageRecorder for InMemoryProviderUsageRecorder {
             "provider usage recorded"
         );
 
-        let mut records = self.records.lock().expect("usage recorder lock poisoned");
+        let mut records = self
+            .records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Self::merge_event(&mut records, event);
     }
 
     fn snapshot(&self) -> ProviderUsageSnapshot {
-        let records = self.records.lock().expect("usage recorder lock poisoned");
+        let records = self
+            .records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Self::build_snapshot(&records)
     }
 }

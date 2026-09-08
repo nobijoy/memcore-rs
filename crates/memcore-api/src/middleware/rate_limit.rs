@@ -48,10 +48,12 @@ impl RateLimiter {
         }
 
         let now = Instant::now();
+        // Recover from poisoning rather than propagating a panic: a single panic
+        // elsewhere while holding this lock must not permanently deny all requests.
         let mut windows = self
             .windows
             .lock()
-            .expect("rate limiter mutex should not be poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if windows.len() > 1_024 {
             windows.retain(|_, window| now.duration_since(window.window_start) < WINDOW * 2);

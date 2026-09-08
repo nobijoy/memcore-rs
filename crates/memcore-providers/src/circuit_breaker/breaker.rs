@@ -128,7 +128,10 @@ impl ProviderCircuitBreaker {
             };
         }
 
-        let circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
+        let circuits = self
+            .circuits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         circuits
             .get(key)
             .map(|entry| CircuitBreakerSnapshot {
@@ -148,7 +151,10 @@ impl ProviderCircuitBreaker {
             return Ok(CircuitState::Closed);
         }
 
-        let mut circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
+        let mut circuits = self
+            .circuits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = circuits
             .entry(key.to_string())
             .or_insert_with(CircuitEntry::new);
@@ -175,7 +181,10 @@ impl ProviderCircuitBreaker {
             return;
         }
 
-        let mut circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
+        let mut circuits = self
+            .circuits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = circuits
             .entry(key.to_string())
             .or_insert_with(CircuitEntry::new);
@@ -199,7 +208,10 @@ impl ProviderCircuitBreaker {
             return;
         }
 
-        let mut circuits = self.circuits.lock().expect("circuit breaker lock poisoned");
+        let mut circuits = self
+            .circuits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = circuits
             .entry(key.to_string())
             .or_insert_with(CircuitEntry::new);
